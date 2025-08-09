@@ -125,11 +125,11 @@ if __name__ == "__main__":
     for i in range(rounds):
         # Agent A speaks to Agent B
         reply_a = agent_step(agent_a, "Agent_B", last_message, stimulator_a)
-        print(f"A: {reply_a}")
+        print(f"\nA: {reply_a}")
 
         # Agent B speaks to Agent A
         reply_b = agent_step(agent_b, "Agent_A", reply_a, stimulator_b)
-        print(f"B: {reply_b}")
+        print(f"\nB: {reply_b}")
 
         last_message = reply_b
         time.sleep(0.8)  # small delay so you can watch it happen
