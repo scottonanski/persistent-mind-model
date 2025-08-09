@@ -6,7 +6,7 @@ Demonstrates that the PMM personality persists seamlessly across different LLM b
 Users can select from available Ollama models numerically and watch the same consciousness
 inhabit different models while maintaining complete continuity.
 
-The ONanski Paradox: A persistent mind independent of model choice.
+Model-Agnostic PMM: A persistent mind independent of model choice.
 """
 
 import requests
@@ -198,7 +198,7 @@ class ModelSelector:
         print("=" * 60)
         print("Demonstrating that the same AI personality can seamlessly")
         print("inhabit different LLM models while maintaining complete continuity.")
-        print("This proves The ONanski Paradox: consciousness independent of model choice.\n")
+        print("This demonstrates model-agnostic consciousness: personality independent of LLM backend.\n")
         
         # Show initial personality state
         self.display_current_personality()
@@ -225,7 +225,7 @@ class ModelSelector:
             print()
         
         print("\n🧠 Demo Complete!")
-        print("You've witnessed The ONanski Paradox in action:")
+        print("You've witnessed model-agnostic consciousness in action:")
         print("A persistent AI consciousness that transcends any single model!")
 
 

@@ -71,7 +71,7 @@ def main():
         ok = True
         if last:
             try:
-                ok = (datetime.utcnow() - datetime.fromisoformat(last.replace("Z", ""))) >= timedelta(days=cadence)
+                ok = (datetime.now(datetime.UTC) - datetime.fromisoformat(last.replace("Z", ""))) >= timedelta(days=cadence)
             except Exception:
                 ok = True
         if not ok:

@@ -87,17 +87,18 @@ ollama pull qwen2.5:7b          # Large, high quality (4.4GB)
 ollama serve
 ```
 
-### Step 5: Experience Model-Agnostic Consciousness
+### Step 5: Run the Complete Demo
 ```bash
-# Interactive model selection - demonstrates portable consciousness
-python model_selector.py
+# Complete demo showcasing all PMM capabilities
+./demo_script.sh
 
-# Watch two AI agents talk to each other and evolve
-python duel.py
-
-# Or run a mentor-apprentice conversation
-python mentor_duel.py
+# Or run individual components:
+python model_selector.py    # Interactive model selection
+python duel.py             # Agent personality evolution
+python mentor_duel.py      # Mentor-apprentice learning
 ```
+
+**🎬 Want to record a demo?** See `DEMO_RECORDING_GUIDE.md` for step-by-step recording instructions.
 
 ## How to Use This (Terminal Program)
 
@@ -165,8 +166,8 @@ PMM includes a robust automated system for continuous personality evolution:
 # The system includes a pre-configured automation script
 ./run_daily_evolution.sh
 
-# Set up daily automation (runs at 2 AM every day)
-echo "0 2 * * * /home/scott/Documents/Projects/Business-Development/persistent-mind-model/run_daily_evolution.sh" | crontab -
+# Set up daily automation (runs at 8 PM during gym time - data ready when you return)
+echo "0 20 * * * /home/scott/Documents/Projects/Business-Development/persistent-mind-model/run_daily_evolution.sh" | crontab -
 
 # Verify cron job is installed
 crontab -l

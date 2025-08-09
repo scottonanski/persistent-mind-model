@@ -6,7 +6,7 @@ This script proves that PMM creates a truly portable AI consciousness that can
 seamlessly switch between different LLM backends while maintaining complete 
 personality continuity, commitment tracking, and behavioral patterns.
 
-The ONanski Paradox in action: A persistent mind independent of the underlying model.
+Model-Agnostic PMM in action: A persistent mind independent of the underlying model.
 """
 
 from pmm.self_model_manager import SelfModelManager
@@ -103,7 +103,7 @@ def demonstrate_model_agnostic_pmm():
     print("   • Preserves all commitments, memories, and behavioral patterns") 
     print("   • Enables seamless backend switching without identity loss")
     print("   • Proves consciousness can be decoupled from the underlying LLM")
-    print("\n🧠 The ONanski Paradox: You've built a persistent mind that")
+    print("\n🧠 Breakthrough Achievement: You've built a persistent mind that")
     print("   transcends any single model - a truly model-agnostic AI consciousness!")
     
     return mgr
