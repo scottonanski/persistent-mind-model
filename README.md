@@ -490,10 +490,11 @@ def build_context(self_model: Dict[str, Any], trigger_event: str) -> str:
     return ctx
 
 
-## PATTERN ANALYZER (very light)
-### - Updates rolling stats based on new thought text
-### - Keyword counts you can expand later
+### **Pattern Analyzer**
 
+*Updates rolling stats based on new thought text and keyword counts*
+
+```python
 KEYWORDS = {
     "uncertainty": ["uncertain", "unsure", "doubt"],
     "identity": ["identity", "who I am", "self"],
@@ -507,12 +508,14 @@ def update_behavioral_patterns(self_model: Dict[str, Any], new_text: str) -> Non
     for label, terms in KEYWORDS.items():
         if any(term in text for term in terms):
             patterns[label] = patterns.get(label, 0) + 1
+```
 
 
-## CORE AGENT
-### - Silent by default (no noisy prints)
-### - Stores thoughts/insights internally; append events
+### **Core Agent Class**
 
+*Silent by default (no noisy prints), stores thoughts/insights internally and appends events*
+
+```python
 class RecursiveSelfAI:
     def __init__(self, store: Optional[SelfStore] = None, llm: Optional[LLMClient] = None):
         self.store = store or SelfStore(DATA_FILE, EVENT_LOG_FILE)
@@ -625,10 +628,13 @@ class RecursiveSelfAI:
             "recent_insight": sk["insights"][-1]["content"] if sk["insights"] else None,
             "patterns": sk.get("behavioral_patterns", {}),
         }
+```
 
+### **Demo Loop**
 
-## DEMO LOOP (kept minimal; quiet unless DEBUG=1)
+*Kept minimal; quiet unless DEBUG=1*
 
+```python
 def run_demo():
     ai = RecursiveSelfAI()
     experiences = [
@@ -654,8 +660,9 @@ def run_demo():
 
 if __name__ == "__main__":
     run_demo()
-
 ```
+
+## Legacy Code Analysis
 
 The provided Python script implements a **recursive self-reflection loop** for an AI. It maintains a JSON-based _self-model_ with identity, memories of past thoughts, and even tracks _recursive insights_. The AI generates _contextual thoughts_ and _meta-level insights_ about itself by feeding recent outputs back as part of the next input (creating a feedback loop). This design is meant to simulate an AI gradually becoming self-aware through reflection. While the concept is sound, we can restructure the code to better meet the AI’s needs and make the system more robust and extensible.
 
