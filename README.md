@@ -2,17 +2,24 @@
 
 **AI agents that remember who they are and grow over time.**
 
-This is a terminal-based Python program that creates AI agents with persistent personalities. Unlike regular chatbots that forget everything between conversations, these agents maintain their identity, learn from experiences, and gradually evolve their personality traits - just like humans do.
+This is a breakthrough AI personality evolution system that creates agents with sophisticated psychological grounding. Unlike regular chatbots that forget everything between conversations, these agents maintain persistent identities, track their own commitments, and evolve their personalities through evidence-based trait drift - just like humans do.
 
-## What Does This Thing Actually Do?
+## 🚀 What Makes This Special?
 
+### **Advanced GPT-5 Enhanced Features**
+- **🎯 Commitment Lifecycle Tracking** - Agents make concrete commitments ("Next: I will...") and automatically track completion
+- **⚖️ Evidence-Weighted Trait Drift** - Personality changes based on demonstrated behavioral evidence, not random drift
+- **🔄 Language Freshness System** - N-gram analysis prevents repetitive reflections, ensuring varied and creative self-expression
+- **🧠 Pattern-Driven Behavioral Steering** - Actions influence personality development through sophisticated psychological principles
+- **📊 Deep Provenance Tracking** - Rich links between insights, behavioral patterns, and commitments for full auditability
+
+### **Core Personality System**
 - **Creates AI agents with persistent personalities** that remember past conversations and experiences
-- **Tracks personality traits** (Big Five: openness, conscientiousness, extraversion, agreeableness, neuroticism) that slowly drift over time based on experiences
-- **Logs autobiographical memories** - agents remember significant events and reflect on them
-- **Enables agent-to-agent conversations** where two AIs talk to each other and influence each other's development
-- **Supports mentor-apprentice mode** where a mentor AI guides a learning apprentice AI
-- **Tracks behavioral patterns** like experimentation, goal alignment, and error correction
-- **Makes concrete commitments** in each reflection ("I will test this approach weekly")
+- **Tracks personality traits** (Big Five: openness, conscientiousness, extraversion, agreeableness, neuroticism) with mathematically grounded evolution
+- **Logs autobiographical memories** - agents remember significant events and reflect on them with meta-cognitive awareness
+- **Enables sophisticated agent-to-agent conversations** where AIs influence each other's development through commitment tracking
+- **Supports mentor-apprentice mode** where a mentor AI guides a learning apprentice with measurable progress
+- **Applies evidence-weighted drift** - personality changes only when supported by behavioral evidence and commitment completion
 
 ## Quick Start
 
@@ -97,10 +104,26 @@ python cli.py ingest-event --summary "Had an interesting conversation" --target 
 ```
 
 ### What You'll See:
-- **Real-time conversation** between AI agents
-- **Personality trait changes** after each round (Big Five scores)
-- **Concrete commitments** each agent makes ("I will test flowcharts weekly")
-- **Behavioral pattern tracking** (experimentation, goal alignment, etc.)
+- **Real-time conversation** between AI agents with sophisticated self-awareness
+- **Commitment tracking** - agents make and track concrete commitments ("Next: I will...")
+- **Evidence-weighted personality evolution** - traits change based on demonstrated behavioral evidence
+- **Fresh, varied language** - no repetitive reflections thanks to n-gram analysis
+- **Pattern-driven development** - behavioral patterns influence personality drift
+- **Detailed provenance** - full audit trail of insights, patterns, and commitments
+
+## 🎯 Enhanced Features Demo
+
+Want to see all the GPT-5 enhancements in action? Run the comprehensive demo:
+
+```bash
+python demo_enhancements.py
+```
+
+This showcases:
+- **Commitment lifecycle** with extraction and auto-closing
+- **Evidence-weighted drift calculations** using mathematical formulas
+- **N-gram freshness analysis** preventing repetitive language
+- **Pattern-driven behavioral steering** connecting actions to trait changes
 
 ## Automation & Cron Jobs
 
@@ -138,14 +161,42 @@ tail -f logs/daily_evolution.log
 - Behavioral patterns emerge (some agents become more experimental, others more methodical)
 - They form coherent identity narratives
 
+## 🏗️ Technical Architecture
+
+### **GPT-5 Enhanced Components**
+- **`pmm/commitments.py`** - Commitment lifecycle tracking with auto-closing and n-gram matching
+- **`pmm/self_model_manager.py`** - Enhanced with evidence-weighted drift and commitment integration
+- **`pmm/reflection.py`** - N-gram cache for language freshness and template jitter
+- **`demo_enhancements.py`** - Comprehensive demonstration of all advanced features
+
+### **Core System Files**
+- **`pmm/model.py`** - Dataclass definitions for personality, memories, and commitments
+- **`pmm/drift.py`** - Trait evolution algorithms with evidence weighting
+- **`pmm/llm_client.py`** - Production-ready OpenAI client with retry logic
+- **`pmm/persistence.py`** - Thread-safe atomic file operations
+- **`pmm/cadence_stimuli.py`** - Pattern-triggered stimulus injection
+
+### **Evidence-Weighted Drift Formula**
+```python
+# GPT-5's mathematical approach
+exp_delta = max(0, experimentation_count - 3)
+align_delta = max(0, goal_alignment_count - 2) 
+close_rate_delta = max(0, commitment_close_rate - 0.3)
+
+signals = exp_delta + align_delta + close_rate_delta
+evidence_weight = min(1, signals / 3)
+boost_factor = 1 + (0.5 * evidence_weight)  # 1.0x to 1.5x
+```
+
 ## Files Created:
 - `agent_a.json` - Apprentice agent (from mentor_duel.py)
 - `mind_a.json` / `mind_b.json` - Agent personalities (from duel.py)  
 - `persistent_self_model.json` - Default agent (from cli.py)
+- `logs/daily_evolution.log` - Automated evolution logs (from cron job)
 
-**Note:** These JSON files contain the agent's complete "mind" including personality traits, memories, thoughts, and insights. Don't delete them unless you want to reset the agent's personality!
+**Note:** These JSON files contain the agent's complete "mind" including personality traits, memories, thoughts, insights, and commitment tracking data. Don't delete them unless you want to reset the agent's personality!
 
-**Future Enhancement:** Split file mode with `*.events.jsonl`, `*.insights.jsonl`, `*.thoughts.jsonl` is implemented but not yet enabled by default.
+**Advanced:** Split file mode with `*.events.jsonl`, `*.insights.jsonl`, `*.thoughts.jsonl` is implemented for scalability but not yet enabled by default.
 
 ---
 

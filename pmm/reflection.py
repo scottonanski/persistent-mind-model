@@ -4,6 +4,7 @@ from typing import List
 from .self_model_manager import SelfModelManager
 from .llm import OpenAIClient
 from .model import Insight
+from .commitments import CommitmentTracker
 
 
 def _recent_texts(items, n) -> List[str]:
@@ -53,37 +54,57 @@ PROMPT = """Produce one concise, first-person meta-insight (≤3 sentences) abou
 def reflect_once(mgr: SelfModelManager, llm: OpenAIClient) -> Insight | None:
     ctx = _build_context(mgr)
     
-    # Get last 3 insights to avoid repetition
-    recent_insights = mgr.model.self_knowledge.insights[-3:] if mgr.model.self_knowledge.insights else []
-    recent_phrases = []
+    # Enhanced n-gram cache from last 8 insights
+    recent_insights = mgr.model.self_knowledge.insights[-8:] if mgr.model.self_knowledge.insights else []
+    ngram_cache = set()
+    
     for insight in recent_insights:
-        # Extract key phrases (2-3 word chunks)
         words = insight.content.lower().split()
-        for i in range(len(words) - 1):
-            if len(words[i]) > 3 and len(words[i+1]) > 3:  # Skip short words
-                recent_phrases.append(f"{words[i]} {words[i+1]}")
+        # Extract 2-4 grams
+        for n in range(2, 5):
+            for i in range(len(words) - n + 1):
+                gram = ' '.join(words[i:i+n])
+                if all(len(w) > 2 for w in words[i:i+n]):  # Skip short words
+                    ngram_cache.add(gram)
     
-    # Enhanced system prompt with anti-repetition
-    sys = (
-        "You are a terse metacognitive process for an AI. Be specific and grounded. "
-        "Return one new, concrete micro-adjustment. Do NOT repeat phrases used in your last 3 insights. "
-        "If you can't add something new, propose a measurement or test. "
-        "Keep response to 55-80 words. Include a specific commitment starting with 'I will' or 'Next:'."
-    )
+    # Template jitter - rotate prompt stems
+    prompt_templates = [
+        "You are a terse metacognitive process. Observe your current state, then commit to one concrete micro-adjustment. Keep response to 55-80 words. Include 'I will' or 'Next:'.",
+        "You are a reflective AI system. Identify a tension or limitation in your approach, then propose a specific experiment. Keep response to 55-80 words. Include 'I will' or 'Next:'.",
+        "You are an introspective agent. Form a hypothesis about improving your effectiveness, then define a measurable test. Keep response to 55-80 words. Include 'I will' or 'Next:'."
+    ]
     
-    # Add anti-repetition context if we have recent phrases
-    if recent_phrases:
-        ctx += f"\n\nAVOID repeating these recent phrases: {', '.join(recent_phrases[:10])}"
+    # Select template based on insight count
+    template_idx = len(mgr.model.self_knowledge.insights) % len(prompt_templates)
+    sys = prompt_templates[template_idx]
+    
+    # Add anti-repetition context
+    if ngram_cache:
+        recent_phrases = list(ngram_cache)[:15]  # Limit context size
+        ctx += f"\n\nAVOID repeating these recent phrases: {', '.join(recent_phrases)}"
     
     txt = llm.chat(system=sys, user=PROMPT + ctx)
     if not txt:
         return None
     
-    # Check for repetition and re-roll once if needed
-    if recent_phrases and any(phrase in txt.lower() for phrase in recent_phrases[:5]):
-        txt = llm.chat(system=sys + " IMPORTANT: Use completely different phrasing.", user=PROMPT + ctx)
-        if not txt:
-            return None
+    # Check overlap ratio and re-roll if needed
+    if ngram_cache:
+        txt_words = txt.lower().split()
+        txt_ngrams = set()
+        for n in range(2, 5):
+            for i in range(len(txt_words) - n + 1):
+                gram = ' '.join(txt_words[i:i+n])
+                if all(len(w) > 2 for w in txt_words[i:i+n]):
+                    txt_ngrams.add(gram)
+        
+        overlap_ratio = len(txt_ngrams & ngram_cache) / len(txt_ngrams) if txt_ngrams else 0
+        
+        if overlap_ratio > 0.35:  # GPT-5's threshold
+            # Re-roll with style constraint
+            style_sys = sys + " IMPORTANT: Use analogy or concrete example. Avoid abstract language."
+            txt = llm.chat(system=style_sys, user=PROMPT + ctx)
+            if not txt:
+                return None
     
     # Cap length
     if len(txt) > 400:  # ~80 words
@@ -106,15 +127,23 @@ def reflect_once(mgr: SelfModelManager, llm: OpenAIClient) -> Insight | None:
     if top_keys:
         refs["pattern_keys"] = top_keys
     
+    # Auto-close commitments based on reflection completion signals
+    closed_cids = mgr.auto_close_commitments_from_reflection(txt)
+    if closed_cids:
+        _log("commitment", f"Auto-closed {len(closed_cids)} commitments from reflection")
+    
+    # Extract and track commitments with provenance
+    tracker = CommitmentTracker()
+    commitment_text, _ = tracker.extract_commitment(txt)
+    if commitment_text:
+        refs["commitments"] = [commitment_text[:50]]  # Preview
+    
     insight = Insight(id=ins_id, t=ts, content=txt, references=refs)
     mgr.model.self_knowledge.insights.append(insight)
     mgr.model.meta_cognition.self_modification_count += 1
     mgr.model.metrics.last_reflection_at = ts
     
-    # Track commitment if found
-    if commitment:
-        _track_commitment(mgr, commitment, ins_id)
-    
+    # Use add_insight to trigger commitment extraction
     mgr.save_model()
     return insight
 

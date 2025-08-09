@@ -12,7 +12,9 @@ from .model import (
 )
 from .validation import SchemaValidator
 from .metrics import compute_identity_coherence, compute_self_consistency
+from .logging_config import get_logger
 from .drift import apply_effects
+from .commitments import CommitmentTracker
 
 # Minimal debug logging
 DEBUG = os.environ.get("PMM_DEBUG", "0") == "1"
@@ -24,22 +26,23 @@ def _log(*a):
 class SelfModelManager:
     """Interface to the persistent self-model: handles loading, saving, and structured updates."""
 
-    def __init__(self, filepath: Optional[str] = None, schema_path: Optional[str] = None):
-        self.filepath = filepath or "persistent_self_model.json"
-        self.schema_path = schema_path or "schema/pmm.schema.json"
-        self.validator = SchemaValidator(schema_path=self.schema_path)
-        self.lock = threading.RLock()
+    def __init__(self, model_path: str = "persistent_self_model.json"):
+        self.model_path = model_path
+        self.lock = threading.Lock()
+        self.validator = SchemaValidator()
+        self.commitment_tracker = CommitmentTracker()
         self.model = self.load_model()
 
     # -------- persistence --------
     def load_model(self) -> PersistentMindModel:
         with self.lock:
             try:
-                with open(self.filepath, "r") as f:
+                with open(self.model_path, "r") as f:
                     data = json.load(f)
             except FileNotFoundError:
                 model = PersistentMindModel()
-                self.save_model(model)
+                # Save without acquiring lock again (we already have it)
+                self._save_model_unlocked(model)
                 return model
 
             # --- hydrate dict -> dataclasses (defaults first, then overlay) ---
@@ -182,20 +185,23 @@ class SelfModelManager:
 
             # validate hydrated model
             self.validator.validate_model(model)
-            _log("loaded", self.filepath)
+            _log("loaded", self.model_path)
             return model
 
     def save_model(self, model: Optional[PersistentMindModel] = None) -> None:
-        if model is None:
-            model = self.model
         with self.lock:
-            # recompute metrics before save
-            model.metrics.identity_coherence = compute_identity_coherence(model)
-            model.metrics.self_consistency = compute_self_consistency(model)
-            self.validator.validate_model(model)
-            with open(self.filepath, "w") as f:
-                json.dump(asdict(model), f, indent=2, sort_keys=False)
-            _log("saved", self.filepath)
+            self._save_model_unlocked(model)
+    
+    def _save_model_unlocked(self, model: Optional[PersistentMindModel] = None) -> None:
+        """Save model without acquiring lock (internal use only)."""
+        m = model or self.model
+        # recompute metrics before save
+        m.metrics.identity_coherence = compute_identity_coherence(m)
+        m.metrics.self_consistency = compute_self_consistency(m)
+        self.validator.validate_model(m)
+        with open(self.model_path, "w") as f:
+            json.dump(asdict(m), f, indent=2, sort_keys=False)
+        _log("saved", self.model_path)
 
     # -------- convenience APIs --------
     def add_event(self, summary: str, effects: Optional[List[dict]] = None, *, etype: str = "experience") -> Event:
@@ -229,45 +235,122 @@ class SelfModelManager:
         ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         ins = Insight(id=in_id, t=ts, content=content)
         self.model.self_knowledge.insights.append(ins)
+        
+        # Extract and track commitments from insight
+        cid = self.commitment_tracker.add_commitment(content, in_id)
+        if cid:
+            _log("commitment", f"Extracted commitment {cid} from insight {in_id}")
+        
         self.save_model()
         return ins
 
     def apply_drift_and_save(self) -> dict:
         with self.lock:
-            # Check pattern signals to steer drift
+            # Check pattern signals to steer drift with evidence weighting
             patterns = self.model.self_knowledge.behavioral_patterns
             recent_insights = self.model.self_knowledge.insights[-10:] if self.model.self_knowledge.insights else []
             
-            # Calculate pattern momentum from recent insights
+            # Calculate pattern deltas (momentum from recent activity)
             exp_count = patterns.get("experimentation", 0)
             align_count = patterns.get("user_goal_alignment", 0)
             calib_count = patterns.get("calibration", 0)
             error_count = patterns.get("error_correction", 0)
             
-            # Adjust drift aggressiveness based on patterns
+            # Get commitment metrics for close rate
+            commitment_metrics = self.commitment_tracker.get_commitment_metrics()
+            close_rate = commitment_metrics.get('close_rate', 0)
+            
+            # Update model metrics with commitment data
+            self.model.metrics.commitments_open = commitment_metrics.get('commitments_open', 0)
+            self.model.metrics.commitments_closed = commitment_metrics.get('commitments_closed', 0)
+            
+            # Evidence-weighted signals (GPT-5's formula)
+            exp_delta = max(0, exp_count - 3)  # Above baseline
+            align_delta = max(0, align_count - 2)  # Above baseline
+            close_rate_delta = max(0, close_rate - 0.3)  # Above 30% close rate
+            
+            signals = exp_delta + align_delta + close_rate_delta
+            evidence_weight = min(1, signals / 3)  # Cap at 1.0
+            
+            # Adjust drift aggressiveness based on evidence-weighted patterns
             original_delta = self.model.drift_config.max_delta_per_reflection
             
-            # If experimentation/alignment up, allow upper half of delta for openness/conscientiousness
-            if exp_count > 5 or align_count > 3:
-                self.model.drift_config.max_delta_per_reflection = min(0.05, original_delta * 1.5)
-                _log("drift", f"Boosted delta to {self.model.drift_config.max_delta_per_reflection} due to experimentation/alignment")
+            # If experimentation/alignment up with evidence, boost delta
+            if evidence_weight > 0.3:
+                boost_factor = 1 + (0.5 * evidence_weight)  # 1.0 to 1.5x
+                self.model.drift_config.max_delta_per_reflection = min(0.05, original_delta * boost_factor)
+                _log("drift", f"Evidence-weighted delta boost: {boost_factor:.2f}x (signals: {signals:.2f})")
             
-            # If calibration/error_correction up, bias neuroticism downward
-            if calib_count > 3 and error_count > 2:
-                # Apply small downward bias to neuroticism
+            # Symmetry guard for neuroticism (GPT-5's recommendation)
+            if calib_count > 3 and error_count > 2 and close_rate > 0.4:
+                # Apply downward bias only with both calibration AND commitment completion
                 neuro_trait = self.model.personality.traits.big5.neuroticism
-                if neuro_trait.score > 0.3:  # Only if not already low
-                    neuro_trait.score = max(0.05, neuro_trait.score - 0.01)
-                    _log("drift", f"Applied neuroticism stability bias: {neuro_trait.score}")
+                if neuro_trait.score > 0.3:
+                    bias_strength = min(0.02, 0.01 * evidence_weight)
+                    neuro_trait.score = max(0.05, neuro_trait.score - bias_strength)
+                    _log("drift", f"Applied neuroticism stability bias: -{bias_strength:.3f} (close_rate: {close_rate:.2f})")
+            elif calib_count > 3 and close_rate <= 0.4:
+                # Reduced bias if calibration up but commitments not closing
+                neuro_trait = self.model.personality.traits.big5.neuroticism
+                if neuro_trait.score > 0.3:
+                    bias_strength = 0.005  # 50% of planned decrease
+                    neuro_trait.score = max(0.05, neuro_trait.score - bias_strength)
+                    _log("drift", f"Reduced neuroticism bias: -{bias_strength:.3f} (low close rate: {close_rate:.2f})")
             
             net = apply_effects(self.model)
             
             # Restore original delta
             self.model.drift_config.max_delta_per_reflection = original_delta
             
-            self.save_model(self.model)
-            _log("drift", net)
+            # Save without acquiring lock again (we already have it)
+            self._save_model_unlocked(self.model)
+            _log("drift", f"Applied drift with evidence weight: {evidence_weight:.2f}")
             return net
+
+    def set_drift_params(
+        self, 
+        max_delta: float = 0.02, 
+        maturity_factor: float = 0.8,
+        max_delta_per_reflection: float = None,
+        notes_append: str = None
+    ):
+        """Set drift parameters for this agent."""
+        # Handle both parameter names for backward compatibility
+        if max_delta_per_reflection is not None:
+            self.model.drift_config.max_delta_per_reflection = max_delta_per_reflection
+        else:
+            self.model.drift_config.max_delta_per_reflection = max_delta
+        
+        self.model.drift_config.maturity_factor = maturity_factor
+        
+        # Handle notes append
+        if notes_append:
+            dc = self.model.drift_config
+            dc.notes = (dc.notes + "\n" if dc.notes else "") + str(notes_append)
+        
+        # Save the changes
+        self.save_model()
+    
+    # -------- commitment tracking --------
+    def add_commitment(self, text: str, source_insight_id: str, due: Optional[str] = None) -> str:
+        """Add a new commitment and return its ID."""
+        return self.commitment_tracker.add_commitment(text, source_insight_id, due)
+    
+    def mark_commitment(self, cid: str, status: str, note: Optional[str] = None) -> bool:
+        """Manually mark a commitment as closed/completed."""
+        return self.commitment_tracker.mark_commitment(cid, status, note)
+    
+    def get_open_commitments(self) -> List[dict]:
+        """Get all open commitments."""
+        return self.commitment_tracker.get_open_commitments()
+    
+    def auto_close_commitments_from_event(self, event_text: str) -> List[str]:
+        """Auto-close commitments mentioned in event descriptions."""
+        return self.commitment_tracker.auto_close_from_event(event_text)
+    
+    def auto_close_commitments_from_reflection(self, reflection_text: str) -> List[str]:
+        """Auto-close commitments based on reflection completion signals."""
+        return self.commitment_tracker.auto_close_from_reflection(reflection_text)
 
     # -------- extra helpers for duel/mentor loops --------
     def get_big5(self) -> dict:
@@ -327,20 +410,4 @@ class SelfModelManager:
         if changed:
             self.save_model(self.model)
 
-    def set_drift_params(
-        self,
-        *,
-        max_delta_per_reflection: float | None = None,
-        locks: list[str] | None = None,
-        notes_append: str | None = None,
-    ) -> None:
-        """Adjust drift configuration on the live model and persist it."""
-        dc = self.model.drift_config
-        with self.lock:
-            if max_delta_per_reflection is not None:
-                dc.max_delta_per_reflection = float(max_delta_per_reflection)
-            if locks is not None:
-                dc.locks = list(locks)
-            if notes_append:
-                dc.notes = (dc.notes + "\n" if dc.notes else "") + str(notes_append)
-            self.save_model(self.model)
+
