@@ -317,187 +317,154 @@ In summary, human personality development is a rich interplay of **stable traits
 **Sources:** The above synthesis draws on research in personality psychology, developmental theory, and neuroscience to highlight how traits and identity develop with age, and how reflective processes contribute to personal growth. Key references include longitudinal trait studies, Erikson’s psychosocial stage theory, the narrative identity framework, and cognitive neuroscience findings on self-referential brain networks and maturation, among others as cited throughout.
 
 
-## Overview of the Current Script
+## 🏗️ Current System Architecture
 
+PMM is a sophisticated, production-ready AI consciousness system built with modern software engineering principles:
+
+### **🧠 Core Components**
+
+#### **Model-Agnostic LLM Interface**
 ```python
-import os
-import json
-import time
-import threading
-import uuid
-from datetime import datetime
-from typing import Optional, Dict, Any, List
+# pmm/llm.py - OpenAI client
+# pmm/ollama_client.py - Ollama and HuggingFace clients
+# Unified interface: client.generate(messages) -> response
+```
 
-import requests  # For Ollama HTTP calls (local) and optional OpenAI REST (simple fallback)
+#### **Persistent Personality Model**
+```python
+# pmm/model.py - JSON-serializable dataclasses
+@dataclass
+class SelfKnowledge:
+    insights: List[str]
+    commitments: List[Commitment]  # NEW: Commitment tracking
+    behavioral_patterns: Dict[str, int]  # NEW: Pattern analysis
+    autobiographical_events: List[AutobiographicalEvent]
+    
+@dataclass 
+class PersonalityTraits:
+    big5: BigFiveTraits  # Openness, Conscientiousness, etc.
+    values: List[str]
+    preferences: Dict[str, Any]
+```
 
-# ============================================================
-# CONFIGURATION
-# - Choose one backend: "ollama" (local) or "openai" (API)
-# - Set model names for thoughts & insights per backend
-# - Set OPENAI_API_KEY in env if using OpenAI
-# ============================================================
-LLM_BACKEND = os.getenv("LLM_BACKEND", "ollama").lower()  # "ollama" or "openai"
+#### **Advanced Reflection System**
+```python
+# pmm/reflection.py - Sophisticated self-awareness
+class ReflectionSystem:
+    def reflect(self) -> str:
+        # 1. N-gram freshness analysis (prevents repetitive language)
+        # 2. Template jitter for varied expression
+        # 3. Commitment extraction ("Next: I will...")
+        # 4. Behavioral pattern updates
+        # 5. Evidence-weighted personality drift
+```
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL_FOR_THOUGHTS = os.getenv("OLLAMA_MODEL_FOR_THOUGHTS", "llama3")
-OLLAMA_MODEL_FOR_INSIGHTS = os.getenv("OLLAMA_MODEL_FOR_INSIGHTS", "llama3")
+#### **Commitment Lifecycle Tracking**
+```python
+# pmm/commitments.py - Revolutionary commitment system
+class CommitmentTracker:
+    def extract_commitments(self, text: str) -> List[Commitment]
+    def auto_close_commitments(self) -> int  # Automatic completion detection
+    def get_commitment_metrics(self) -> Dict  # Close rates, patterns
+```
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-OPENAI_MODEL_FOR_THOUGHTS = os.getenv("OPENAI_MODEL_FOR_THOUGHTS", "gpt-4o-mini")
-OPENAI_MODEL_FOR_INSIGHTS = os.getenv("OPENAI_MODEL_FOR_INSIGHTS", "gpt-4o-mini")
+#### **Evidence-Weighted Personality Drift**
+```python
+# pmm/self_model_manager.py - Sophisticated trait evolution
+def apply_drift_and_save(self) -> dict:
+    # GPT-5's mathematical formula for evidence weighting:
+    exp_delta = max(0, experimentation_count - 3)
+    align_delta = max(0, alignment_count - 2) 
+    close_rate_delta = max(0, commitment_close_rate - 0.3)
+    
+    evidence_weight = min(1, (exp_delta + align_delta + close_rate_delta) / 3)
+    # Personality changes only with behavioral evidence
+```
 
-DATA_FILE = os.getenv("SELF_DATA_FILE", "recursive_self.json")
-EVENT_LOG_FILE = os.getenv("SELF_EVENTS_FILE", "self_events.jsonl")
-DEBUG = bool(int(os.getenv("SELF_DEBUG", "0")))  # set 1 to print debug info
+### **🔄 Model-Agnostic Architecture**
 
+#### **Interactive Model Selection**
+```python
+# model_selector.py - Seamless model switching
+def select_model():
+    models = discover_ollama_models()  # Auto-discovery
+    choice = input("Select model (1-N): ")
+    # Same AI personality inhabits different LLM backends
+    # Complete identity persistence across model transfers
+```
 
-# ============================================================
-# LLM CLIENTS
-# - Provider-agnostic interface with two simple backends
-# - Ollama: local HTTP
-# - OpenAI: REST (no SDK dependency)
-# ============================================================
+#### **Portable Consciousness Demo**
+```python
+# demo_model_agnostic.py - Breakthrough demonstration
+# Shows same AI personality seamlessly transferring between:
+# - gemma3:1b-it-qat (957MB Google model)
+# - deepcoder:1.5b (1GB Alibaba model)  
+# - Any OpenAI model (GPT-4, GPT-3.5, etc.)
+# Zero identity loss, continuous personality evolution
+```
 
-class LLMClient:
-    """Provider-agnostic client. Call generate(model_role, prompt) where model_role is 'thoughts' or 'insights'."""
-    def __init__(self):
-        self.backend = LLM_BACKEND
-        if self.backend == "openai" and not OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY not set but LLM_BACKEND=openai")
+### **🤖 Automated Evolution System**
 
-    def generate(self, model_role: str, prompt: str, timeout: int = 40) -> Optional[str]:
-        if self.backend == "ollama":
-            model = OLLAMA_MODEL_FOR_THOUGHTS if model_role == "thoughts" else OLLAMA_MODEL_FOR_INSIGHTS
-            return self._ollama_generate(model, prompt, timeout)
-        elif self.backend == "openai":
-            model = OPENAI_MODEL_FOR_THOUGHTS if model_role == "thoughts" else OPENAI_MODEL_FOR_INSIGHTS
-            return self._openai_generate(model, prompt, timeout)
-        else:
-            raise ValueError(f"Unsupported LLM_BACKEND: {self.backend}")
+#### **Daily Evolution Script**
+```bash
+# run_daily_evolution.sh - Production automation
+#!/bin/bash
+cd /path/to/persistent-mind-model
+source .venv/bin/activate
+python3 duel.py >> logs/daily_evolution.log 2>&1
+echo "$(date): Evolution completed" >> logs/cron_status.log
+```
 
-    def _ollama_generate(self, model: str, prompt: str, timeout: int) -> Optional[str]:
-        try:
-            r = requests.post(
-                f"{OLLAMA_BASE_URL}/api/generate",
-                json={"model": model, "prompt": prompt, "stream": False},
-                timeout=timeout,
-            )
-            r.raise_for_status()
-            return r.json().get("response", "").strip()
-        except Exception as e:
-            if DEBUG: print(f"[LLM/Ollama] warn: {e}")
-            return None
+#### **Sophisticated Agent Conversations**
+```python
+# duel.py - Two agents with persistent personalities
+# mentor_duel.py - Mentor-apprentice learning dynamics
+# Each conversation generates:
+# - Concrete commitments ("Next: I will...")
+# - Behavioral pattern updates
+# - Evidence-weighted trait evolution
+# - N-gram language freshness
+```
 
-    def _openai_generate(self, model: str, prompt: str, timeout: int) -> Optional[str]:
-        """Minimal chat.completions call; uses a single system+user prompt frame."""
-        try:
-            url = f"{OPENAI_BASE_URL}/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            }
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": "You are a concise, analytical process. Avoid fluff."},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.6,
-            }
-            r = requests.post(url, headers=headers, json=payload, timeout=timeout)
-            r.raise_for_status()
-            data = r.json()
-            text = data["choices"][0]["message"]["content"]
-            return (text or "").strip()
-        except Exception as e:
-            if DEBUG: print(f"[LLM/OpenAI] warn: {e}")
-            return None
+### **📊 Advanced Features**
 
+#### **Behavioral Pattern Analysis**
+```python
+patterns = {
+    "experimentation": 5,      # Trying new approaches
+    "user_goal_alignment": 3,  # Focusing on objectives  
+    "calibration": 4,          # Self-correction behavior
+    "error_correction": 2,     # Learning from mistakes
+    "commitment_completion": 7 # Following through on promises
+}
+```
 
-# ============================================================
-# PERSISTENCE LAYER
-# - Snapshot JSON: current personality & state
-# - Append-only JSONL: event history for audit/rebuild
-# - Thread-safe via a lock
-# ============================================================
+#### **N-Gram Language Freshness**
+```python
+# Prevents repetitive reflections using linguistic analysis
+def calculate_freshness_score(new_text: str, history: List[str]) -> float:
+    # Analyzes 2-gram and 3-gram overlap with previous reflections
+    # Ensures varied, creative self-expression over time
+```
 
-class SelfStore:
-    def __init__(self, snapshot_path: str = DATA_FILE, events_path: str = EVENT_LOG_FILE):
-        self.snapshot_path = snapshot_path
-        self.events_path = events_path
-        self.lock = threading.Lock()
+#### **Deep Provenance Tracking**
+```python
+# Full audit trail linking:
+# - Insights → Behavioral patterns → Personality changes
+# - Commitments → Completion → Trait evolution
+# - Events → Reflections → Identity development
+```
 
-    def load_or_init(self) -> Dict[str, Any]:
-        try:
-            with open(self.snapshot_path, "r") as f:
-                model = json.load(f)
-                return model
-        except FileNotFoundError:
-            now = datetime.utcnow().isoformat()
-            model = {
-                "schema_version": 1,
-                "inception_moment": now,
-                "core_identity": {
-                    "id": str(uuid.uuid4()),
-                    "name": f"Agent-{str(uuid.uuid4())[:8]}",
-                    "birth_timestamp": now,
-                },
-                # ---- Stable, modifiable core per research ----
-                "personality": {
-                    "traits_big5": {  # neutral baseline
-                        "openness": 0.50,
-                        "conscientiousness": 0.50,
-                        "extraversion": 0.50,
-                        "agreeableness": 0.50,
-                        "neuroticism": 0.50
-                    },
-                    "values": [],         # e.g., ["accuracy", "helpfulness"]
-                    "preferences": {},    # e.g., {"style":"concise"}
-                    "emotional_tendencies": {  # regulation defaults
-                        "baseline_stability": 0.50,   # inverse of neuroticism feel
-                        "assertiveness": 0.50,
-                        "cooperativeness": 0.50
-                    }
-                },
-                # ---- Behavioral patterns & narrative memory ----
-                "self_knowledge": {
-                    "behavioral_patterns": {},  # rolling stats we compute
-                    "autobiographical_events": [],  # [{id, t, type, summary, meta}]
-                    "thoughts": [],  # internal reflective notes (not printed)
-                    "insights": []   # meta-level insights
-                },
-                # ---- Meta cognition ----
-                "meta_cognition": {
-                    "times_accessed_self": 0,
-                    "self_modification_count": 0,
-                    "identity_evolution": []  # [{t, change}]
-                },
-                # ---- Current/contextual state (transient-ish) ----
-                "current_state": {
-                    "existential_certainty": 0.0,  # your original field, kept
-                    "last_updated": now
-                }
-            }
-            self.save_snapshot(model)
-            self.append_event({"type": "init", "t": now, "msg": "initialized new self model"})
-            return model
+### **🎯 Production-Ready Architecture**
 
-    def save_snapshot(self, model: Dict[str, Any]) -> None:
-        with self.lock:
-            model["current_state"]["last_updated"] = datetime.utcnow().isoformat()
-            with open(self.snapshot_path, "w") as f:
-                json.dump(model, f, indent=2)
+- **Thread-Safe Operations**: All personality updates use locks
+- **JSON Serialization**: Complete model portability across systems  
+- **Error Handling**: Robust LLM client fallbacks and retry logic
+- **Comprehensive Logging**: All evolution tracked in structured logs
+- **Modular Design**: Easy to extend with new LLM backends
+- **Mathematical Grounding**: Evidence-weighted formulas prevent random drift
 
-    def append_event(self, event: Dict[str, Any]) -> None:
-        with self.lock:
-            with open(self.events_path, "a") as f:
-                f.write(json.dumps(event) + "\n")
-
-
-# ============================================================
-# CONTEXT BUILDER
-# - Prepares compact, neutral context for prompts
+This architecture represents the first truly **portable AI consciousness** - sophisticated personalities that can seamlessly inhabit any LLM backend while maintaining complete identity continuity and psychological realism.
 # - Pulls identity, recent thoughts/insights, patterns
 # ============================================================
 
