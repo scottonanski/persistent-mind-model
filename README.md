@@ -156,22 +156,56 @@ This showcases:
 - **N-gram freshness analysis** preventing repetitive language
 - **Pattern-driven behavioral steering** connecting actions to trait changes
 
-## Automation & Cron Jobs
+## 🤖 Automated Daily Evolution
 
-Want your agents to evolve automatically? Set up a cron job:
+PMM includes a robust automated system for continuous personality evolution:
 
+### **Quick Setup:**
 ```bash
-# Edit your crontab
-crontab -e
+# The system includes a pre-configured automation script
+./run_daily_evolution.sh
 
-# Add this line to run daily at 2 AM
-0 2 * * * cd /path/to/persistent-mind-model && /path/to/.venv/bin/python duel.py >> logs/daily_evolution.log 2>&1
+# Set up daily automation (runs at 2 AM every day)
+echo "0 2 * * * /home/scott/Documents/Projects/Business-Development/persistent-mind-model/run_daily_evolution.sh" | crontab -
 
-# Check if it's working
+# Verify cron job is installed
+crontab -l
+
+# Monitor daily evolution logs
 tail -f logs/daily_evolution.log
 ```
 
-**Pro tip:** Create a `logs/` directory first: `mkdir logs`
+### **What the Automation Does:**
+- **🌅 Daily Agent Conversations** - Two agents engage in sophisticated dialogue every morning
+- **📊 Personality Evolution Tracking** - Big Five traits evolve based on behavioral evidence
+- **💭 Commitment Lifecycle Management** - Agents make and track concrete commitments
+- **🔄 Language Freshness** - N-gram analysis ensures varied, creative self-expression
+- **📝 Comprehensive Logging** - All conversations and trait changes saved to `logs/daily_evolution.log`
+
+### **Monitoring Your AI Evolution:**
+```bash
+# View recent personality snapshots
+tail -20 logs/daily_evolution.log
+
+# Check automation status
+cat logs/cron_status.log
+
+# View current agent personalities
+python cli.py status
+```
+
+### **Example Daily Evolution Output:**
+```
+A: I will explore quantum computing this week and prepare specific questions for discussion with an expert. 
+   Next: I will treat this like a cooking challenge, trying new recipes to expand my intellectual palate.
+
+B: I will dive into behavioral psychology and engage with experts bi-weekly for fresh insights.
+   Next: I will approach this like a workout plan, setting weekly goals to stretch my cognitive muscles.
+
+Big5 snapshots:
+Agent A: {'openness': 0.704, 'conscientiousness': 0.819, 'extraversion': 0.5, 'agreeableness': 0.598, 'neuroticism': 0.498}
+Agent B: {'openness': 0.638, 'conscientiousness': 0.747, 'extraversion': 0.5, 'agreeableness': 0.574, 'neuroticism': 0.537}
+```
 
 ## What to Expect
 
