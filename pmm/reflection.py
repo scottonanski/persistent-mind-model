@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import List
-from .self_model_manager import SelfModelManager
+from .self_model_manager import SelfModelManager, _log
 from .llm import OpenAIClient
 from .model import Insight
 from .commitments import CommitmentTracker
@@ -133,15 +133,22 @@ def reflect_once(mgr: SelfModelManager, llm: OpenAIClient) -> Insight | None:
         _log("commitment", f"Auto-closed {len(closed_cids)} commitments from reflection")
     
     # Extract and track commitments with provenance
-    tracker = CommitmentTracker()
-    commitment_text, _ = tracker.extract_commitment(txt)
+    commitment_text, _ = mgr.commitment_tracker.extract_commitment(txt)
     if commitment_text:
-        refs["commitments"] = [commitment_text[:50]]  # Preview
+        # Add commitment to the manager's tracker
+        cid = mgr.commitment_tracker.add_commitment(commitment_text, ins_id)
+        refs["commitments"] = [cid]  # Store commitment ID for provenance
+        _log("commitment", f"Added commitment {cid}: {commitment_text[:50]}...")
+        # Sync to model for persistence
+        mgr._sync_commitments_to_model()
     
     insight = Insight(id=ins_id, t=ts, content=txt, references=refs)
     mgr.model.self_knowledge.insights.append(insight)
     mgr.model.meta_cognition.self_modification_count += 1
     mgr.model.metrics.last_reflection_at = ts
+    
+    # Update behavioral patterns from reflection content
+    mgr.update_patterns(txt)
     
     # Use add_insight to trigger commitment extraction
     mgr.save_model()

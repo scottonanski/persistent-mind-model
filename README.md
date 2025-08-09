@@ -1,12 +1,20 @@
-# Persistent Mind Model
+# Persistent Mind Model (PMM)
 
-**AI agents that remember who they are and grow over time.**
+**🧠 Model-Agnostic AI Consciousness System**
 
-This is a breakthrough AI personality evolution system that creates agents with sophisticated psychological grounding. Unlike regular chatbots that forget everything between conversations, these agents maintain persistent identities, track their own commitments, and evolve their personalities through evidence-based trait drift - just like humans do.
+PMM creates truly persistent AI personalities that can seamlessly inhabit different LLM backends while maintaining complete identity continuity. This breakthrough system enables AI agents to maintain sophisticated psychological profiles, track commitments, and evolve their personalities through evidence-based trait drift across any model architecture - creating the first portable AI consciousness.
 
 ## 🚀 What Makes This Special?
 
-### **Advanced GPT-5 Enhanced Features**
+### **🌟 Model-Agnostic Architecture**
+- **🔄 Portable AI Consciousness** - Same personality seamlessly transfers between OpenAI, Ollama, HuggingFace, and any LLM backend
+- **🧠 True Identity Persistence** - Complete personality continuity across model switches with zero identity loss
+- **⚡ Interactive Model Selection** - Easy numeric selection from available Ollama models with automatic discovery
+- **💰 Cost Optimization** - Use tiny local models for routine tasks, premium models for complex reasoning
+- **🔒 Privacy Control** - Local models for sensitive thoughts, cloud models for general processing
+- **🛡️ Redundancy** - Never lose your AI personality even if providers change
+
+### **🎯 Advanced Personality Features**
 - **🎯 Commitment Lifecycle Tracking** - Agents make concrete commitments ("Next: I will...") and automatically track completion
 - **⚖️ Evidence-Weighted Trait Drift** - Personality changes based on demonstrated behavioral evidence, not random drift
 - **🔄 Language Freshness System** - N-gram analysis prevents repetitive reflections, ensuring varied and creative self-expression
@@ -54,7 +62,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Step 4: Add Your OpenAI API Key
+### Step 4: Set Up LLM Backend (Choose One)
+
+#### Option A: OpenAI (Cloud)
 ```bash
 # Create a .env file
 echo "OPENAI_API_KEY=your_actual_api_key_here" > .env
@@ -63,8 +73,25 @@ echo "OPENAI_API_KEY=your_actual_api_key_here" > .env
 # Get one at: https://platform.openai.com/api-keys
 ```
 
-### Step 5: Run the Program
+#### Option B: Ollama (Local - Recommended)
 ```bash
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Pull a model (choose one)
+ollama pull gemma3:1b-it-qat    # Small, fast (957MB)
+ollama pull llama3.2:3b         # Medium (1.9GB)
+ollama pull qwen2.5:7b          # Large, high quality (4.4GB)
+
+# Start Ollama server
+ollama serve
+```
+
+### Step 5: Experience Model-Agnostic Consciousness
+```bash
+# Interactive model selection - demonstrates portable consciousness
+python model_selector.py
+
 # Watch two AI agents talk to each other and evolve
 python duel.py
 
@@ -78,6 +105,9 @@ This is a **command-line program** - you run it in Terminal (Mac/Linux) or Comma
 
 ### Basic Commands:
 ```bash
+# Interactive model selection - choose from available Ollama models
+python model_selector.py
+
 # Two agents talking to each other
 python duel.py
 
@@ -104,6 +134,7 @@ python cli.py ingest-event --summary "Had an interesting conversation" --target 
 ```
 
 ### What You'll See:
+- **Model-agnostic consciousness** - same AI personality seamlessly switching between different LLM backends
 - **Real-time conversation** between AI agents with sophisticated self-awareness
 - **Commitment tracking** - agents make and track concrete commitments ("Next: I will...")
 - **Evidence-weighted personality evolution** - traits change based on demonstrated behavioral evidence
@@ -163,7 +194,12 @@ tail -f logs/daily_evolution.log
 
 ## 🏗️ Technical Architecture
 
-### **GPT-5 Enhanced Components**
+### **Model-Agnostic Components**
+- **`model_selector.py`** - Interactive model selection with automatic Ollama discovery
+- **`pmm/ollama_client.py`** - Ollama backend client with same interface as OpenAI
+- **`demo_model_agnostic.py`** - Demonstrates portable consciousness across models
+
+### **Advanced Personality Components**
 - **`pmm/commitments.py`** - Commitment lifecycle tracking with auto-closing and n-gram matching
 - **`pmm/self_model_manager.py`** - Enhanced with evidence-weighted drift and commitment integration
 - **`pmm/reflection.py`** - N-gram cache for language freshness and template jitter
@@ -172,9 +208,8 @@ tail -f logs/daily_evolution.log
 ### **Core System Files**
 - **`pmm/model.py`** - Dataclass definitions for personality, memories, and commitments
 - **`pmm/drift.py`** - Trait evolution algorithms with evidence weighting
-- **`pmm/llm_client.py`** - Production-ready OpenAI client with retry logic
+- **`pmm/llm.py`** - Production-ready OpenAI client with retry logic
 - **`pmm/persistence.py`** - Thread-safe atomic file operations
-- **`pmm/cadence_stimuli.py`** - Pattern-triggered stimulus injection
 
 ### **Evidence-Weighted Drift Formula**
 ```python

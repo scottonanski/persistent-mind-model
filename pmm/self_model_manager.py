@@ -32,6 +32,8 @@ class SelfModelManager:
         self.validator = SchemaValidator()
         self.commitment_tracker = CommitmentTracker()
         self.model = self.load_model()
+        # Sync commitments from model to tracker
+        self._sync_commitments_from_model()
 
     # -------- persistence --------
     def load_model(self) -> PersistentMindModel:
@@ -144,6 +146,11 @@ class SelfModelManager:
                     ))
             if insights:
                 model.self_knowledge.insights = insights
+
+            # Load commitments
+            commitments_data = sk.get("commitments", {}) or {}
+            if isinstance(commitments_data, dict):
+                model.self_knowledge.commitments = commitments_data
 
             # Metrics overlay
             met = data.get("metrics", {}) or {}
@@ -350,7 +357,46 @@ class SelfModelManager:
     
     def auto_close_commitments_from_reflection(self, reflection_text: str) -> List[str]:
         """Auto-close commitments based on reflection completion signals."""
-        return self.commitment_tracker.auto_close_from_reflection(reflection_text)
+        closed_cids = self.commitment_tracker.auto_close_from_reflection(reflection_text)
+        if closed_cids:
+            self._sync_commitments_to_model()
+        return closed_cids
+    
+    def _sync_commitments_from_model(self):
+        """Load commitments from model into tracker."""
+        if hasattr(self.model.self_knowledge, 'commitments'):
+            for cid, commitment_data in self.model.self_knowledge.commitments.items():
+                # Reconstruct Commitment object from dict
+                from .commitments import Commitment
+                commitment = Commitment(
+                    cid=commitment_data['cid'],
+                    text=commitment_data['text'],
+                    created_at=commitment_data['created_at'],
+                    source_insight_id=commitment_data['source_insight_id'],
+                    status=commitment_data.get('status', 'open'),
+                    closed_at=commitment_data.get('closed_at'),
+                    due=commitment_data.get('due'),
+                    close_note=commitment_data.get('close_note'),
+                    ngrams=commitment_data.get('ngrams', [])
+                )
+                self.commitment_tracker.commitments[cid] = commitment
+    
+    def _sync_commitments_to_model(self):
+        """Save commitments from tracker to model."""
+        commitment_dict = {}
+        for cid, commitment in self.commitment_tracker.commitments.items():
+            commitment_dict[cid] = {
+                'cid': commitment.cid,
+                'text': commitment.text,
+                'created_at': commitment.created_at,
+                'source_insight_id': commitment.source_insight_id,
+                'status': commitment.status,
+                'closed_at': commitment.closed_at,
+                'due': commitment.due,
+                'close_note': commitment.close_note,
+                'ngrams': commitment.ngrams or []
+            }
+        self.model.self_knowledge.commitments = commitment_dict
 
     # -------- extra helpers for duel/mentor loops --------
     def get_big5(self) -> dict:
@@ -391,16 +437,16 @@ class SelfModelManager:
         patterns = self.model.self_knowledge.behavioral_patterns
         # lightweight, extend as needed
         kw = {
-            "stability": ["stable", "stability", "consistent"],
-            "identity": ["identity", "who i am", "self"],
-            "growth": ["grow", "growth", "improve", "adapt"],
-            "reflection": ["reflect", "reflection", "summariz", "journal"],
+            "stability": ["stable", "stability", "consistent", "reliable", "predictable"],
+            "identity": ["identity", "who i am", "self", "recognize", "observe"],
+            "growth": ["grow", "growth", "improve", "adapt", "expand", "develop", "enhance", "evolve"],
+            "reflection": ["reflect", "reflection", "summariz", "journal", "notice", "observed", "recognize"],
             # newly tracked meta-behaviors
-            "calibration": ["unsure", "uncertain", "confidence", "probability", "estimate"],
-            "error_correction": ["mistake", "fix", "correct", "regression", "bug"],
-            "source_citation": ["`", ".py", "class ", "def ", "path/", "file:"],
-            "experimentation": ["ablation", "test", "benchmark", "experiment", "hypothesis"],
-            "user_goal_alignment": ["objective", "goal", "align", "constraint", "tradeoff"],
+            "calibration": ["unsure", "uncertain", "confidence", "probability", "estimate", "assess"],
+            "error_correction": ["mistake", "fix", "correct", "regression", "bug", "adjust", "refine"],
+            "source_citation": ["`", ".py", "class ", "def ", "path/", "file:", "reference"],
+            "experimentation": ["ablation", "test", "benchmark", "experiment", "hypothesis", "explore", "try", "challenge", "innovative", "new approaches", "different", "diverse", "stimulate", "fresh"],
+            "user_goal_alignment": ["objective", "goal", "align", "constraint", "tradeoff", "allocate", "dedicate", "focus", "aim"],
         }
         changed = False
         for label, terms in kw.items():

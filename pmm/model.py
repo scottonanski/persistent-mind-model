@@ -212,6 +212,7 @@ class SelfKnowledge:
     autobiographical_events: List[Event] = field(default_factory=list)
     thoughts: List[Thought] = field(default_factory=list)
     insights: List[Insight] = field(default_factory=list)
+    commitments: Dict[str, Dict] = field(default_factory=dict)  # Store commitment data
 
 # ===== Metrics / Drift / Meta =====
 
