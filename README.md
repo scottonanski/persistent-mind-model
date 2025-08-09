@@ -139,12 +139,13 @@ tail -f logs/daily_evolution.log
 - They form coherent identity narratives
 
 ## Files Created:
-- `agent_a.json` / `mind_a.json` - Agent personality and memory files
-- `*.events.jsonl` - Append-only event logs (if using split file mode)
-- `*.insights.jsonl` - Reflection and insight logs
-- `*.thoughts.jsonl` - Thought process logs
+- `agent_a.json` - Apprentice agent (from mentor_duel.py)
+- `mind_a.json` / `mind_b.json` - Agent personalities (from duel.py)  
+- `persistent_self_model.json` - Default agent (from cli.py)
 
-**Note:** These files contain the agent's "mind" - don't delete them unless you want to reset the agent's personality!
+**Note:** These JSON files contain the agent's complete "mind" including personality traits, memories, thoughts, and insights. Don't delete them unless you want to reset the agent's personality!
+
+**Future Enhancement:** Split file mode with `*.events.jsonl`, `*.insights.jsonl`, `*.thoughts.jsonl` is implemented but not yet enabled by default.
 
 ---
 
