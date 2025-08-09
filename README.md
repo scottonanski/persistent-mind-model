@@ -100,6 +100,48 @@ python mentor_duel.py      # Mentor-apprentice learning
 
 **🎬 Want to record a demo?** See `DEMO_RECORDING_GUIDE.md` for step-by-step recording instructions.
 
+## 🔗 LangChain Integration
+
+**Add persistent personality to any LangChain application!**
+
+PMM provides a drop-in replacement for LangChain memory systems that adds persistent personality traits, commitment tracking, and behavioral evolution.
+
+```python
+from langchain.chains import ConversationChain
+from langchain.llms import OpenAI
+from pmm.langchain_memory import PersistentMindMemory
+
+# Create PMM-powered memory with custom personality
+memory = PersistentMindMemory(
+    agent_path="my_agent.json",
+    personality_config={
+        "openness": 0.8,        # Creative and curious
+        "conscientiousness": 0.7, # Organized and disciplined
+        "extraversion": 0.6,     # Moderately outgoing
+        "agreeableness": 0.9,    # Very cooperative
+        "neuroticism": 0.2       # Calm and stable
+    }
+)
+
+# Use with any LangChain chain
+chain = ConversationChain(llm=OpenAI(), memory=memory)
+response = chain.predict(input="Hello! What are you interested in?")
+```
+
+**Key Benefits:**
+- ✅ **Persistent personality** across all conversations
+- ✅ **Automatic commitment tracking** from AI responses
+- ✅ **Behavioral pattern evolution** over time
+- ✅ **Model-agnostic** - works with any LLM backend
+- ✅ **Drop-in replacement** for standard LangChain memory
+
+**📚 Full Integration Guide:** See `LANGCHAIN_INTEGRATION.md` for complete documentation and examples.
+
+**🎯 Try the Example:**
+```bash
+python examples/langchain_chatbot.py
+```
+
 ## How to Use This (Terminal Program)
 
 This is a **command-line program** - you run it in Terminal (Mac/Linux) or Command Prompt (Windows). No web interface, no clicking around.
