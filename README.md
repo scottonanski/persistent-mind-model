@@ -77,14 +77,23 @@ python duel.py
 # Mentor guiding an apprentice
 python mentor_duel.py
 
-# Manual reflection for a single agent
-python cli.py reflect agent_a.json
+# Manual reflection for default agent
+python cli.py reflect
 
 # Check agent status
-python cli.py status agent_a.json
+python cli.py status
 
 # Validate agent's data structure
-python cli.py validate agent_a.json
+python cli.py validate
+
+# Apply drift manually
+python cli.py apply-drift
+
+# Reflect only if due (respects cadence)
+python cli.py reflect-if-due
+
+# Add a custom event
+python cli.py ingest-event --summary "Had an interesting conversation" --target "personality.traits.big5.openness.score" --delta 0.01 --conf 0.8
 ```
 
 ### What You'll See:
