@@ -1,4 +1,153 @@
-# How Human Personality Develops Over Time (and the Role of Self-Reflection)
+# Persistent Mind Model
+
+**AI agents that remember who they are and grow over time.**
+
+This is a terminal-based Python program that creates AI agents with persistent personalities. Unlike regular chatbots that forget everything between conversations, these agents maintain their identity, learn from experiences, and gradually evolve their personality traits - just like humans do.
+
+## What Does This Thing Actually Do?
+
+- **Creates AI agents with persistent personalities** that remember past conversations and experiences
+- **Tracks personality traits** (Big Five: openness, conscientiousness, extraversion, agreeableness, neuroticism) that slowly drift over time based on experiences
+- **Logs autobiographical memories** - agents remember significant events and reflect on them
+- **Enables agent-to-agent conversations** where two AIs talk to each other and influence each other's development
+- **Supports mentor-apprentice mode** where a mentor AI guides a learning apprentice AI
+- **Tracks behavioral patterns** like experimentation, goal alignment, and error correction
+- **Makes concrete commitments** in each reflection ("I will test this approach weekly")
+
+## Quick Start
+
+### Step 1: Get Your Computer Ready
+```bash
+# Install Python 3.11+ if you don't have it
+# On Mac: brew install python
+# On Ubuntu: sudo apt install python3 python3-pip
+# On Windows: Download from python.org
+
+# Clone this repository
+git clone https://github.com/scottonanski/persistent-mind-model.git
+cd persistent-mind-model
+```
+
+### Step 2: Set Up a Virtual Environment (Recommended)
+```bash
+# Create a virtual environment
+python3 -m venv .venv
+
+# Activate it
+# On Mac/Linux:
+source .venv/bin/activate
+# On Windows:
+.venv\Scripts\activate
+
+# You should see (.venv) in your terminal prompt
+```
+
+### Step 3: Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### Step 4: Add Your OpenAI API Key
+```bash
+# Create a .env file
+echo "OPENAI_API_KEY=your_actual_api_key_here" > .env
+
+# Replace "your_actual_api_key_here" with your real OpenAI API key
+# Get one at: https://platform.openai.com/api-keys
+```
+
+### Step 5: Run the Program
+```bash
+# Watch two AI agents talk to each other and evolve
+python duel.py
+
+# Or run a mentor-apprentice conversation
+python mentor_duel.py
+```
+
+## How to Use This (Terminal Program)
+
+This is a **command-line program** - you run it in Terminal (Mac/Linux) or Command Prompt (Windows). No web interface, no clicking around.
+
+### Basic Commands:
+```bash
+# Two agents talking to each other
+python duel.py
+
+# Mentor guiding an apprentice
+python mentor_duel.py
+
+# Manual reflection for a single agent
+python cli.py reflect agent_a.json
+
+# Check agent status
+python cli.py status agent_a.json
+
+# Validate agent's data structure
+python cli.py validate agent_a.json
+```
+
+### What You'll See:
+- **Real-time conversation** between AI agents
+- **Personality trait changes** after each round (Big Five scores)
+- **Concrete commitments** each agent makes ("I will test flowcharts weekly")
+- **Behavioral pattern tracking** (experimentation, goal alignment, etc.)
+
+## Automation & Cron Jobs
+
+Want your agents to evolve automatically? Set up a cron job:
+
+```bash
+# Edit your crontab
+crontab -e
+
+# Add this line to run daily at 2 AM
+0 2 * * * cd /path/to/persistent-mind-model && /path/to/.venv/bin/python duel.py >> logs/daily_evolution.log 2>&1
+
+# Check if it's working
+tail -f logs/daily_evolution.log
+```
+
+**Pro tip:** Create a `logs/` directory first: `mkdir logs`
+
+## What to Expect
+
+### First Run:
+- Agents start with default personalities
+- They make basic commitments about learning and growth
+- Personality traits begin to drift slightly
+
+### After Several Runs:
+- Agents develop distinct personalities and speaking styles
+- They reference past experiences and commitments
+- Trait evolution becomes more pronounced (openness increases, conscientiousness grows)
+- They start making more sophisticated commitments
+
+### Long-term Evolution:
+- Agents develop rich autobiographical memories
+- Personality traits stabilize within healthy bounds
+- Behavioral patterns emerge (some agents become more experimental, others more methodical)
+- They form coherent identity narratives
+
+## Files Created:
+- `agent_a.json` / `mind_a.json` - Agent personality and memory files
+- `*.events.jsonl` - Append-only event logs (if using split file mode)
+- `*.insights.jsonl` - Reflection and insight logs
+- `*.thoughts.jsonl` - Thought process logs
+
+**Note:** These files contain the agent's "mind" - don't delete them unless you want to reset the agent's personality!
+
+---
+
+*This project was totally vibe coded by Scott Onanski.*
+
+---
+
+# Academic Background & Theory
+
+*For the super nerds who want to understand the psychological foundations...*
+
+## How Human Personality Develops Over Time (and the Role of Self-Reflection)
 
 ## Trait Stability vs. Change Across the Lifespan
 
