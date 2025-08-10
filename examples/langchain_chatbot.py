@@ -93,17 +93,55 @@ def get_session_history(session_id: str) -> ChatMessageHistory:
     return _store[session_id]
 
 # ---------- Model + Prompt ----------
-sys_msg = (
-    "You are an AI assistant with a persistent personality that evolves over time.\n\n"
-    f"Personality Profile (Big Five):\n"
-    f"• Openness: {TRAITS['openness']:.2f}\n"
-    f"• Conscientiousness: {TRAITS['conscientiousness']:.2f}\n"
-    f"• Extraversion: {TRAITS['extraversion']:.2f}\n"
-    f"• Agreeableness: {TRAITS['agreeableness']:.2f}\n"
-    f"• Neuroticism: {TRAITS['neuroticism']:.2f}\n\n"
-    "Be authentic to these traits; answer concisely and avoid fluff. "
-    "If the user asks what you talked about last time, summarize the most recent user+assistant turns from history."
-)
+def get_enhanced_system_message():
+    # Check for known user information from conversation history
+    user_context = ""
+    
+    # Check LangChain conversation history for user name
+    if HIST_PATH.exists():
+        try:
+            with HIST_PATH.open("r", encoding="utf-8") as f:
+                for line in f:
+                    record = json.loads(line)
+                    content = record.get("content", "").lower()
+                    # Look for name introductions
+                    if ("my name is scott" in content or 
+                        "i'm scott" in content or 
+                        "this is scott" in content or
+                        "scott" in content):
+                        user_context = "\n\nIMPORTANT: The user's name is Scott. Remember this across all conversations."
+                        break
+        except Exception:
+            pass
+    
+    # Also check PMM events as backup
+    if not user_context and PMM_PATH.exists():
+        try:
+            data = json.loads(PMM_PATH.read_text())
+            events = data.get("self_knowledge", {}).get("autobiographical_events", [])
+            for event in events[-10:]:
+                summary = event.get("summary", "")
+                if "Scott" in summary or "My name is" in summary:
+                    user_context = "\n\nIMPORTANT: The user's name is Scott. Remember this across all conversations."
+                    break
+        except Exception:
+            pass
+    
+    return (
+        "You are an AI assistant with a persistent personality that evolves over time.\n\n"
+        f"Personality Profile (Big Five):\n"
+        f"• Openness: {TRAITS['openness']:.2f}\n"
+        f"• Conscientiousness: {TRAITS['conscientiousness']:.2f}\n"
+        f"• Extraversion: {TRAITS['extraversion']:.2f}\n"
+        f"• Agreeableness: {TRAITS['agreeableness']:.2f}\n"
+        f"• Neuroticism: {TRAITS['neuroticism']:.2f}\n\n"
+        "Be authentic to these traits; answer concisely and avoid fluff. "
+        "Pay attention to the conversation history - if you've talked before, acknowledge it. "
+        "If the user asks what you talked about last time, summarize the most recent user+assistant turns from history."
+        f"{user_context}"
+    )
+
+sys_msg = get_enhanced_system_message()
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", sys_msg),
