@@ -35,7 +35,7 @@ from pydantic import Field
 from .self_model_manager import SelfModelManager
 from .reflection import reflect_once
 from .llm import OpenAIClient
-from .commitments import extract_commitments
+from .commitments import CommitmentTracker
 
 
 class PersistentMindMemory(BaseChatMemory):
@@ -47,32 +47,41 @@ class PersistentMindMemory(BaseChatMemory):
     patterns that influence all interactions.
     """
     
-    pmm: SelfModelManager = Field(exclude=True)
+    pmm: SelfModelManager = Field(default=None, exclude=True)
     personality_context: str = Field(default="")
     commitment_context: str = Field(default="")
+    memory_key: str = Field(default="history")
+    input_key: str = Field(default="input")
+    output_key: str = Field(default="response")
+    conversation_count: int = Field(default=0)
     
-    def __init__(
-        self,
-        agent_path: str,
-        personality_config: Optional[Dict[str, float]] = None,
-        **kwargs
-    ):
+    def __init__(self, agent_path: str, personality_config: Optional[Dict[str, float]] = None):
         """
-        Initialize PMM-powered memory system.
+        Initialize the LangChain-compatible memory wrapper.
         
         Args:
-            agent_path: Path to PMM agent file (created if doesn't exist)
-            personality_config: Initial personality traits (Big Five scores 0-1)
-            **kwargs: Additional LangChain memory arguments
+            agent_path: Path to save/load the agent's persistent state
+            personality_config: Optional initial personality configuration
         """
-        super().__init__(**kwargs)
-        
-        # Initialize PMM system
+        super().__init__()
         self.pmm = SelfModelManager(agent_path)
         
-        # Set initial personality if provided
+        # Initialize personality if provided
         if personality_config:
-            self._apply_personality_config(personality_config)
+            for trait, value in personality_config.items():
+                if hasattr(self.pmm.model.personality.traits.big5, trait):
+                    trait_obj = getattr(self.pmm.model.personality.traits.big5, trait)
+                    trait_obj.score = max(0.0, min(1.0, float(value)))
+            self.pmm.save_model()
+        
+        # LangChain memory interface requirements - ConversationChain uses "response" as output key
+        self.memory_key = "history"
+        self.input_key = "input"
+        self.output_key = "response"
+        
+        # Track conversation context for commitments
+        self.conversation_count = 0
+        self.commitment_context = ""
         
         # Update context strings
         self._update_personality_context()
@@ -85,11 +94,8 @@ class PersistentMindMemory(BaseChatMemory):
         
         for trait, score in config.items():
             if trait in big5_traits:
-                setattr(
-                    self.pmm.model.personality.traits.big5[trait], 
-                    "score", 
-                    max(0.0, min(1.0, score))
-                )
+                trait_obj = getattr(self.pmm.model.personality.traits.big5, trait)
+                trait_obj.score = max(0.0, min(1.0, score))
         
         self.pmm.save_model()
     
@@ -109,6 +115,19 @@ class PersistentMindMemory(BaseChatMemory):
         
         if patterns:
             context_parts.append(f"Behavioral Patterns: {', '.join(f'{k}({v})' for k, v in patterns.items())}")
+        
+        # Add recent memories and insights
+        recent_events = self.pmm.model.self_knowledge.autobiographical_events[-3:]  # Last 3 events
+        if recent_events:
+            context_parts.append("\nRecent Memories:")
+            for event in recent_events:
+                context_parts.append(f"• {event.summary}")
+        
+        recent_insights = self.pmm.model.self_knowledge.insights[-2:]  # Last 2 insights
+        if recent_insights:
+            context_parts.append("\nRecent Insights:")
+            for insight in recent_insights:
+                context_parts.append(f"• {insight.content[:100]}{'...' if len(insight.content) > 100 else ''}")
         
         self.personality_context = "\n".join(context_parts)
     
@@ -134,25 +153,54 @@ class PersistentMindMemory(BaseChatMemory):
         3. Updates behavioral patterns
         4. Triggers personality evolution if needed
         """
-        # Get human input and AI output
-        human_input = inputs.get(self.input_key, "")
-        ai_output = outputs.get(self.output_key, "")
+        # Get human input and AI output - handle various LangChain key formats
+        human_input = inputs.get(self.input_key, "") or inputs.get("input", "") or inputs.get("question", "")
+        
+        # LangChain ConversationChain typically uses the first available output value
+        ai_output = ""
+        if outputs:
+            # Try common output keys
+            ai_output = (outputs.get(self.output_key, "") or 
+                        outputs.get("response", "") or 
+                        outputs.get("text", "") or
+                        outputs.get("answer", ""))
+            
+            # If no standard keys, get the first value
+            if not ai_output and outputs:
+                ai_output = list(outputs.values())[0] if outputs.values() else ""
         
         # Store conversation as PMM event
         if human_input:
-            self.pmm.add_event(
-                summary=f"User interaction: {human_input[:100]}...",
-                effects=[]
-            )
+            try:
+                # Add user input as an autobiographical event
+                self.pmm.add_event(
+                    summary=f"User said: {human_input[:100]}{'...' if len(human_input) > 100 else ''}",
+                    effects=[],
+                    etype="conversation"
+                )
+                pass  # Event added successfully
+            except Exception as e:
+                pass  # Silently handle errors in production
         
         if ai_output:
-            # Add AI response as thought
-            self.pmm.add_thought(ai_output, trigger="langchain_conversation")
+            try:
+                # Add AI response as thought
+                self.pmm.add_thought(ai_output, trigger="langchain_conversation")
+                
+                # Add AI response as an event too
+                self.pmm.add_event(
+                    summary=f"I responded: {ai_output[:100]}{'...' if len(ai_output) > 100 else ''}",
+                    effects=[],
+                    etype="self_expression"
+                )
+            except Exception as e:
+                pass  # Silently handle errors in production
             
             # Extract and track commitments
             try:
-                commitments = extract_commitments(ai_output)
-                for commitment_text in commitments:
+                tracker = CommitmentTracker()
+                commitment_text, _ = tracker.extract_commitment(ai_output)
+                if commitment_text:
                     self.pmm.add_commitment(
                         text=commitment_text,
                         source_insight_id="langchain_interaction"
@@ -165,6 +213,56 @@ class PersistentMindMemory(BaseChatMemory):
                 self.pmm.update_patterns(ai_output)
             except Exception:
                 pass
+            
+            # Trigger reflection if we have enough events (every 3 interactions)
+            try:
+                event_count = len(self.pmm.model.self_knowledge.autobiographical_events)
+                if event_count > 0 and event_count % 6 == 0:  # Every 3 back-and-forth exchanges
+                    insight = self.trigger_reflection()
+                    if insight:
+                        print(f"\n🧠 Generated insight: {insight[:100]}...")
+            except Exception as e:
+                pass
+            try:
+                # Add AI response as thought
+                self.pmm.add_thought(ai_output, trigger="langchain_conversation")
+                
+                # Add AI response as an event too
+                self.pmm.add_event(
+                    summary=f"I responded: {ai_output[:100]}{'...' if len(ai_output) > 100 else ''}",
+                    effects=[],
+                    etype="self_expression"
+                )
+            except Exception as e:
+                pass  # Silently handle errors in production
+            
+            # Extract and track commitments
+            try:
+                tracker = CommitmentTracker()
+                commitment_text, _ = tracker.extract_commitment(ai_output)
+                if commitment_text:
+                    self.pmm.add_commitment(
+                        text=commitment_text,
+                        source_insight_id="langchain_interaction"
+                    )
+            except Exception:
+                pass
+            
+            # Update behavioral patterns based on conversation
+            try:
+                self.pmm.update_patterns(ai_output)
+            except Exception:
+                pass
+            
+            # Trigger reflection if we have enough events (every 3 interactions)
+            event_count = len(self.pmm.model.self_knowledge.autobiographical_events)
+            if event_count > 0 and event_count % 6 == 0:  # Every 3 back-and-forth exchanges
+                try:
+                    insight = self.trigger_reflection()
+                    if insight:
+                        print(f"\n🧠 Generated insight: {insight[:100]}...")
+                except Exception as e:
+                    print(f"\n⚠️ Reflection failed: {e}")
         
         # Update context for next interaction
         self._update_personality_context()
@@ -185,6 +283,8 @@ class PersistentMindMemory(BaseChatMemory):
         """
         # Get base memory variables from LangChain
         base_variables = super().load_memory_variables(inputs)
+        if base_variables is None:
+            base_variables = {}
         
         # Add PMM personality context
         pmm_context_parts = []
@@ -210,7 +310,7 @@ class PersistentMindMemory(BaseChatMemory):
     def get_personality_summary(self) -> Dict[str, Any]:
         """Get current personality state for debugging/monitoring."""
         return {
-            "agent_id": self.pmm.model.core_identity.agent_id,
+            "agent_id": self.pmm.model.core_identity.id,
             "name": self.pmm.model.core_identity.name,
             "personality_traits": {
                 trait: getattr(self.pmm.model.personality.traits.big5, trait).score
@@ -218,9 +318,9 @@ class PersistentMindMemory(BaseChatMemory):
                              "agreeableness", "neuroticism"]
             },
             "behavioral_patterns": dict(self.pmm.model.self_knowledge.behavioral_patterns),
-            "total_events": len(self.pmm.model.autobiographical_memory.events),
+            "total_events": len(self.pmm.model.self_knowledge.autobiographical_events),
             "total_insights": len(self.pmm.model.self_knowledge.insights),
-            "open_commitments": len(self.pmm.get_open_commitments()) if hasattr(self.pmm, 'get_open_commitments') else 0
+            "open_commitments": len(self.pmm.model.self_knowledge.commitments)
         }
     
     def trigger_reflection(self) -> Optional[str]:

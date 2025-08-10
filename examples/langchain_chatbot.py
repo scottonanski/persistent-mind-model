@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from langchain.chains import ConversationChain
-from langchain.llms import OpenAI
+from langchain_community.llms import OpenAI
 from langchain.prompts import PromptTemplate
 from pmm.langchain_memory import PersistentMindMemory
 
