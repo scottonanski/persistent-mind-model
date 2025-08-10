@@ -1,7 +1,11 @@
 # examples/langchain_chatbot.py
 import os, json, uuid, sys, pathlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
 
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -59,7 +63,7 @@ def load_history() -> List[BaseMessage]:
 
 def save_message(role: str, content: str) -> None:
     with HIST_PATH.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"t": datetime.utcnow().isoformat(), "role": role, "content": content}) + "\n")
+        f.write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "role": role, "content": content}) + "\n")
 
 def append_pmm_event(role: str, content: str) -> None:
     try:
@@ -67,7 +71,7 @@ def append_pmm_event(role: str, content: str) -> None:
         sk = data.setdefault("self_knowledge", {})
         ev = sk.setdefault("autobiographical_events", [])
         ev.append({
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
             "session_id": SESSION_ID,
             "role": role,
             "content": content[:2000]
