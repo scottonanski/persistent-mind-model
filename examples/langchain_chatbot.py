@@ -1,143 +1,167 @@
-#!/usr/bin/env python3
-"""
-LangChain + PMM Integration Example: Persistent Personality Chatbot
+# examples/langchain_chatbot.py
+import os, json, uuid, sys, pathlib
+from datetime import datetime
+from typing import Dict, List, Any
 
-This example demonstrates how to use PMM's LangChain wrapper to create
-a chatbot with persistent personality that evolves over time.
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
+from langchain_community.chat_message_histories import ChatMessageHistory
 
-Key Features Demonstrated:
-- Persistent personality traits (Big Five)
-- Automatic commitment extraction and tracking
-- Personality evolution through conversations
-- Model-agnostic consciousness (works with any LLM)
+# ---------- Config ----------
+SESSION_ID = os.getenv("PMM_SESSION_ID", "default")
+HIST_DIR = pathlib.Path(".chat_history")
+HIST_DIR.mkdir(exist_ok=True)
+HIST_PATH = HIST_DIR / f"{SESSION_ID}.jsonl"
+PMM_PATH = pathlib.Path("persistent_self_model.json")  # adjust if you keep it elsewhere
 
-Usage:
-    python examples/langchain_chatbot.py
-"""
+MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+TEMPERATURE = float(os.getenv("PMM_TEMP", "0.7"))
 
-import os
-import sys
-from pathlib import Path
-
-# Add PMM to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from dotenv import load_dotenv
-load_dotenv()
-
-from langchain.chains import ConversationChain
-from langchain_community.llms import OpenAI
-from langchain.prompts import PromptTemplate
-from pmm.langchain_memory import PersistentMindMemory
-
-
-def create_personality_aware_prompt():
-    """Create a prompt template that leverages PMM personality context."""
-    template = """You are an AI assistant with a persistent personality that evolves over time.
-
-{history}
-
-Your responses should be consistent with your personality traits and any active commitments you've made. 
-Be authentic to your personality while being helpful and engaging.
-
-Human: {input}
-Assistant:"""
-    
-    return PromptTemplate(
-        input_variables=["history", "input"],
-        template=template
-    )
-
-
-def main():
-    """Run the persistent personality chatbot demo."""
-    print("🧠 PMM + LangChain Persistent Personality Chatbot")
-    print("=" * 50)
-    print("This chatbot has a persistent personality that evolves over time!")
-    print("Type 'quit' to exit, 'personality' to see current traits.\n")
-    
-    # Initialize PMM memory with custom personality
-    memory = PersistentMindMemory(
-        agent_path="langchain_agent.json",
-        personality_config={
-            "openness": 0.7,        # Creative and curious
-            "conscientiousness": 0.6, # Moderately organized
-            "extraversion": 0.8,     # Outgoing and energetic
-            "agreeableness": 0.9,    # Very cooperative
-            "neuroticism": 0.3       # Calm and stable
-        }
-    )
-    
-    # Create LangChain conversation chain
-    llm = OpenAI(temperature=0.7)
-    prompt = create_personality_aware_prompt()
-    chain = ConversationChain(
-        llm=llm,
-        memory=memory,
-        prompt=prompt,
-        verbose=True
-    )
-    
-    # Show initial personality
-    print("🎭 Initial Personality:")
-    personality = memory.get_personality_summary()
-    for trait, score in personality["personality_traits"].items():
-        print(f"   {trait.title()}: {score:.2f}")
-    print()
-    
-    # Chat loop
-    while True:
+# ---------- PMM personality loader ----------
+def load_pmm_traits() -> Dict[str, float]:
+    if PMM_PATH.exists():
         try:
-            user_input = input("You: ").strip()
-            
-            if user_input.lower() == 'quit':
-                break
-            elif user_input.lower() == 'personality':
-                print("\n🎭 Current Personality State:")
-                personality = memory.get_personality_summary()
-                for trait, score in personality["personality_traits"].items():
-                    print(f"   {trait.title()}: {score:.2f}")
-                print(f"   Events: {personality['total_events']}")
-                print(f"   Insights: {personality['total_insights']}")
-                print(f"   Open Commitments: {personality['open_commitments']}")
-                if personality["behavioral_patterns"]:
-                    print(f"   Patterns: {personality['behavioral_patterns']}")
-                print()
-                continue
-            elif user_input.lower() == 'reflect':
-                print("\n🪞 Triggering reflection...")
-                insight = memory.trigger_reflection()
-                if insight:
-                    print(f"Insight: {insight}")
-                else:
-                    print("No new insights generated.")
-                print()
-                continue
-            
-            if not user_input:
-                continue
-            
-            # Get response from PMM-powered chain
-            response = chain.predict(input=user_input)
-            print(f"Assistant: {response}\n")
-            
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            print(f"Error: {e}\n")
-    
-    # Show final personality state
-    print("\n🎭 Final Personality State:")
-    personality = memory.get_personality_summary()
-    for trait, score in personality["personality_traits"].items():
-        print(f"   {trait.title()}: {score:.2f}")
-    print(f"\nTotal conversation events: {personality['total_events']}")
-    print(f"Insights generated: {personality['total_insights']}")
-    print(f"Active commitments: {personality['open_commitments']}")
-    
-    print("\n🎯 Your AI assistant's personality has evolved through our conversation!")
-    print("The same personality will be restored in future conversations.")
+            data = json.loads(PMM_PATH.read_text())
+            big5 = data.get("personality", {}).get("traits", {}).get("big5", {})
+            # support both plain floats and {score: x} schema
+            def score(v): 
+                return (v if isinstance(v, (int, float)) else v.get("score", 0.5))
+            return {
+                "openness":          score(big5.get("openness", 0.7)),
+                "conscientiousness": score(big5.get("conscientiousness", 0.6)),
+                "extraversion":      score(big5.get("extraversion", 0.8)),
+                "agreeableness":     score(big5.get("agreeableness", 0.9)),
+                "neuroticism":       score(big5.get("neuroticism", 0.3)),
+            }
+        except Exception:
+            pass
+    # fallback demo defaults
+    return dict(openness=0.70, conscientiousness=0.60, extraversion=0.80, agreeableness=0.90, neuroticism=0.30)
 
+TRAITS = load_pmm_traits()
 
-if __name__ == "__main__":
-    main()
+# ---------- Disk-backed message history ----------
+def load_history() -> List[BaseMessage]:
+    if not HIST_PATH.exists():
+        return []
+    msgs = []
+    with HIST_PATH.open("r", encoding="utf-8") as f:
+        for line in f:
+            rec = json.loads(line)
+            role, content = rec["role"], rec["content"]
+            if role == "system":  msgs.append(SystemMessage(content=content))
+            elif role == "human": msgs.append(HumanMessage(content=content))
+            else:                 msgs.append(AIMessage(content=content))
+    return msgs
+
+def save_message(role: str, content: str) -> None:
+    with HIST_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"t": datetime.utcnow().isoformat(), "role": role, "content": content}) + "\n")
+
+def append_pmm_event(role: str, content: str) -> None:
+    try:
+        data = json.loads(PMM_PATH.read_text()) if PMM_PATH.exists() else {}
+        sk = data.setdefault("self_knowledge", {})
+        ev = sk.setdefault("autobiographical_events", [])
+        ev.append({
+            "ts": datetime.utcnow().isoformat(),
+            "session_id": SESSION_ID,
+            "role": role,
+            "content": content[:2000]
+        })
+        stats = data.setdefault("metrics", {})
+        stats["events"] = int(stats.get("events", 0)) + 1
+        PMM_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    except Exception as e: sys.stderr.write(f"[PMM] append event failed: {e}\n")
+
+# LangChain expects an in-memory history object per session
+_store: Dict[str, ChatMessageHistory] = {}
+
+def get_session_history(session_id: str) -> ChatMessageHistory:
+    if session_id not in _store:
+        hist = ChatMessageHistory()
+        for m in load_history():
+            hist.add_message(m)
+        _store[session_id] = hist
+    return _store[session_id]
+
+# ---------- Model + Prompt ----------
+sys_msg = (
+    "You are an AI assistant with a persistent personality that evolves over time.\n\n"
+    f"Personality Profile (Big Five):\n"
+    f"• Openness: {TRAITS['openness']:.2f}\n"
+    f"• Conscientiousness: {TRAITS['conscientiousness']:.2f}\n"
+    f"• Extraversion: {TRAITS['extraversion']:.2f}\n"
+    f"• Agreeableness: {TRAITS['agreeableness']:.2f}\n"
+    f"• Neuroticism: {TRAITS['neuroticism']:.2f}\n\n"
+    "Be authentic to these traits; answer concisely and avoid fluff. "
+    "If the user asks what you talked about last time, summarize the most recent user+assistant turns from history."
+)
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", sys_msg),
+    MessagesPlaceholder(variable_name="history"),
+    ("human", "{input}")
+])
+
+llm = ChatOpenAI(model=MODEL, temperature=TEMPERATURE)
+
+chain = prompt | llm
+
+# Wire history (no deprecations)
+history_chain = RunnableWithMessageHistory(
+    chain,
+    get_session_history,
+    input_messages_key="input",
+    history_messages_key="history",
+)
+
+# ---------- CLI Loop ----------
+print("🧠 PMM + LangChain Persistent Personality Chatbot (LC 0.2+)\n"
+      "Type 'quit' to exit, 'personality' to see current traits, 'count' to see message count.")
+
+# Check for OpenAI API key
+if not os.getenv("OPENAI_API_KEY"):
+    print("⚠️  Please set your OPENAI_API_KEY environment variable")
+    print("   You can get one at: https://platform.openai.com/api-keys")
+    print("   Set it with: export OPENAI_API_KEY='your-key-here'")
+    sys.exit(1)
+
+# Ensure system message is on disk once per fresh history
+if not HIST_PATH.exists():
+    save_message("system", sys_msg)
+
+while True:
+    try:
+        user = input("\nYou: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nBye.")
+        break
+
+    if user.lower() in {"quit", "exit"}:
+        print("Bye.")
+        break
+    if user.lower() == "personality":
+        print(f"🎭 Current Personality State:\n"
+              f"   Openness: {TRAITS['openness']:.2f}\n"
+              f"   Conscientiousness: {TRAITS['conscientiousness']:.2f}\n"
+              f"   Extraversion: {TRAITS['extraversion']:.2f}\n"
+              f"   Agreeableness: {TRAITS['agreeableness']:.2f}\n"
+              f"   Neuroticism: {TRAITS['neuroticism']:.2f}")
+        continue
+    if user.lower() == "count":
+        hist = get_session_history(SESSION_ID)
+        # count only human+ai messages, ignore system
+        n = sum(1 for m in hist.messages if m.type in {"human", "ai"})
+        convs = n // 2  # rough conversations count
+        print(f"Conversations so far (approx): {convs}  |  Messages: {n}")
+        continue
+
+    save_message("human", user); append_pmm_event("human", user)
+    ai = history_chain.invoke({"input": user}, config={"configurable": {"session_id": SESSION_ID}})
+    text = ai.content
+    print(f"Assistant: {text}")
+    save_message("ai", text); append_pmm_event("ai", text)
