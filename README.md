@@ -110,6 +110,34 @@ ollama pull qwen2.5:7b          # Large, high quality (4.4GB)
 ollama serve
 ```
 
+### LangChain Integration Setup
+
+The LangChain demo combines modern LangChain APIs with PMM's persistent personality system:
+
+```bash
+# Ensure you have your OpenAI API key set
+export OPENAI_API_KEY='your-key-here'
+
+# Run the hybrid LangChain + PMM chatbot
+python examples/langchain_chatbot_hybrid.py
+```
+
+**Features:**
+- **Cross-session memory** - AI remembers you between conversations
+- **Personality evolution** - Traits change based on your interactions
+- **Modern LangChain APIs** - Uses RunnableWithMessageHistory
+- **Special commands**: 
+  - Type `personality` to see current Big Five traits
+  - Type `memory` to see cross-session context
+  - Type `quit` to exit
+
+**Environment Variables (Optional):**
+```bash
+export PMM_SESSION_ID="your_session"     # Default: "default"
+export OPENAI_CHAT_MODEL="gpt-4o-mini"   # Default: "gpt-4o-mini"
+export PMM_TEMP="0.7"                     # Default: 0.7
+```
+
 ### Complete Demo Suite
 ```bash
 # Complete demo showcasing all PMM capabilities
