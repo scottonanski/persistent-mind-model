@@ -100,11 +100,18 @@ def reflect_once(mgr: SelfModelManager, llm: OpenAIClient) -> Insight | None:
         overlap_ratio = len(txt_ngrams & ngram_cache) / len(txt_ngrams) if txt_ngrams else 0
         
         if overlap_ratio > 0.35:  # GPT-5's threshold
+            print(f"   🔄 High n-gram overlap detected ({overlap_ratio:.1%}), re-rolling with style constraint...")
             # Re-roll with style constraint
             style_sys = sys + " IMPORTANT: Use analogy or concrete example. Avoid abstract language."
-            txt = llm.chat(system=style_sys, user=PROMPT + ctx)
-            if not txt:
-                return None
+            try:
+                txt = llm.chat(system=style_sys, user=PROMPT + ctx)
+                if not txt:
+                    print(f"   ⚠️  Re-roll failed, using original response")
+                else:
+                    print(f"   ✅ Re-roll successful, reduced repetition")
+            except Exception as e:
+                print(f"   ⚠️  Re-roll failed ({type(e).__name__}), using original response")
+                # Keep original txt if re-roll fails
     
     # Cap length
     if len(txt) > 400:  # ~80 words

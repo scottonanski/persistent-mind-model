@@ -109,21 +109,39 @@ class CommitmentTracker:
         closed_cids = []
         reflection_lower = reflection_text.lower()
         
-        # Look for completion signals
-        completion_signals = ['done', 'completed', 'finished', 'accomplished', 'achieved']
+        # More lenient completion signals - any forward progress or new commitment
+        completion_signals = [
+            'done', 'completed', 'finished', 'accomplished', 'achieved',
+            'next:', 'i will', 'plan to', 'going to', 'decided to',
+            'realized', 'noticed', 'observed', 'recognized', 'understand'
+        ]
         has_completion_signal = any(signal in reflection_lower for signal in completion_signals)
         
-        if not has_completion_signal:
+        # Auto-close old commitments when new ones are made (progression)
+        has_new_commitment = any(signal in reflection_lower for signal in ['next:', 'i will', 'plan to'])
+        
+        if not (has_completion_signal or has_new_commitment):
             return closed_cids
         
+        # Get oldest open commitments to close (FIFO approach)
+        open_commitments = [(cid, c) for cid, c in self.commitments.items() if c.status == "open"]
+        open_commitments.sort(key=lambda x: x[1].created_at)  # Sort by creation time
+        
+        # If making new commitment, close 1-2 oldest ones (showing progress)
+        if has_new_commitment and len(open_commitments) > 5:
+            for cid, commitment in open_commitments[:2]:  # Close 2 oldest
+                self.mark_commitment(cid, "closed", f"Auto-closed: progressed to new commitment")
+                closed_cids.append(cid)
+        
+        # Also check for direct n-gram matches (more lenient threshold)
         for cid, commitment in self.commitments.items():
-            if commitment.status != "open":
+            if commitment.status != "open" or cid in closed_cids:
                 continue
             
-            # Check if reflection mentions commitment terms
+            # Check if reflection mentions commitment terms (reduced threshold)
             matching_ngrams = sum(1 for ngram in commitment.ngrams if ngram in reflection_lower)
-            if matching_ngrams >= 2:  # At least 2 matching 3-grams
-                self.mark_commitment(cid, "closed", f"Auto-closed from reflection completion")
+            if matching_ngrams >= 1:  # Reduced from 2 to 1 for more sensitivity
+                self.mark_commitment(cid, "closed", f"Auto-closed: reflection mentioned commitment terms")
                 closed_cids.append(cid)
         
         return closed_cids

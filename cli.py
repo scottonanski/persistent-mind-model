@@ -65,15 +65,19 @@ def main():
         return
 
     if args.cmd == "reflect-if-due":
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
         cadence = mgr.model.metrics.reflection_cadence_days or 7
         last = mgr.model.metrics.last_reflection_at
         ok = True
         if last:
             try:
-                ok = (datetime.now(datetime.UTC) - datetime.fromisoformat(last.replace("Z", ""))) >= timedelta(days=cadence)
+                # Ensure timezone-aware parsing; stored timestamps end with 'Z' for UTC
+                last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+                now_utc = datetime.now(timezone.utc)
+                ok = (now_utc - last_dt) >= timedelta(days=cadence)
             except Exception:
-                ok = True
+                # If parsing fails, be conservative: skip instead of forcing reflection
+                ok = False
         if not ok:
             print("skip: cadence not reached")
             return

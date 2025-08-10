@@ -184,9 +184,7 @@ while True:
     # Save to both systems
     save_message("human", user)
     
-    # Process through PMM system for personality evolution
-    pmm_memory.save_context({"input": user}, {"response": ""})
-    
+    # Defer PMM persistence until after AI response to avoid duplicate entries
     # Get AI response through modern LangChain
     ai = history_chain.invoke({"input": user}, config={"configurable": {"session_id": SESSION_ID}})
     text = ai.content

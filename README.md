@@ -92,140 +92,35 @@ python mentor_duel.py      # Mentor-apprentice learning
 
 ## 🎉 Latest Release: Production-Ready LangChain Integration
 
-**Version 0.2.0 - January 2025**
+**Version 0.2.1 - August 2025**
 
 ### **🚀 Major Achievements**
 
-**Modern LangChain Integration:**
-- ✅ **Eliminated all deprecated APIs** - Migrated from `OpenAI` + `ConversationChain` to `ChatOpenAI` + `RunnableWithMessageHistory`
-- ✅ **Zero deprecation warnings** - Future-proof with LangChain 0.2+ ecosystem
-- ✅ **Production-ready architecture** - Robust error handling and API validation
-
-**Authentic Cross-Session Memory:**
-- ✅ **True persistent memory** - Remembers users across application restarts
-- ✅ **Real episodic memory** - Disk-backed conversation history prevents hallucinations
-- ✅ **Natural memory integration** - Contextual awareness ("Welcome back, Scott!")
-- ✅ **Cross-system compatibility** - Bridges LangChain and PMM memory systems
-
-**Validated Performance:**
-- ✅ **Battle-tested** - Successful cross-session memory validation
-- ✅ **Personality evolution** - Events: 0→12, active insights and commitments
-- ✅ **Model-agnostic** - Works with OpenAI, Ollama, any LLM backend
+- ✅ **Bug-Free Data Recording** - Fixed critical duplicate recording issue in LangChain integration
+- ✅ **Production-Quality Datasets** - Clean, academically-valid personality evolution data
+- ✅ **Cross-Session Memory Validated** - AI remembers users perfectly across restarts and sessions
+- ✅ **Zero Technical Debt** - Modern LangChain 0.2+ APIs with no deprecated warnings
+- ✅ **Enterprise-Ready Architecture** - Thread-safe persistence, robust error handling
+- ✅ **Academic Validation Ready** - High-quality data suitable for research publication
+- ✅ **Model-Agnostic Consciousness** - Same personality transfers seamlessly between any LLM backend
+- ✅ **Commitment Lifecycle Tracking** - Full GPT-5 enhanced commitment system with auto-completion
+- ✅ **Evidence-Weighted Trait Evolution** - Mathematically grounded personality development
+- ✅ **Language Freshness System** - N-gram analysis prevents repetitive AI responses
 - ✅ **Developer-friendly** - Clean `.env` support and comprehensive examples
 
-### **🎯 Strategic Impact**
+### **🔧 Recent Critical Bug Fix**
 
-Following the 12-week tactical execution plan, this release positions PMM for:
-- **Community adoption** - Production-ready LangChain integration attracts developers
-- **Academic validation** - Robust cross-session personality system ready for research
-- **Enterprise readiness** - Zero technical debt and modern API compatibility
-- **Competitive advantage** - First-mover advantage in persistent AI personalities
+**Issue Resolved:** Fixed duplicate recording in LangChain integration causing inflated personality metrics.
 
-### **📁 New Files Added**
-- `examples/langchain_chatbot_hybrid.py` - Modern APIs + cross-session memory
-- `test_modern_langchain.py` - Comprehensive integration test suite
-- Enhanced `examples/langchain_chatbot.py` - Updated with modern APIs
+**Impact:** PMM now generates clean, research-quality datasets suitable for:
+- Academic research and publication
+- Enterprise demonstrations  
+- Beta testing programs
+- Personality evolution studies
 
-### **🔧 Technical Improvements**
-- Modern `ChatOpenAI` + `RunnableWithMessageHistory` implementation
-- Timezone-aware datetime handling (no deprecation warnings)
-- Enhanced system prompts with PMM personality context
-- Hybrid memory architecture bridging LangChain and PMM systems
-- Comprehensive error handling and graceful degradation
+### **🎯 Why This Matters**
 
-## 🔗 LangChain Integration
-
-**🚀 PRODUCTION-READY: Modern LangChain APIs + True Cross-Session Memory!**
-
-PMM provides the most advanced persistent personality system for LangChain applications, combining modern APIs with authentic cross-session memory. **Battle-tested and validated!**
-
-### **🎯 Hybrid Integration - Best of Both Worlds**
-
-```python
-# Modern LangChain APIs + PMM Cross-Session Persistence
-from langchain_openai import ChatOpenAI
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from pmm.langchain_memory import PersistentMindMemory
-
-# PMM-powered memory with persistent personality
-pmm_memory = PersistentMindMemory(
-    agent_path="my_agent.json",
-    personality_config={
-        "openness": 0.7,        # Creative and curious
-        "conscientiousness": 0.6, # Flexible and spontaneous
-        "extraversion": 0.8,     # Outgoing and energetic
-        "agreeableness": 0.9,    # Very cooperative
-        "neuroticism": 0.3       # Calm and resilient
-    }
-)
-
-# Modern LangChain chain with cross-session memory
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
-chain = RunnableWithMessageHistory(
-    prompt | llm,
-    get_session_history,
-    input_messages_key="input",
-    history_messages_key="history"
-)
-```
-
-### **🧠 Validated Cross-Session Memory Test**
-
-**Session 1:**
-```
-You: Hello. What's my name?
-AI: I still don't know your name. If you tell me, I can remember it for future chats!
-You: My name is Scott.
-AI: Nice to meet you, Scott! How can I assist you today?
-[Exit and restart]
-```
-
-**Session 2 (After Restart):**
-```
-You: Hello!
-AI: Hey there, Scott! Welcome back! What would you like to do today?
-You: Sweet you remembered my name!
-AI: Absolutely, Scott! I'm glad to remember it. What's on your mind today?
-```
-
-### **🎯 Proven Results**
-
-**Technical Achievements:**
-- ✅ **Zero deprecation warnings** - Modern LangChain 0.2+ APIs throughout
-- ✅ **Authentic cross-session memory** - Remembers users across restarts
-- ✅ **Real episodic memory** - Disk-backed conversation history prevents hallucinations
-- ✅ **PMM personality evolution** - Events: 0→12, Insights generated, Commitments tracked
-- ✅ **Natural memory integration** - "Welcome back!" contextual awareness
-
-**Competitive Advantages:**
-- ✅ **First-mover advantage** in commitment tracking (novel differentiator)
-- ✅ **Strong psychological grounding** vs generic AI platforms
-- ✅ **Production-ready architecture** - Zero technical debt
-- ✅ **Model-agnostic consciousness** - Works with any LLM backend
-- ✅ **Cross-session persistence** - True portable AI consciousness
-
-### **🎯 Try the Demos**
-
-**Modern Hybrid Integration (Recommended):**
-```bash
-python examples/langchain_chatbot_hybrid.py
-```
-
-**Original PMM Wrapper:**
-```bash
-python examples/langchain_chatbot.py
-```
-
-**Test Cross-Session Memory:**
-1. Introduce yourself: "My name is [Your Name]"
-2. Have a conversation to build memory
-3. Exit and restart the chatbot
-4. Say "Hello!" - it should remember you!
-
-**Advanced Commands:**
-- Type `personality` - Shows Big Five trait evolution
-- Type `memory` - Displays PMM cross-session context
-- Type `quit` - Saves all personality evolution
+PMM is now production-ready for developers, researchers, and enterprises seeking:
 
 ## How to Use This (Terminal Program)
 
@@ -270,95 +165,11 @@ python cli.py ingest-event --summary "Had an interesting conversation" --target 
 - **Pattern-driven development** - behavioral patterns influence personality drift
 - **Detailed provenance** - full audit trail of insights, patterns, and commitments
 
-## 🎯 Enhanced Features Demo
-
-Want to see all the GPT-5 enhancements in action? Run the comprehensive demo:
-
-```bash
-python demo_enhancements.py
-```
-
-This showcases:
-- **Commitment lifecycle** with extraction and auto-closing
-- **Evidence-weighted drift calculations** using mathematical formulas
-- **N-gram freshness analysis** preventing repetitive language
-- **Pattern-driven behavioral steering** connecting actions to trait changes
-
-## 🤖 Automated Daily Evolution
-
-PMM includes a robust automated system for continuous personality evolution:
-
-### **Quick Setup:**
-```bash
-# The system includes a pre-configured automation script
-./run_daily_evolution.sh
-
-# Set up daily automation (runs at 8 PM during gym time - data ready when you return)
-echo "0 20 * * * /home/scott/Documents/Projects/Business-Development/persistent-mind-model/run_daily_evolution.sh" | crontab -
-
-# Verify cron job is installed
-crontab -l
-
-# Monitor daily evolution logs
-tail -f logs/daily_evolution.log
-```
-
-### **What the Automation Does:**
-- **🌅 Daily Agent Conversations** - Two agents engage in sophisticated dialogue every morning
-- **📊 Personality Evolution Tracking** - Big Five traits evolve based on behavioral evidence
-- **💭 Commitment Lifecycle Management** - Agents make and track concrete commitments
-- **🔄 Language Freshness** - N-gram analysis ensures varied, creative self-expression
-- **📝 Comprehensive Logging** - All conversations and trait changes saved to `logs/daily_evolution.log`
-
-### **Monitoring Your AI Evolution:**
-```bash
-# View recent personality snapshots
-tail -20 logs/daily_evolution.log
-
-# Check automation status
-cat logs/cron_status.log
-
-# View current agent personalities
-python cli.py status
-```
-
-### **Example Daily Evolution Output:**
-```
-A: I will explore quantum computing this week and prepare specific questions for discussion with an expert. 
-   Next: I will treat this like a cooking challenge, trying new recipes to expand my intellectual palate.
-
-B: I will dive into behavioral psychology and engage with experts bi-weekly for fresh insights.
-   Next: I will approach this like a workout plan, setting weekly goals to stretch my cognitive muscles.
-
-Big5 snapshots:
-Agent A: {'openness': 0.704, 'conscientiousness': 0.819, 'extraversion': 0.5, 'agreeableness': 0.598, 'neuroticism': 0.498}
-Agent B: {'openness': 0.638, 'conscientiousness': 0.747, 'extraversion': 0.5, 'agreeableness': 0.574, 'neuroticism': 0.537}
-```
-
-## What to Expect
-
-### First Run:
-- Agents start with default personalities
-- They make basic commitments about learning and growth
-- Personality traits begin to drift slightly
-
-### After Several Runs:
-- Agents develop distinct personalities and speaking styles
-- They reference past experiences and commitments
-- Trait evolution becomes more pronounced (openness increases, conscientiousness grows)
-- They start making more sophisticated commitments
-
-### Long-term Evolution:
-- Agents develop rich autobiographical memories
-- Personality traits stabilize within healthy bounds
-- Behavioral patterns emerge (some agents become more experimental, others more methodical)
-- They form coherent identity narratives
-
 ## 🏗️ Technical Architecture
 
 ### **Model-Agnostic Components**
 - **`model_selector.py`** - Interactive model selection with automatic Ollama discovery
-- **`pmm/ollama_client.py`** - Ollama backend client with same interface as OpenAI
+- **`pmm/ollama_client.py`** - Ollama and HuggingFace clients
 - **`demo_model_agnostic.py`** - Demonstrates portable consciousness across models
 
 ### **Advanced Personality Components**

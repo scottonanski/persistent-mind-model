@@ -223,46 +223,6 @@ class PersistentMindMemory(BaseChatMemory):
                         print(f"\n🧠 Generated insight: {insight[:100]}...")
             except Exception as e:
                 pass
-            try:
-                # Add AI response as thought
-                self.pmm.add_thought(ai_output, trigger="langchain_conversation")
-                
-                # Add AI response as an event too
-                self.pmm.add_event(
-                    summary=f"I responded: {ai_output[:100]}{'...' if len(ai_output) > 100 else ''}",
-                    effects=[],
-                    etype="self_expression"
-                )
-            except Exception as e:
-                pass  # Silently handle errors in production
-            
-            # Extract and track commitments
-            try:
-                tracker = CommitmentTracker()
-                commitment_text, _ = tracker.extract_commitment(ai_output)
-                if commitment_text:
-                    self.pmm.add_commitment(
-                        text=commitment_text,
-                        source_insight_id="langchain_interaction"
-                    )
-            except Exception:
-                pass
-            
-            # Update behavioral patterns based on conversation
-            try:
-                self.pmm.update_patterns(ai_output)
-            except Exception:
-                pass
-            
-            # Trigger reflection if we have enough events (every 3 interactions)
-            event_count = len(self.pmm.model.self_knowledge.autobiographical_events)
-            if event_count > 0 and event_count % 6 == 0:  # Every 3 back-and-forth exchanges
-                try:
-                    insight = self.trigger_reflection()
-                    if insight:
-                        print(f"\n🧠 Generated insight: {insight[:100]}...")
-                except Exception as e:
-                    print(f"\n⚠️ Reflection failed: {e}")
         
         # Update context for next interaction
         self._update_personality_context()

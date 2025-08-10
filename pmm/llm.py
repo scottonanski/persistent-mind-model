@@ -37,7 +37,21 @@ class OpenAIClient:
                 {"role": "user", "content": user},
             ],
         }
-        r = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-        r.raise_for_status()
-        data = r.json()
-        return (data["choices"][0]["message"]["content"] or "").strip()
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+            r.raise_for_status()
+            data = r.json()
+            return (data["choices"][0]["message"]["content"] or "").strip()
+        except requests.exceptions.HTTPError as e:
+            if r.status_code == 503:
+                raise RuntimeError(f"OpenAI API temporarily unavailable (503). Try again in a few moments.") from e
+            elif r.status_code == 429:
+                raise RuntimeError(f"OpenAI API rate limit exceeded (429). Wait before retrying.") from e
+            elif r.status_code >= 500:
+                raise RuntimeError(f"OpenAI API server error ({r.status_code}). Service may be down.") from e
+            else:
+                raise RuntimeError(f"OpenAI API error ({r.status_code}): {r.text}") from e
+        except requests.exceptions.Timeout:
+            raise RuntimeError(f"OpenAI API request timed out after {self.timeout}s") from None
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError("Failed to connect to OpenAI API. Check internet connection.") from None
