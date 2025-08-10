@@ -1,16 +1,44 @@
-# Core dependencies
+# PMM Next-Stage Architecture Dependencies
+
+# Core Dependencies
 jsonschema>=4.17.0
 requests>=2.28.0
 python-dotenv>=1.0.0
+dataclasses-json>=0.6.0  # Enhanced dataclass serialization
 
-# Production dependencies
+# Next-Stage Architecture Dependencies
+sentence-transformers>=2.2.0  # Embedding-based recall
+scikit-learn>=1.3.0  # Clustering for archival
+numpy>=1.24.0  # Numerical operations
+cryptography>=41.0.0  # Encryption support
+
+# Local Inference Support
+ollama>=0.1.0  # Ollama integration
+transformers>=4.30.0  # HuggingFace models
+torch>=2.0.0  # PyTorch backend
+accelerate>=0.20.0  # Model acceleration
+
+# Production Dependencies
 openai>=1.0.0
-tenacity>=8.2.0  # Retry logic
+tenacity>=8.2.0  # Retry logic with exponential backoff
 pytest>=7.0.0  # Testing framework
 pytest-asyncio>=0.21.0  # Async testing
 pytest-cov>=4.0.0  # Coverage reporting
 
-# Optional performance dependencies
+# Performance & Storage
 aiofiles>=23.0.0  # Async file I/O
+lzma  # Built-in compression
+gzip  # Built-in compression
+sqlite3  # Built-in database
+
+# Optional Dependencies
 pydantic>=2.0.0  # Enhanced validation (future)
-structlog>=23.0.0  # Structured logging (alternative)
+structlog>=23.0.0  # Structured logging
+fastapi>=0.100.0  # API framework (optional)
+uvicorn>=0.22.0  # ASGI server (optional)
+
+# Development Dependencies
+black>=23.0.0  # Code formatting
+isort>=5.12.0  # Import sorting
+mypy>=1.4.0  # Type checking
+pre-commit>=3.3.0  # Git hooks
