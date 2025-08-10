@@ -44,33 +44,6 @@ This builds on the proven PMM foundation by adding:
 - **Cross-Platform**: Same consciousness across different LLM backends
 - **Zero Vendor Lock-in**: Self-sovereign operation independent of providers
 
-## Additional Features
-
-### Memory Integrity Verification
-- **Hash Chains**: Each memory gets a SHA-256 hash linked to the previous one
-- **Verification**: Check if memory chain has been tampered with
-- **Snapshots**: Periodic full-state saves for integrity checking
-
-### Memory State Representation
-- **Activation Values**: Floating point values (0.0-1.0) representing memory strength
-- **Phase Values**: Angles (0-2π radians) for semantic positioning
-- **Decay Modeling**: Simple time-based memory strength reduction
-
-### Semantic Memory Search
-- **Embedding Search**: Use sentence transformers for similarity matching
-- **Context Filtering**: Basic relevance scoring
-- **Archive Search**: Search through compressed historical memories
-
-### Local LLM Support
-- **Multiple Backends**: Ollama, LM Studio, llama.cpp, HuggingFace integration
-- **Fallback Logic**: Try local first, fall back to API if needed
-- **Provider Abstraction**: Unified interface across different LLM providers
-
-### Data Export/Import
-- **JSON Export**: Save complete memory state to files
-- **Integrity Manifest**: Include hash verification data
-- **Cross-System**: Load saved state on different machines
-
 ## 🏗️ Architecture Overview
 
 ```

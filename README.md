@@ -80,11 +80,49 @@ python examples/langchain_chatbot_hybrid.py
 python pmm_demo.py
 ```
 
+## 💬 How to Chat with the AI (PMM in Action)
+
+**The easiest way to see PMM working is the LangChain chatbot:**
+
+```bash
+# Start the chatbot
+python examples/langchain_chatbot_hybrid.py
+```
+
+**What you'll see:**
+1. **Initial personality display** - Shows the AI's Big Five personality traits
+2. **Natural conversation** - Chat normally, the AI responds with its personality
+3. **Memory persistence** - It remembers everything across sessions
+4. **Personality evolution** - Traits slowly change based on your interactions
+
+**Special commands while chatting:**
+- Type `personality` - See current personality traits and stats
+- Type `memory` - View the AI's cross-session memory context  
+- Type `quit` - Exit the chat
+
 **🎯 Test Cross-Session Memory:**
 1. Run the chatbot and introduce yourself: "My name is [Your Name]"
 2. Chat for a bit, then exit with Ctrl+C
 3. Restart the chatbot and say "Hello!"
 4. Watch it remember you: "Hey there, [Your Name]! Welcome back!"
+
+**Example conversation:**
+```
+You: Hi, I'm Sarah and I love hiking
+Assistant: Nice to meet you, Sarah! I can tell you're someone who enjoys the outdoors...
+
+You: personality
+🎭 Current Personality State:
+   Openness: 0.72
+   Conscientiousness: 0.65
+   ...
+
+You: quit
+[Exit and restart]
+
+You: Hello!
+Assistant: Hey there, Sarah! Welcome back! How have your hiking adventures been?
+```
 
 ### Advanced Setup Options
 
