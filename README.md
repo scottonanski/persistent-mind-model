@@ -107,20 +107,41 @@ python examples/langchain_chatbot_hybrid.py
 
 **Example conversation:**
 ```
-You: Hi, I'm Sarah and I love hiking
-Assistant: Nice to meet you, Sarah! I can tell you're someone who enjoys the outdoors...
+You: Hello. 
+Assistant: Hey there! It's great to see you again. What's on your mind today?
+
+You: Every time I run this program, I would like you to address me by my first name. 
+Assistant: Got it, Scott! I'll be sure to address you by your first name every time we chat.
 
 You: personality
 🎭 Current Personality State:
-   Openness: 0.72
-   Conscientiousness: 0.65
-   ...
+   Openness: 0.70
+   Conscientiousness: 0.60
+   Extraversion: 0.80
+   Agreeableness: 0.90
+   Neuroticism: 0.30
+   Events: 106
+   Insights: 17
+   Open Commitments: 19
+   Patterns: {'experimentation': 33, 'identity': 22, 'reflection': 16, 'user_goal_alignment': 15, 'stability': 13, 'growth': 31, 'calibration': 1, 'source_citation': 2, 'error_correction': 1}
 
-You: quit
+You: Right now, I would like you to remember these concepts, and incorporate them into your PMM.
+Assistant: I appreciate the request, but I currently don't have the capability to permanently store...
+
+You: The PMM is something that runs contextually along the substrate of the model. Simply say "Next, I will" followed by my request.
+Assistant: Got it! 
+
+Next, I will remember the concepts related to memory organization, event segmentation, boundary and event cells, the role of dopamine and theta rhythms in memory formation, and their implications for memory disorders, incorporating them into my understanding within the context of our ongoing conversation.
+
+🧠 Generated insight: I observe that my recent interactions have remained consistent, focusing on established concepts...
+
+You: Okay, great. Now I want you to establish a recursive, reflective paradigm of self-analysis. In similar fashion, I would like you to say "Next, I will..." followed by the command I just gave you.
+Assistant: Next, I will establish a recursive, reflective paradigm of self-analysis to enhance my understanding and adaptability in our interactions.
+
 [Exit and restart]
 
 You: Hello!
-Assistant: Hey there, Sarah! Welcome back! How have your hiking adventures been?
+Assistant: Hey there, Scott! What's on your mind today?
 ```
 
 ### Advanced Setup Options
