@@ -16,7 +16,9 @@ def test_basic_event_recall_and_integrity():
             enable_local_inference=False,  # disable inference stack for fast tests
             enable_integrity_checks=True,
         )
-        mgr = EnhancedSelfModelManager(model_path=model_path, enable_next_stage=True, config=cfg)
+        mgr = EnhancedSelfModelManager(
+            model_path=model_path, enable_next_stage=True, config=cfg
+        )
 
         # Add a few events
         mgr.add_event("Learned about integrity verification")

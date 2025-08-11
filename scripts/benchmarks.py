@@ -4,6 +4,7 @@ def fmt_ms(ms: float) -> str:
         return f"{ms:.3f} ms"
     return f"{ms * 1000.0:.1f} µs"
 
+
 #!/usr/bin/env python3
 """
 Simple PMM benchmark script.
@@ -85,9 +86,16 @@ def bench_chain_verification(mgr: EnhancedSelfModelManager) -> float:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="PMM simple benchmarks (no heavy backends by default)")
+    ap = argparse.ArgumentParser(
+        description="PMM simple benchmarks (no heavy backends by default)"
+    )
     ap.add_argument("--tokens", type=int, default=50, help="Number of events to add")
-    ap.add_argument("--recalls", type=int, default=0, help="Number of recall queries (0 skips recall)")
+    ap.add_argument(
+        "--recalls",
+        type=int,
+        default=0,
+        help="Number of recall queries (0 skips recall)",
+    )
     ap.add_argument(
         "--model-path", default="enhanced_pmm_model.json", help="Model file path"
     )
@@ -95,10 +103,14 @@ def main():
         "--fresh", action="store_true", help="Start from a fresh model file"
     )
     ap.add_argument(
-        "--enable-recall", action="store_true", help="Enable recall engine (may load embeddings)"
+        "--enable-recall",
+        action="store_true",
+        help="Enable recall engine (may load embeddings)",
     )
     ap.add_argument(
-        "--enable-inference", action="store_true", help="Enable local/API inference (may load models)"
+        "--enable-inference",
+        action="store_true",
+        help="Enable local/API inference (may load models)",
     )
     args = ap.parse_args()
 
@@ -141,9 +153,13 @@ def main():
         return
 
     print("[done] PMM Benchmarks (illustrative):")
-    print(f"  Token creation avg: {fmt_ms(avg_create_ms)}/event over {args.tokens} events")
+    print(
+        f"  Token creation avg: {fmt_ms(avg_create_ms)}/event over {args.tokens} events"
+    )
     if args.enable_recall and args.recalls > 0:
-        print(f"  Recall latency avg: {fmt_ms(avg_recall_ms)} over {args.recalls} queries")
+        print(
+            f"  Recall latency avg: {fmt_ms(avg_recall_ms)} over {args.recalls} queries"
+        )
     else:
         print("  Recall latency avg: (skipped)")
     print(f"  Verify integrity:   {fmt_ms(verify_ms)}")
