@@ -7,7 +7,7 @@ This demonstrates the key improvements: no deprecated APIs and real episodic mem
 import os
 import json
 import pathlib
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, List
 
 # Mock the LangChain components for testing
@@ -66,7 +66,7 @@ def test_modern_langchain_features():
     
     with HIST_PATH.open("w", encoding="utf-8") as f:
         for msg in test_messages:
-            f.write(json.dumps({"t": datetime.utcnow().isoformat(), **msg}) + "\n")
+            f.write(json.dumps({"t": datetime.now(UTC).isoformat(), **msg}) + "\n")
     
     print(f"   ✓ Created test history at {HIST_PATH}")
     print(f"   ✓ Saved {len(test_messages)} messages")
@@ -105,7 +105,7 @@ def test_modern_langchain_features():
     def mock_append_pmm_event(role: str, content: str):
         # Simulate the PMM event logging
         event = {
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "session_id": "test_session",
             "role": role,
             "content": content[:100]

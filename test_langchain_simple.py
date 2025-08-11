@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from pmm.langchain_memory import PersistentMindMemory
 
-def test_langchain_integration():
+def run_langchain_integration() -> bool:
     """Test PMM LangChain integration without LLM calls."""
     print("🧠 Testing PMM + LangChain Integration")
     print("=" * 40)
@@ -50,7 +50,7 @@ def test_langchain_integration():
     
     # Test save context (simulate conversation)
     test_inputs = {"input": "Hello, how are you?"}
-    test_outputs = {"output": "I'm doing well! Next: I will help you with any questions you have."}
+    test_outputs = {"response": "I'm doing well! Next: I will help you with any questions you have."}
     
     try:
         memory.save_context(test_inputs, test_outputs)
@@ -67,6 +67,11 @@ def test_langchain_integration():
     print("\n🎯 LangChain Integration Test: SUCCESS!")
     return True
 
+
+def test_langchain_integration():
+    ok = run_langchain_integration()
+    assert ok is True
+
 if __name__ == "__main__":
-    success = test_langchain_integration()
+    success = run_langchain_integration()
     sys.exit(0 if success else 1)

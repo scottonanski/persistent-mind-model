@@ -15,7 +15,7 @@ from pmm.tokenization_engine import TokenizationEngine
 from pmm.enhanced_model import EnhancedPersistentMindModel
 
 
-def test_memory_tokenization():
+def run_memory_tokenization():
     """Test basic memory tokenization without ML models."""
     print("🔗 Testing Memory Tokenization")
     print("-" * 40)
@@ -62,7 +62,7 @@ def test_memory_tokenization():
     return token
 
 
-def test_chain_linking():
+def run_chain_linking():
     """Test blockchain-style chain linking."""
     print("\n🔗 Testing Chain Linking")
     print("-" * 40)
@@ -118,7 +118,7 @@ def test_chain_linking():
     return tokens
 
 
-def test_enhanced_model():
+def run_enhanced_model():
     """Test enhanced model creation."""
     print("\n📊 Testing Enhanced Model")
     print("-" * 40)
@@ -139,7 +139,7 @@ def test_enhanced_model():
     return model
 
 
-def test_quantum_states():
+def run_quantum_states():
     """Test quantum-inspired memory states."""
     print("\n⚛️ Testing Quantum States")
     print("-" * 40)
@@ -174,7 +174,7 @@ def test_quantum_states():
     return token
 
 
-def test_export_structure():
+def run_export_structure():
     """Test export data structure."""
     print("\n📦 Testing Export Structure")
     print("-" * 40)
@@ -199,6 +199,35 @@ def test_export_structure():
     return manifest
 
 
+def test_memory_tokenization():
+    token = run_memory_tokenization()
+    # Basic assertions
+    assert token.content_hash and isinstance(token.chain_position, int)
+
+
+def test_chain_linking():
+    tokens = run_chain_linking()
+    assert len(tokens) >= 3
+    for i in range(1, len(tokens)):
+        assert tokens[i].prev_hash == tokens[i-1].content_hash
+        assert tokens[i].chain_position == i
+
+
+def test_enhanced_model():
+    model = run_enhanced_model()
+    assert hasattr(model, "self_knowledge") and hasattr(model, "schema_version")
+
+
+def test_quantum_states():
+    token = run_quantum_states()
+    assert 0.0 <= token.amplitude <= 1.0
+
+
+def test_export_structure():
+    manifest = run_export_structure()
+    assert manifest.export_id and manifest.agent_id
+
+
 def main():
     """Run minimal tests."""
     print("=" * 60)
@@ -208,11 +237,11 @@ def main():
     
     try:
         # Run core tests
-        token = test_memory_tokenization()
-        tokens = test_chain_linking() 
-        model = test_enhanced_model()
-        quantum_token = test_quantum_states()
-        manifest = test_export_structure()
+        token = run_memory_tokenization()
+        tokens = run_chain_linking() 
+        model = run_enhanced_model()
+        quantum_token = run_quantum_states()
+        manifest = run_export_structure()
         
         # Success summary
         print("\n" + "=" * 60)

@@ -8,7 +8,7 @@ quantum-inspired memory states, and self-sovereign AI identity.
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
-from datetime import datetime
+from datetime import datetime, UTC
 import uuid
 
 # Import existing model components
@@ -247,7 +247,7 @@ class EnhancedPersistentMindModel:
     next_stage_enabled: bool = True
     
     # Legacy fields (preserved exactly)
-    inception_moment: str = field(default_factory=lambda: datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
+    inception_moment: str = field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
     core_identity: CoreIdentity = field(default_factory=CoreIdentity)
     personality: Personality = field(default_factory=Personality)
     narrative_identity: NarrativeIdentity = field(default_factory=NarrativeIdentity)

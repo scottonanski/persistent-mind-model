@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from pmm.langchain_memory import PersistentMindMemory
 
-def test_memory_building():
+def run_memory_building() -> bool:
     """Test PMM memory building through multiple interactions."""
     print("🧠 Testing PMM Memory Building")
     print("=" * 40)
@@ -105,6 +105,10 @@ def test_memory_building():
     
     return success
 
+def test_memory_building():
+    ok = run_memory_building()
+    assert ok is True
+
 if __name__ == "__main__":
-    success = test_memory_building()
+    success = run_memory_building()
     sys.exit(0 if success else 1)

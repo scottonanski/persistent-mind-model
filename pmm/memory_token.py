@@ -11,7 +11,7 @@ import json
 import math
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
 
@@ -30,7 +30,7 @@ class MemoryToken:
     
     # Core identity
     token_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     
     # Cryptographic integrity
     content_hash: str = ""  # SHA-256 of full content
@@ -178,7 +178,7 @@ class IdentityLockpoint:
     """
     
     lockpoint_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     chain_position: int = 0
     
     # Full state snapshot

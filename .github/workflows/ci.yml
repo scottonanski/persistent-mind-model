@@ -9,10 +9,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      - run: python -m pip install -U pip
-      - run: pip install -r requirements.txt || true
-      - run: pip install pytest black ruff
-      - run: black --check .
-      - run: ruff check .
-      - run: pytest -q || true
+        with:
+          python-version: '3.11'
+      # Determine which paths changed so we only run pytest for code changes
+      - name: Detect changed paths
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          filters: |
+            code:
+              - 'pmm/**'
+              - 'tests/**'
+              - 'examples/**'
+              - 'requirements.txt'
+              - 'pyproject.toml'
+              - 'setup.cfg'
+              - '.ruff.toml'
+              - '.flake8'
+      - name: Install dependencies
+        if: steps.changes.outputs.code == 'true'
+        run: |
+          python -m pip install -U pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest black ruff
+      - name: Black
+        if: steps.changes.outputs.code == 'true'
+        run: black --check .
+      - name: Ruff
+        if: steps.changes.outputs.code == 'true'
+        run: ruff check .
+      - name: Pytest (only on code changes)
+        if: steps.changes.outputs.code == 'true'
+        run: pytest -q

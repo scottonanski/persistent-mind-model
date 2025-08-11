@@ -1,7 +1,9 @@
 from __future__ import annotations
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Dict
 from .model import PersistentMindModel, TraitScore, IdentityChange
+from datetime import timezone as tz
+UTC = tz.utc
 
 
 def _days_since(yyyy_mm_dd: str) -> int:
@@ -31,7 +33,7 @@ def apply_effects(model: PersistentMindModel) -> Dict[str, float]:
     """Apply pending effects_hypothesis to traits.
     Returns net drift per trait-path (without .score).
     """
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     cfg = model.drift_config
     net: Dict[str, float] = {}
 
@@ -50,9 +52,10 @@ def apply_effects(model: PersistentMindModel) -> Dict[str, float]:
             trait = _get_trait(model, target)
             if trait is None:
                 continue
-            # cooldown
-            if _days_since(trait.last_update) < cfg.cooldown_days:
-                continue
+            # cooldown (bypass for initial traits so first change can apply)
+            if trait.origin != "init":
+                if _days_since(trait.last_update) < cfg.cooldown_days:
+                    continue
             # scale delta
             eff_delta = delta * (1.0 - cfg.inertia) * cfg.event_sensitivity
             # clamp by max step

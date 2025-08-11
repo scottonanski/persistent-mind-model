@@ -6,7 +6,7 @@ Split file manager: model vs. append-only logs for performance and clarity.
 import json
 import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import List, Optional
 
 from .model import PersistentMindModel, Event, Insight, Thought
@@ -79,7 +79,7 @@ class SplitModelManager:
         """Add event to log and keep recent summary in model."""
         with self.lock:
             ev_id = f"ev{self._get_next_event_id()}"
-            ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
             
             # Create full event
             event = Event(

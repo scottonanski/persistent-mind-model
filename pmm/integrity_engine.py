@@ -13,7 +13,7 @@ import hashlib
 import os
 import shutil
 import tarfile
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, List, Tuple, Optional, Any, Set
 from dataclasses import dataclass, asdict
 import uuid
@@ -147,7 +147,7 @@ class IntegrityEngine:
         # Create manifest
         manifest = ExportManifest(
             export_id=str(uuid.uuid4()),
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             agent_id=pmm_model.core_identity.id,
             agent_name=pmm_model.core_identity.name,
             birth_timestamp=pmm_model.core_identity.birth_timestamp,
@@ -333,7 +333,7 @@ class IntegrityEngine:
             "anomalies": anomalies,
             "lockpoints": lockpoint_results,
             "lockpoints_valid": sum(1 for lp in lockpoint_results if lp["valid"]),
-            "verification_timestamp": datetime.utcnow().isoformat()
+            "verification_timestamp": datetime.now(UTC).isoformat()
         }
     
     def create_backup_snapshot(self, 
@@ -404,7 +404,7 @@ class IntegrityEngine:
                 "export_file": target_file,
                 "import_command": f"pmm import-identity {target_file}",
                 "verification_hash": manifest.export_integrity_hash,
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.now(UTC).isoformat()
             }
             
             instructions_file = os.path.join(target_system_path, "migration_instructions.json")
