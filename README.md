@@ -318,11 +318,58 @@ python cli.py ingest-event --summary "Had an interesting conversation" --target 
 - **Pattern-driven development** - behavioral patterns influence personality drift
 - **Detailed provenance** - full audit trail of insights, patterns, and commitments
 
-## 🏗️ Technical Architecture
+### Per-turn metrics (duel.py)
 
-### **Model-Agnostic Components**
-- **`model_selector.py`** - Interactive model selection with automatic Ollama discovery
-- **`pmm/ollama_client.py`** - Ollama and HuggingFace clients
+Each agent turn prints compact state:
+
+- **commitments**: commitment IDs created/active this turn (e.g., `['c103']`)
+- **ΔBig5**: per-turn applied Big Five deltas after clamping
+- **overlap(prev)**: n-gram overlap vs the immediately previous turn (%)
+- **overlap(8)**: n-gram overlap vs the last 8 insights in the agent’s freshness cache (%)
+
+If overlap exceeds the freshness threshold, you’ll see controlled re-roll logs:
+
+- "🔄 High n-gram overlap detected (XX.X%), re-rolling..."
+- "✅ Re-roll successful, reduced repetition"
+
+With `PMM_DEBUG=1`, additional logs appear:
+
+- Commitment auto-close notices
+- Drift logs (evidence-weighted boost, applied weight)
+- Clamp reasons (e.g., "No significant drift this turn (clamped: openness)")
+
+Session end prints:
+
+- Commitment Summary: open/closed counts and close_rate
+- Session ΔBig5: cumulative trait changes
+- Big5 snapshots: final values persisted to `mind_a.json` / `mind_b.json`
+
+#### Example output
+
+```
+A: I propose we refine our approach by focusing on integrity checks before recall.
+   · commitments: ['c103']  · ΔBig5: {'conscientiousness': +0.02}  · overlap(prev): 11.8%  · overlap(8): 6.3%
+
+B: Agreed. I'll verify the chain after adding a few events to ensure consistency.
+   · commitments: []  · ΔBig5: {'openness': +0.01}  · overlap(prev): 9.4%  · overlap(8): 7.1%
+
+🔄 High n-gram overlap detected (36.5%), re-rolling...
+✅ Re-roll successful, reduced repetition
+
+Commitment Summary: open=1, closed=2, close_rate=0.67
+Session ΔBig5: {'openness': +0.03, 'conscientiousness': +0.04}
+```
+
+#### Example debug logs (`PMM_DEBUG=1`)
+
+```
+[DRIFT] evidence_weight=0.62 boost=1.18 applied=+0.012 -> conscientiousness
+[CLAMP] openness delta +0.004 suppressed (near upper bound)
+[FRESHNESS] overlap(prev)=36.5% > 30.0% threshold -> re-roll with jitter
+[COMMIT] auto-close c101 (matched: deliver summary)
+```
+
+## 🏗️ Technical Architecture
 
 ### **Advanced Personality Components**
 - **`pmm/commitments.py`** - Commitment lifecycle tracking with auto-closing and n-gram matching

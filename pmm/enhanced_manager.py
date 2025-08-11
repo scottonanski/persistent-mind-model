@@ -60,9 +60,21 @@ class EnhancedSelfModelManager:
         self.model_path = model_path
         self.lock = threading.Lock()
         self.enable_next_stage = enable_next_stage
+        # Defer disk saves during batch operations (e.g., benchmarks)
+        self._defer_saves: bool = False
 
         # Initialize configuration
         self.config = config or NextStageConfig()
+
+        # Test mode: disable heavy engines and defer saves for fast, deterministic tests
+        if os.environ.get("PMM_TEST_MODE", "0") == "1":
+            self.config.enable_recall = False
+            self.config.enable_local_inference = False
+            # Optional: also disable archival to avoid extra I/O in tests
+            # (keep integrity checks on)
+            self.config.enable_archival = False
+            # Defer disk saves during tests; export/verify can still operate
+            self._defer_saves = True
 
         # Initialize core components
         self.validator = SchemaValidator()
@@ -386,6 +398,8 @@ class EnhancedSelfModelManager:
 
     def _save_enhanced_model(self, model: Optional[EnhancedPersistentMindModel] = None):
         """Save enhanced model with locking."""
+        if self._defer_saves:
+            return
         with self.lock:
             self._save_enhanced_model_unlocked(model)
 
@@ -393,6 +407,8 @@ class EnhancedSelfModelManager:
         self, model: Optional[EnhancedPersistentMindModel] = None
     ):
         """Save enhanced model without locking."""
+        if self._defer_saves:
+            return
         model_to_save = model or self.model
 
         # Sync commitments before saving (only if model is already initialized)
@@ -404,6 +420,18 @@ class EnhancedSelfModelManager:
 
         with open(self.model_path, "w") as f:
             json.dump(data, f, indent=2)
+
+    # Batch mode helpers
+    def begin_batch(self):
+        """Defer disk writes until end_batch() is called."""
+        with self.lock:
+            self._defer_saves = True
+
+    def end_batch(self):
+        """End deferred mode and persist the current model to disk once."""
+        with self.lock:
+            self._defer_saves = False
+            self._save_enhanced_model_unlocked()
 
     def _check_and_trigger_archival(self):
         """Check if archival should be triggered."""

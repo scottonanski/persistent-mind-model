@@ -24,10 +24,13 @@ This builds on the PMM foundation by adding:
 - **Chain Verification**: Detect any unauthorized modifications to the memory history
 - **Identity Lockpoints**: Periodic full-state snapshots for integrity validation
 
-### 🌌 **Quantum-Inspired Memory States**
-- **Amplitude Vectors**: Memory activation probabilities (0.0-1.0)
-- **Phase Angles**: Semantic/emotional positioning in memory space (0-2π)
-- **Memory Resonance**: Quantum-inspired activation cascades
+### Memory token state model (amplitude/phase)
+
+Note: 'quantum' terminology is metaphorical. See `pmm/quantum_memory.py`. Implementation uses classical heuristics for salience (amplitude) and semantic drift (phase).
+
+- **Amplitude**: Memory activation probability (0.0-1.0)
+- **Phase**: Semantic angle (0-2π)
+- **State interactions**: Heuristics for related-memory activation
 
 ### 🎯 **Cue-Based Semantic Recall**
 - **Embedding Similarity**: Advanced semantic memory search
@@ -111,17 +114,17 @@ manager = EnhancedSelfModelManager(
 # Add experiences (automatically tokenized with cryptographic integrity)
 manager.add_event("Noted an insight about memory integrity")
 manager.add_thought("Memory tokens enable verifiable AI history")
-manager.add_insight("Quantum states create rich memory dynamics")
+manager.add_insight("Added memory-token state model for richer recall heuristics")
 
 # Semantic recall from memory
-results = manager.recall_memories("consciousness breakthrough", max_results=5)
+results = manager.recall_memories("topic breakthrough", max_results=5)
 for result in results:
     print(f"Memory: {result.content[:100]}...")
     print(f"Relevance: {result.similarity_score:.3f}")
 
 # Generate text using local models
 response = manager.generate_text_local(
-    "What insights have I had about consciousness?",
+    "What insights have I recorded about topic X?",
     max_tokens=200
 )
 print(f"Generated using: {response.provider}")

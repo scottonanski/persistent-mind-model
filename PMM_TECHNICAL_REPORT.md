@@ -6,9 +6,7 @@
 
 ## Executive Summary
 
-The Persistent Mind Model (PMM) is a sophisticated AI personality system that enables artificial intelligence agents to maintain consistent, evolving personalities across conversations and sessions. Built with a production-ready foundation and enhanced with experimental next-stage features, PMM represents a practical approach to AI consciousness modeling through cryptographic memory integrity, personality trait evolution, and cross-platform portability.
-
-With 120 repository clones in just 2 days, PMM has demonstrated strong community interest and adoption potential in the AI development space.
+The Persistent Mind Model (PMM) is an AI personality system for maintaining consistent, evolving personalities across conversations and sessions. Built on a production-oriented foundation with experimental next-stage features, PMM focuses on identity integrity, evidence-weighted personality drift, and cross-platform portability.
 
 ---
 
@@ -19,10 +17,10 @@ PMM solves the fundamental problem of AI personality persistence by providing:
 - **Memory continuity** across conversations and sessions
 - **Personality evolution** based on evidence-weighted behavioral changes
 - **Cryptographic integrity** for tamper-evident AI memory history
-- **Cross-platform portability** enabling AI consciousness migration
+- **Cross-platform portability** enabling AI identity migration
 
 ### 1.2 Architecture Philosophy
-The system follows a layered architecture approach, building from a solid foundation of personality modeling to advanced features like quantum-inspired memory states and local inference capabilities. This design ensures backward compatibility while enabling experimental features.
+The system follows a layered architecture approach, building from a solid foundation of personality modeling to advanced features like a memory token state model (amplitude/phase) and local inference capabilities. Note: any 'quantum' terminology is metaphorical. See `pmm/quantum_memory.py`; implementation uses classical heuristics. This design ensures backward compatibility while enabling experimental features.
 
 ---
 
@@ -61,14 +59,14 @@ class SelfKnowledge:
 
 **Key Components:**
 - `pmm/tokenization_engine.py` - SHA-256 hash chain creation
-- `pmm/memory_token.py` - MemoryToken dataclass with quantum states
+- `pmm/memory_token.py` - MemoryToken dataclass with amplitude/phase state fields
 
 **How it Works:**
 Every memory (event, thought, insight) gets converted into a MemoryToken with:
 1. **Content hash** - SHA-256 of the memory content
 2. **Previous hash** - Links to the previous token in the chain
 3. **Timestamp** - When the memory was created
-4. **Quantum state** - Amplitude and phase values for memory dynamics
+4. **State model** - Amplitude and phase values for memory dynamics
 
 The tokenization process creates an immutable chain where any tampering breaks the cryptographic verification, similar to blockchain technology but optimized for individual AI memory rather than distributed consensus.
 
@@ -86,28 +84,26 @@ def create_memory_token(self, event: Event, previous_hash: str) -> MemoryToken:
     )
 ```
 
-### Layer 3: Quantum-Inspired Memory States
+### Layer 3: Memory token state model (amplitude/phase)
 
-**Purpose:** Models memory activation and semantic relationships using quantum mechanics concepts.
+Note: 'quantum' terminology is metaphorical. See `pmm/quantum_memory.py`. Implementation uses classical heuristics for salience (amplitude) and semantic angle (phase).
 
 **Key Components:**
 - `pmm/quantum_memory.py` - Amplitude/phase vector management
 
 **How it Works:**
-Each memory token includes quantum-inspired state vectors:
+Each memory token includes state vectors:
 - **Amplitude** (0.0-1.0) - Represents memory activation probability/strength
-- **Phase** (0-2π radians) - Represents semantic/emotional positioning in memory space
+- **Phase** (0-2π radians) - Represents semantic angle in memory space
 - **Temporal decay** - Memories naturally fade over time unless reinforced
-- **Resonance cascades** - Related memories activate together through phase alignment
-
-This isn't actual quantum computing but uses quantum mechanics principles to create more realistic memory dynamics than simple binary storage.
+- **Related-memory activation** - Heuristic activation via phase proximity
 
 **Memory State Calculation:**
 ```python
 def calculate_memory_resonance(self, cue_phase: float, memory_phases: List[float]) -> List[float]:
     resonance_scores = []
     for phase in memory_phases:
-        # Calculate phase difference (quantum-inspired)
+        # Calculate phase difference (heuristic using angle distance)
         phase_diff = abs(cue_phase - phase)
         if phase_diff > math.pi:
             phase_diff = 2 * math.pi - phase_diff
@@ -145,7 +141,7 @@ The archival process maintains personality continuity while managing computation
 **How it Works:**
 Memory recall combines multiple techniques:
 1. **Embedding similarity** - Uses sentence transformers to find semantically related memories
-2. **Phase resonance** - Quantum-inspired activation based on memory phase alignment
+2. **Phase heuristic** - Activation based on memory phase proximity
 3. **Archive integration** - Searches both active and archived memories
 4. **Relevance scoring** - Combines semantic similarity with recency and importance
 
@@ -215,34 +211,22 @@ class LocalInferenceEngine:
 The integrity layer enables:
 1. **Complete export** - Full AI personality state with all memories and metadata
 2. **Cryptographic verification** - Hash chain validation ensures data integrity
-3. **Cross-platform migration** - Same AI consciousness across different systems
+3. **Cross-platform migration** - Same AI identity/personality across different systems
 4. **Incremental backup** - Efficient updates without full re-export
 
-**Export Process:**
+**Export Process (public API):**
 ```python
-def export_identity(self, export_path: str) -> ExportManifest:
-    # Gather all identity components
-    personality_state = self.manager.get_personality_summary()
-    memory_tokens = self.manager.get_all_memory_tokens()
-    quantum_states = self.manager.get_quantum_memory_states()
-    
-    # Create integrity manifest
-    manifest = ExportManifest(
-        export_id=str(uuid.uuid4()),
-        created_at=datetime.now(timezone.utc),
-        total_tokens=len(memory_tokens),
-        chain_integrity_hash=self.calculate_chain_hash(memory_tokens)
-    )
-    
-    # Export with compression and verification
-    self.write_compressed_export(export_path, {
-        'manifest': manifest,
-        'personality': personality_state,
-        'memories': memory_tokens,
-        'quantum_states': quantum_states
-    })
-    
-    return manifest
+from pmm.enhanced_manager import EnhancedSelfModelManager
+
+manager = EnhancedSelfModelManager(
+    model_path="enhanced_pmm_model.json",
+    enable_next_stage=True,
+)
+
+manifest = manager.export_identity("./my_export", include_archives=True)
+print(f"Export ID: {manifest.export_id}")
+print(f"Created: {manifest.created_at}")
+print(f"Total tokens: {manifest.total_tokens}")
 ```
 
 ---
@@ -287,35 +271,33 @@ python examples/langchain_chatbot_hybrid.py
 - `recall` - Semantic memory search
 - `generate` - Local text generation
 - `export-identity` - Complete identity backup
-- `import-identity` - Identity restoration
+- `import-identity` - Identity restoration (if enabled)
 - `verify-integrity` - Cryptographic verification
-- `stats` - Comprehensive system statistics
-- `quantum` - Quantum memory analysis
-- `archive` - Archive management
+- `stats` - System statistics
+- `quantum` - State model analysis (amplitude/phase). Experimental.
+- `archive` - Archive status and manual archival trigger
 
 **Usage Examples:**
 ```bash
 # Add experience and recall related memories
-pmm_cli.py add-event "Had coffee with a friend" --next-stage
-pmm_cli.py recall "friendship" --max-results 5 --next-stage
+python pmm_cli.py add-event "Had coffee with a friend" --next-stage
+python pmm_cli.py recall "friendship" --max-results 5 --next-stage
 
 # Generate response using local models
-pmm_cli.py generate "What makes a good friend?" --next-stage
+python pmm_cli.py generate "Summarize recent insights about friendship" --next-stage
 
 # Export complete identity for backup
-pmm_cli.py export-identity ./my_backup --next-stage
+python pmm_cli.py export-identity ./my_backup --next-stage
 ```
 
-### 3.3 Demo Scripts
+### 3.3 Verified Examples
 
-**Purpose:** Demonstrate specific features and validate functionality.
+**Purpose:** Demonstrate working features and validate functionality.
 
-**Key Scripts:**
+**Recommended Artifacts:**
 - `test_core_concepts.py` - Pure Python validation (no ML dependencies)
-- `demo_simple.py` - Simplified next-stage demo
-- `demo_next_stage.py` - Full ML-powered demonstration
-
-These scripts provide entry points for understanding PMM capabilities without requiring full setup.
+- `examples/langchain_chatbot_hybrid.py` - Interactive chat with persistent identity
+- `pmm_cli.py` - CLI for memory operations, generation, and integrity checks
 
 ---
 
@@ -392,7 +374,7 @@ Schema validation for data integrity:
 
 1. **Event Input** - User interaction or system event occurs
 2. **Tokenization** - Event converted to MemoryToken with hash chain linking
-3. **Quantum State Assignment** - Amplitude/phase values calculated based on content
+3. **State Model Assignment** - Amplitude/phase values calculated based on content
 4. **Storage** - Token stored in active memory with persistence
 5. **Personality Update** - Traits potentially updated based on evidence weighting
 
@@ -401,7 +383,7 @@ Schema validation for data integrity:
 1. **Cue Processing** - User query converted to embedding vector
 2. **Active Search** - Current memories searched for semantic similarity
 3. **Archive Search** - Historical memories searched if needed
-4. **Quantum Resonance** - Phase alignment calculated for context awareness
+4. **Phase Heuristic** - Phase alignment calculated for context awareness
 5. **Result Ranking** - Combined scoring produces ranked results
 
 ### 5.3 Personality Evolution Flow
@@ -440,9 +422,9 @@ Schema validation for data integrity:
 - Blockchain-inspired verification without distributed consensus
 - Tamper-evident audit trail for trust applications
 
-**Quantum-Inspired Memory Modeling:**
-- More realistic memory dynamics than binary storage
-- Context-aware activation through phase relationships
+**State model (amplitude/phase):**
+- Heuristic memory dynamics beyond binary storage
+- Context-aware activation via phase relationships
 - Temporal decay modeling natural forgetting
 
 **Complete Identity Portability:**
@@ -462,9 +444,36 @@ Schema validation for data integrity:
 
 ### 7.2 Response Times
 
-- **Memory Recall:** <100ms for semantic search
-- **Chain Verification:** <1s for 10,000+ tokens
-- **Token Creation:** 1000+ tokens/second
+Note: The following values are illustrative and depend heavily on hardware, model choice, and configuration. Measure in your environment for accurate figures.
+
+- **Memory Recall:** Typical sub-second on local indexes
+- **Chain Verification:** Scales with token count; typically fast for moderate sizes
+- **Token Creation:** Dependent on hashing and I/O performance
+
+#### 7.2.1 Benchmarks (illustrative)
+
+To generate local, reproducible numbers on your machine:
+
+```bash
+# From repo root (light run, recall disabled by default)
+PYTHONPATH=. python3 scripts/benchmarks.py --model-path /tmp/pmm_bench_model.json --fresh
+
+# Include recall timing (may load embedding stack depending on config)
+PYTHONPATH=. python3 scripts/benchmarks.py --tokens 100 --recalls 3 --enable-recall \
+  --model-path /tmp/pmm_bench_model.json --fresh
+```
+
+This reports:
+- Token creation avg (ms/event)
+- Recall latency avg (ms)
+- Verify integrity time (ms)
+
+Notes:
+- Default token count is 50 for fast runs; increase (e.g., 100) for smoother averages.
+- By default, heavy backends are disabled. Use `--enable-recall` and/or `--enable-inference` to opt-in.
+- The benchmark prints periodic progress and ETA, e.g. `· 20/100 events | avg=42.3 ms | elapsed=0.9s | ETA=1.7s`.
+
+Note: Results are hardware- and configuration-dependent (model/provider, CPU/GPU, disk). Treat as illustrative, not universal claims.
 
 ### 7.3 Scalability
 

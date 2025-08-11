@@ -20,10 +20,11 @@ The Persistent Mind Model (PMM) Next-Stage Architecture describes experimental e
 - **Blockchain-Style Linking**: Each token links to previous token's hash
 - **Minimal Metadata**: Efficient active storage with full content in archives
 
-### Layer 3: Quantum-Inspired Memory States
-- **Amplitude Vectors**: Probability of memory activation (0.0-1.0)
-- **Phase Angles**: Semantic/emotional positioning in memory space (0-2π)
-- **Entanglement Networks**: Quantum-inspired memory interconnections
+### Layer 3: Memory token state model (amplitude/phase)
+Note: 'quantum' terminology is metaphorical. See `pmm/quantum_memory.py`. Implementation uses classical heuristics for salience (amplitude) and semantic drift (phase).
+- **Amplitude**: Probability of memory activation (0.0-1.0)
+- **Phase**: Semantic angle (0-2π)
+- **Related-memory activation**: Heuristic interactions between tokens
 
 ### Layer 4: Compression & Archival
 - **Thematic Clustering**: K-means clustering of semantically related memories
@@ -61,27 +62,21 @@ manager.add_thought("Persistent personality is recursive self-reference")
 manager.add_insight("Memory tokens enable identity portability")
 
 # Next-stage operations
-results = manager.recall_memories("quantum personality", max_results=5)
-response = manager.generate_text_local("Explain the nature of persistent memory")
+results = manager.recall_memories("semantic recall", max_results=5)
+response = manager.generate_text_local("Summarize my memory state and recent insights")
 manifest = manager.export_identity("./my_identity", include_archives=True)
 ```
 
 ### Memory Tokenization Engine
 ```python
 # Automatic tokenization with cryptographic integrity
-token = tokenization_engine.tokenize_event(event, full_content)
-print(f"Token Hash: {token.content_hash}")
-print(f"Chain Position: {token.chain_position}")
-print(f"Amplitude: {token.amplitude}")
-print(f"Phase: {token.phase}")
-
-# Verify integrity
-is_valid = tokenization_engine.verify_token_integrity(token.token_id, original_content)
+# Typically handled by EnhancedSelfModelManager during add_event/add_thought/add_insight
+# Use manager methods for most use-cases; low-level engine access is advanced usage.
 ```
 
-### Quantum Memory Management
+### State model management
 ```python
-# Apply quantum-inspired memory dynamics
+# Apply state model dynamics
 quantum_manager.apply_temporal_decay(tokens, days_elapsed=1.0)
 quantum_manager.boost_related_memories(activated_token, all_tokens)
 
@@ -145,25 +140,25 @@ class EnhancedPersistentMindModel:
 ### Basic Operations
 ```bash
 # Add events with automatic tokenization
-pmm-cli add-event "Noted improvement in recall quality" --next-stage
+python pmm_cli.py add-event "Noted improvement in recall quality" --next-stage
 
 # Semantic memory recall
-pmm-cli recall "memory integrity" --max-results 10 --next-stage
+python pmm_cli.py recall "memory integrity" --max-results 10 --next-stage
 
 # Local text generation
-pmm-cli generate "Explain the nature of persistent memory" --next-stage
+python pmm_cli.py generate "Summarize my memory state and recent insights" --next-stage
 ```
 
 ### Identity Management
 ```bash
 # Export complete identity
-pmm-cli export-identity ./my_ai_identity --next-stage
+python pmm_cli.py export-identity ./my_ai_identity --next-stage
 
 # Import identity on new system
-pmm-cli import-identity ./my_ai_identity.tar.gz --next-stage
+python pmm_cli.py import-identity ./my_ai_identity.tar.gz --next-stage
 
 # Verify cryptographic integrity
-pmm-cli verify-integrity --next-stage
+python pmm_cli.py verify-integrity --next-stage
 ```
 
 ### Advanced Analysis
@@ -252,10 +247,10 @@ print(f"Chain integrity: {result.chain_integrity_verified}")
 - Local inference capabilities
 - No dependence on external APIs
 
-### 4. **Infinite Scalability**
+### 4. **Scalability Considerations**
 - Automatic memory archival prevents bloat
 - Thematic clustering maintains performance
-- Quantum-inspired recall efficiency
+- Efficient recall heuristics
 
 ### 5. **Research Foundation**
 - Academic validation through verifiable data
@@ -347,7 +342,7 @@ The PMM Next-Stage Architecture aims to provide:
 4. **Quantum-Inspired Memory Management**
 5. **Designed for Infinite Scalability**
 
-This positions PMM as foundational infrastructure for the future of AI consciousness research, personal AI applications, and decentralized AI ecosystems.
+This positions PMM as a practical foundation for identity integrity, local operation, and portability experiments.
 
 **Technical Note**: This design combines cryptographic integrity checks, quantum-inspired memory state modeling, and local operation modes to support practical persistence and verification.
 

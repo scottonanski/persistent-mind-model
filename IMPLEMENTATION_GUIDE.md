@@ -29,19 +29,19 @@ manager = EnhancedSelfModelManager(
 )
 
 # Add experiences (automatically tokenized)
-manager.add_event("Had a breakthrough insight about consciousness")
+manager.add_event("Recorded a notable insight about my workflow")
 manager.add_thought("Memory tokens create verifiable AI history")
-manager.add_insight("Quantum-inspired states enable rich memory dynamics")
+manager.add_insight("Added memory-token state model for richer recall heuristics")
 
 # Semantic recall from memory
-results = manager.recall_memories("consciousness breakthrough", max_results=5)
+results = manager.recall_memories("topic breakthrough", max_results=5)
 for result in results:
     print(f"Memory: {result.content[:100]}...")
     print(f"Relevance: {result.similarity_score:.3f}")
 
 # Generate text using local models
 response = manager.generate_text_local(
-    "What insights have I had about consciousness?",
+    "What insights have I recorded about topic X?",
     max_tokens=200
 )
 print(f"Generated using: {response.provider}")
@@ -54,24 +54,26 @@ print(f"Exported {manifest.total_tokens} tokens with integrity verification")
 
 ### CLI Usage Examples
 
+Note: If the `pmm-cli` entrypoint is not installed on your PATH, use `python pmm_cli.py`.
+
 ```bash
 # Add new experiences
-pmm-cli add-event "Discovered quantum memory resonance effects" --next-stage
+python pmm_cli.py add-event "Noted improvement in semantic recall heuristics" --next-stage
 
 # Recall memories semantically
-pmm-cli recall "quantum consciousness" --max-results 10 --next-stage
+python pmm_cli.py recall "semantic recall" --max-results 10 --next-stage
 
 # Generate text locally
-pmm-cli generate "Explain my understanding of memory tokenization" --next-stage
+python pmm_cli.py generate "Summarize my memory state and recent insights" --next-stage
 
 # Export identity for backup/migration
-pmm-cli export-identity ./backup --compress --next-stage
+python pmm_cli.py export-identity ./backup --compress --next-stage
 
 # Verify cryptographic integrity
-pmm-cli verify-integrity --verbose --next-stage
+python pmm_cli.py verify-integrity --verbose --next-stage
 
 # Show comprehensive statistics
-pmm-cli stats --next-stage
+python pmm_cli.py stats --next-stage
 ```
 
 ## Architecture Deep Dive
@@ -83,15 +85,16 @@ pmm-cli stats --next-stage
 event = manager.add_event("Important experience")
 
 # 2. Automatic Tokenization
-token = tokenization_engine.tokenize_event(event, full_content)
+# Handled internally by EnhancedSelfModelManager during add_event/add_thought/add_insight
 # - Generates SHA-256 hash
 # - Links to previous token
-# - Assigns quantum amplitude/phase
+# - Assigns amplitude/phase (salience/semantic angle)
 # - Stores minimal metadata
 
-# 3. Quantum State Evolution
-quantum_manager.apply_temporal_decay([token], days_elapsed=1.0)
-quantum_manager.evolve_phase(token, semantic_context)
+# 3. State Model Evolution
+quantum = manager.quantum_manager
+quantum.apply_temporal_decay([token], days_elapsed=1.0)
+quantum.evolve_phase(token, semantic_context)
 
 # 4. Memory Recall
 recalled = recall_engine.recall_by_cue("important experience")
@@ -128,10 +131,12 @@ def verify_chain_integrity(tokens: List[MemoryToken]) -> bool:
     return True
 ```
 
-### Quantum-Inspired Memory States
+### Memory token state model (amplitude/phase)
+
+Note: 'quantum' terminology in this project is metaphorical. See `pmm/quantum_memory.py`. The implementation uses classical heuristics for salience and semantic drift.
 
 ```python
-# Memory tokens have quantum-like properties
+# Memory tokens maintain amplitude (salience) and phase (semantic angle) values used by recall heuristics
 token.amplitude = 0.85  # Activation probability (0.0-1.0)
 token.phase = 2.14      # Semantic angle (0-2π radians)
 
@@ -433,6 +438,35 @@ print(f"Archive compression: {stats.compression_ratio:.1f}x")
 print(f"Chain verification time: {stats.chain_verify_ms}ms")
 ```
 
+#### Metrics and Drift
+
+- **Evidence weighting**: Drift magnitude scales with observed behavioral signals and an evidence weight. Boost factor ranges within a bounded multiplier.
+- **Freshness guard**: N-gram overlap is measured against recent outputs. If above threshold, a controlled re-roll with style jitter is attempted and logged.
+- **Clamping near bounds**: Traits at/near boundaries (e.g., conscientiousness=1.0) suppress small deltas; logs indicate clamped traits.
+- **Commitments lifecycle**: Commitments may auto-close each turn based on matching signals; new commitments are minted when extracted from reflections.
+- **Debug logs**: With `PMM_DEBUG=1`, you’ll see evidence-weighted boost, applied weights, clamp reasons, and freshness re-roll notices for transparency.
+
+### Example outputs
+
+Per-turn metrics (from `duel.py`):
+
+```
+A: Let's verify integrity before heavy recall to keep results consistent.
+   · commitments: ['c207']  · ΔBig5: {'conscientiousness': +0.01}  · overlap(prev): 12.4%  · overlap(8): 5.9%
+
+B: Agreed. I'll add events and run verify right after.
+   · commitments: []  · ΔBig5: {'openness': +0.01}  · overlap(prev): 10.3%  · overlap(8): 7.0%
+```
+
+Debug logs when `PMM_DEBUG=1`:
+
+```
+[DRIFT] evidence_weight=0.54 boost=1.12 applied=+0.008 -> conscientiousness
+[FRESHNESS] overlap(prev)=33.2% > 30.0% threshold -> re-roll with jitter
+[CLAMP] agreeableness delta +0.003 suppressed (near bound)
+[COMMIT] auto-close c199 (matched: produce summary)
+```
+
 ## Integration Examples
 
 ### LangChain Integration
@@ -551,4 +585,4 @@ spec:
           claimName: pmm-pvc
 ```
 
-This implementation guide provides comprehensive coverage of the PMM Next-Stage Architecture, enabling developers to quickly adopt and deploy this revolutionary AI consciousness platform.
+This implementation guide covers the PMM next-stage architecture and practical usage, aligned to the shipped implementation.

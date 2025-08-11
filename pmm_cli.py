@@ -333,24 +333,24 @@ def cmd_archive_status(args):
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="PMM Next-Stage CLI - Enhanced AI Consciousness Management",
+        description="PMM Next-Stage CLI - Manage next-stage PMM features",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Add an event with tokenization
-  pmm-cli add-event "Had a breakthrough in understanding quantum memory" --next-stage
+  python pmm_cli.py add-event "Recorded an insight about memory integrity" --next-stage
   
   # Recall memories semantically
-  pmm-cli recall "quantum mechanics" --max-results 5 --next-stage
+  python pmm_cli.py recall "memory integrity" --max-results 5 --next-stage
   
   # Generate text locally
-  pmm-cli generate "Explain the nature of consciousness" --next-stage
+  python pmm_cli.py generate "Summarize my memory state and recent insights" --next-stage
   
   # Export complete identity
-  pmm-cli export-identity ./my_identity --next-stage
+  python pmm_cli.py export-identity ./my_identity --next-stage
   
   # Verify cryptographic integrity
-  pmm-cli verify-integrity --next-stage
+  python pmm_cli.py verify-integrity --next-stage
         """,
     )
 
