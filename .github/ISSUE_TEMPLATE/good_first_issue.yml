@@ -1,0 +1,24 @@
+name: Good first issue
+description: A small, well-scoped task for first-time contributors
+labels: [good first issue, help wanted]
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: Task
+      description: What needs to be done, in one paragraph.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] ...

@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an idea or improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What use case or limitation are you facing?
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: API/UX details. Add examples, pseudo-code, or CLI flags.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links to prior art, screenshots, or discussions.
