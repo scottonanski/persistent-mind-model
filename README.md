@@ -2,6 +2,8 @@
 
 **Persistent personality and memory for LLM applications**
 
+*If this helps you, ⭐ the repo and join Discussions.*
+
 PMM provides a practical way to maintain a consistent personality and memory across sessions and, where supported, across different LLM backends. It tracks traits, commitments, and memories with reproducible, testable logic.
 
 ## ⚡ **Quickstart (60 seconds)**
