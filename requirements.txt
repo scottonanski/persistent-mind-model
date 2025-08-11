@@ -27,9 +27,7 @@ pytest-cov>=4.0.0  # Coverage reporting
 
 # Performance & Storage
 aiofiles>=23.0.0  # Async file I/O
-lzma  # Built-in compression
-gzip  # Built-in compression
-sqlite3  # Built-in database
+# lzma/gzip/sqlite3 are from Python stdlib and should NOT be in requirements
 
 # Optional Dependencies
 pydantic>=2.0.0  # Enhanced validation (future)
