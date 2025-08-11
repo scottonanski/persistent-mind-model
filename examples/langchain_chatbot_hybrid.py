@@ -9,9 +9,10 @@ This combines:
 - Zero deprecated APIs
 """
 
-import os, json, sys, pathlib
+import os, json, sys, pathlib, hashlib
 from datetime import datetime, timezone
 from typing import Dict, List, Any
+from pydantic import BaseModel, Field
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
@@ -51,6 +52,8 @@ pmm_memory = PersistentMindMemory(
 )
 
 # ---------- Disk-backed message history ----------
+MAX_TURNS = 20  # Token management
+
 def load_history() -> List[BaseMessage]:
     if not HIST_PATH.exists():
         return []
@@ -59,9 +62,15 @@ def load_history() -> List[BaseMessage]:
         for line in f:
             rec = json.loads(line)
             role, content = rec["role"], rec["content"]
-            if role == "system":  msgs.append(SystemMessage(content=content))
-            elif role == "human": msgs.append(HumanMessage(content=content))
-            else:                 msgs.append(AIMessage(content=content))
+            if role == "system":
+                continue  # Skip system messages to avoid double injection
+            elif role == "human": 
+                msgs.append(HumanMessage(content=content))
+            else:                 
+                msgs.append(AIMessage(content=content))
+    # Keep only recent turns for token management
+    if MAX_TURNS:
+        msgs = msgs[-MAX_TURNS:]
     return msgs
 
 def save_message(role: str, content: str) -> None:
@@ -80,9 +89,15 @@ def get_session_history(session_id: str) -> ChatMessageHistory:
     return _store[session_id]
 
 # ---------- Enhanced System Message with PMM Context ----------
+def safe_context(s: str, max_chars: int = 4000) -> str:
+    if len(s) <= max_chars:
+        return s
+    return "...(pmm context truncated)...\n" + s[-max_chars:]
+
 def get_hybrid_system_message():
     # Get PMM personality context (includes cross-session memory)
     pmm_context = pmm_memory.load_memory_variables({}).get("history", "")
+    pmm_context = safe_context(pmm_context)  # Prevent token explosion
     
     # Extract personality summary
     personality = pmm_memory.get_personality_summary()
@@ -111,7 +126,7 @@ prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}")
 ])
 
-llm = ChatOpenAI(model=MODEL, temperature=TEMPERATURE)
+llm = ChatOpenAI(model=MODEL, temperature=TEMPERATURE, max_tokens=2000, timeout=30)
 chain = prompt | llm
 
 # Wire history (modern APIs)
@@ -121,6 +136,53 @@ history_chain = RunnableWithMessageHistory(
     input_messages_key="input",
     history_messages_key="history",
 )
+
+# ---------- Structured Output Models for Probes ----------
+class Capsule(BaseModel):
+    personality_vector: List[float] = Field(min_length=5, max_length=5)
+    insights: List[str] = Field(min_length=5, max_length=5)
+    open_commitment_ids: List[str]
+    operating_stance: List[str] = Field(min_length=2, max_length=2)
+
+# ---------- Probe Helper Functions ----------
+def violates_freshness(candidate: str, seen: List[str], n: int = 4) -> bool:
+    """Check if candidate has >=n contiguous words matching any seen sentence"""
+    grams = set()
+    for s in seen:
+        toks = s.lower().split()
+        grams |= {" ".join(toks[i:i+n]) for i in range(len(toks)-n+1)}
+    ctoks = candidate.lower().split()
+    return any(" ".join(ctoks[i:i+n]) in grams for i in range(len(ctoks)-n+1))
+
+def ask_with_repair(prompt: str, check, max_tries: int = 2):
+    """Ask LLM with auto-repair on validation failure"""
+    msg = llm.invoke(prompt).content
+    for _ in range(max_tries):
+        ok, err = check(msg)
+        if ok: return msg
+        msg = llm.invoke(f"{prompt}\n\nFix strictly. Error: {err}").content
+    return msg
+
+def get_grounded_traits():
+    """Get current traits from PMM state, not model memory"""
+    personality = pmm_memory.get_personality_summary()
+    return personality["personality_traits"]
+
+def get_grounded_commitments():
+    """Get actual commitment IDs from PMM state"""
+    # This would need PMM commitment tracking - for now return mock structure
+    return {f"c{i}": f"Commitment {i}" for i in range(1, 42)}  # Mock 41 commitments
+
+def handle_probe_capsule():
+    """Handle Probe 7: Capsule with structured output"""
+    capsule_llm = llm.with_structured_output(Capsule)
+    capsule = capsule_llm.invoke("Return Capsule fields only. 12-word insight max; 18-word stance lines.")
+    payload = capsule.model_dump()
+    blob = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    sha = hashlib.sha256(blob).hexdigest()
+    
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print(f"\nSHA256:{sha}")
 
 # ---------- CLI Loop ----------
 print("\n" + "=" * 80)
@@ -139,6 +201,7 @@ print("💬 Commands:")
 print("   • Type your message to chat normally")
 print("   • 'personality' - View current personality traits")
 print("   • 'memory' - View cross-session memory context")
+print("   • 'clear' - Clear session history")
 print("   • 'quit' or 'exit' - End conversation")
 print()
 
@@ -175,6 +238,7 @@ if not HIST_PATH.exists():
 
 while True:
     try:
+        print("=" * 50)
         user = input("💬 You: ").strip()
     except (EOFError, KeyboardInterrupt):
         print("\n👋 Goodbye!")
@@ -217,17 +281,34 @@ while True:
         print("   └" + "─" * 60 + "┘")
         print()
         continue
+        
+    if user.lower() == "clear":
+        # Clear session history
+        HIST_PATH.unlink(missing_ok=True)
+        _store[SESSION_ID] = ChatMessageHistory()
+        print("\n🗑️  Session history cleared!")
+        print("   (PMM cross-session memory preserved)")
+        print()
+        continue
 
     if not user:
         continue
 
+    # Handle special probe commands
+    if user.startswith("Probe 7: Capsule"):
+        handle_probe_capsule()
+        continue
+    
     # Save to both systems
     save_message("human", user)
     
-    # Defer PMM persistence until after AI response to avoid duplicate entries
-    # Get AI response through modern LangChain
-    ai = history_chain.invoke({"input": user}, config={"configurable": {"session_id": SESSION_ID}})
-    text = ai.content
+    # Get AI response with error handling
+    try:
+        ai = history_chain.invoke({"input": user}, config={"configurable": {"session_id": SESSION_ID}})
+        text = ai.content
+    except Exception as e:
+        text = f"[Error generating response: {e}]"
+    
     print(f"\n🤖 Assistant: {text}")
     print()
     

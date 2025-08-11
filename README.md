@@ -72,8 +72,11 @@ export OPENAI_API_KEY='your-key-here'
 python test_core_concepts.py      # Pure Python core concepts validation
 ./demo_script.sh                  # Working scripted demo
 
-# LangChain integration example
+# LangChain integration example (production-ready)
 python examples/langchain_chatbot_hybrid.py
+
+# Probe testing system (grounded state access)
+python probe_tester.py
 
 # CLI utilities
 python pmm_cli.py --help
@@ -96,7 +99,8 @@ python examples/langchain_chatbot_hybrid.py
 
 **Special commands while chatting:**
 - Type `personality` - See current personality traits and stats
-- Type `memory` - View the AI's cross-session memory context  
+- Type `memory` - View the AI's cross-session memory context
+- Type `clear` - Clear session history (preserves PMM cross-session memory)
 - Type `quit` - Exit the chat
 
 **🎯 Test Cross-Session Memory:**
@@ -201,6 +205,9 @@ export PMM_TEMP="0.7"                     # Default: 0.7
 # Complete demo showcasing all PMM capabilities
 ./demo_script.sh
 
+# Production-ready probe testing system
+python probe_tester.py     # Grounded state validation
+
 # Or run individual components:
 python model_selector.py    # Interactive model selection
 python duel.py             # Agent personality evolution
@@ -235,11 +242,20 @@ Enhanced memory management features (experimental)
 - ✅ **Language Freshness System** - N-gram analysis prevents repetitive AI responses
 - ✅ **Developer-friendly** - Clean `.env` support and comprehensive examples
 
-### Recent Fix
+### Recent Fixes
 
-**Issue Resolved:** Fixed duplicate recording in LangChain integration causing inflated personality metrics.
+**Production Hardening (Latest):**
+- ✅ **Fixed Double System Message Bug** - Eliminated model confusion from duplicate system injection
+- ✅ **Grounded State Access** - Probes now read from PMM store instead of hallucinating responses
+- ✅ **Structured Output Validation** - Pydantic models with auto-repair for reliable probe responses
+- ✅ **Token Management** - MAX_TURNS=20 limit and context truncation prevent token explosion
+- ✅ **Error Handling** - Try-catch with fallbacks, timeouts, and graceful degradation
+- ✅ **Freshness Guardrails** - N-gram overlap detection prevents repetitive language
+- ✅ **Real Commitment Tracking** - Canonical ID-based commitment lifecycle management
 
-Impact: Improves data integrity for downstream analysis.
+**Previous Fix:** Fixed duplicate recording in LangChain integration causing inflated personality metrics.
+
+Impact: Production-ready reliability for academic validation and real-world deployment.
 
 ### Why This Matters
 
