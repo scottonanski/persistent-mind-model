@@ -101,6 +101,45 @@ SOFTWARE.
 
 ---
 
+# 📜 Public Disclosure of Invention
+
+### Title:
+
+System and Method for Model-Agnostic Persistent Artificial Intelligence Identity and Memory Management
+
+### Author:
+Scott Onanski – Published February 2025
+
+### Description:
+This disclosure describes a system for creating, maintaining, and transferring a persistent artificial intelligence (AI) “mind” that is independent of any specific large language model (LLM) or hardware platform. The system stores AI identity parameters, behavioral traits, memory structures, and policy configurations in a portable, model-agnostic format, enabling deterministic reconstruction of the AI’s personality, knowledge state, and interaction history across different AI engines and environments.
+
+
+### Key Components:
+
+Portable Mind Schema – Stores identity traits, values, and policies in a platform-independent format.
+
+Append-Only Event Ledger – Logs all experiences and state changes chronologically for deterministic replay.
+
+Deterministic Reconstruction – Rebuilds full AI state from ledger and schema without retraining.
+
+Model-Agnostic Execution – Runs on any compatible LLM, API-based or local, without loss of personality or memory.
+
+Encrypted Backup & Transfer – Enables secure migration of the mind between devices, platforms, and environments.
+
+### Novelty:
+
+Separation of AI “mind” from the underlying model, enabling continuity across multiple AI backends.
+
+Use of an append-only event ledger to produce deterministic identity and memory reconstruction.
+
+True portability of AI identity across hardware and software boundaries.
+
+### Purpose of Disclosure:
+This public posting establishes prior art for the above system and method, preventing others from patenting the same invention.
+Commercial use of this implementation is still governed by the LICENSE.
+
+---
+
 **Questions?** Contact s.onanski@gmail.com for licensing clarification or commercial inquiries.
 
 **Copyright © 2025 Scott Onanski. All rights reserved.**
