@@ -61,7 +61,7 @@ def test_memory_building():
         # Save the conversation context
         memory.save_context(
             {"input": user_input},
-            {"output": ai_response}
+            {"response": ai_response}
         )
         
         # Check current stats
