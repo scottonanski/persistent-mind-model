@@ -4,7 +4,6 @@ from typing import Dict
 from .model import PersistentMindModel, TraitScore, IdentityChange
 
 
-
 def _days_since(yyyy_mm_dd: str) -> int:
     try:
         d = date.fromisoformat(yyyy_mm_dd)

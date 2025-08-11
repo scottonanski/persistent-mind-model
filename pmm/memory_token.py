@@ -29,7 +29,9 @@ class MemoryToken:
 
     # Core identity
     token_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
     # Cryptographic integrity
     content_hash: str = ""  # SHA-256 of full content
@@ -179,7 +181,9 @@ class IdentityLockpoint:
     """
 
     lockpoint_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     chain_position: int = 0
 
     # Full state snapshot

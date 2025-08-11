@@ -73,7 +73,9 @@ def test_modern_langchain_features():
 
     with HIST_PATH.open("w", encoding="utf-8") as f:
         for msg in test_messages:
-            f.write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), **msg}) + "\n")
+            f.write(
+                json.dumps({"t": datetime.now(timezone.utc).isoformat(), **msg}) + "\n"
+            )
 
     print(f"   ✓ Created test history at {HIST_PATH}")
     print(f"   ✓ Saved {len(test_messages)} messages")
