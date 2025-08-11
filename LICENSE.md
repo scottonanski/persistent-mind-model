@@ -108,7 +108,7 @@ SOFTWARE.
 System and Method for Model-Agnostic Persistent Artificial Intelligence Identity and Memory Management
 
 ### Author:
-Scott Onanski – Published August 2025
+Scott Onanski – Published on GitHub on August 2025
 
 ### Description:
 This disclosure describes a system for creating, maintaining, and transferring a persistent artificial intelligence (AI) “mind” that is independent of any specific large language model (LLM) or hardware platform. The system stores AI identity parameters, behavioral traits, memory structures, and policy configurations in a portable, model-agnostic format, enabling deterministic reconstruction of the AI’s personality, knowledge state, and interaction history across different AI engines and environments.
