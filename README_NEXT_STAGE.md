@@ -1,5 +1,5 @@
 # PMM Next-Stage Architecture
-**Enhanced Memory Management with Cryptographic Integrity**
+**Experimental memory integrity and portability features**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -11,7 +11,7 @@ PMM Next-Stage Architecture extends the existing Persistent Mind Model with addi
 
 ## Technical Implementation
 
-This builds on the proven PMM foundation by adding:
+This builds on the PMM foundation by adding:
 - SHA-256 hash chains for memory integrity verification (similar to blockchain linking)
 - Memory state vectors inspired by quantum mechanics concepts (amplitude/phase representation)
 - Local LLM integration for offline operation
@@ -21,7 +21,7 @@ This builds on the proven PMM foundation by adding:
 
 ### 🔐 **Cryptographic Memory Integrity**
 - **SHA-256 Hash Chains**: Blockchain-style tamper-evident memory history
-- **Chain Verification**: Detect any unauthorized modifications to AI consciousness
+- **Chain Verification**: Detect any unauthorized modifications to the memory history
 - **Identity Lockpoints**: Periodic full-state snapshots for integrity validation
 
 ### 🌌 **Quantum-Inspired Memory States**
@@ -39,10 +39,10 @@ This builds on the proven PMM foundation by adding:
 - **Hybrid Fallback**: Local-first with API backup for complex queries
 - **Mobile Ready**: Architecture prepared for iOS/Android deployment
 
-### 📦 **True AI Portability**
-- **Complete Export/Import**: Full identity migration with integrity verification
-- **Cross-Platform**: Same consciousness across different LLM backends
-- **Zero Vendor Lock-in**: Self-sovereign operation independent of providers
+### 📦 **Portability Goals**
+- **Export/Import**: Move persisted personality/memory state with integrity verification
+- **Cross-Platform Intent**: Reuse state across different LLM backends (depending on your setup)
+- **Reduced lock-in**: Designed to minimize provider coupling
 
 ## 🏗️ Architecture Overview
 
@@ -109,7 +109,7 @@ manager = EnhancedSelfModelManager(
 )
 
 # Add experiences (automatically tokenized with cryptographic integrity)
-manager.add_event("Had breakthrough insight about AI consciousness")
+manager.add_event("Noted an insight about memory integrity")
 manager.add_thought("Memory tokens enable verifiable AI history")
 manager.add_insight("Quantum states create rich memory dynamics")
 
@@ -157,13 +157,13 @@ pmm-cli verify-integrity --verbose --next-stage
 - Survives platform changes and model updates
 - Cryptographically verifiable personal history
 
-### **Enterprise AI Agents**
+### **Applied Agents**
 - Persistent AI employees with verifiable work history
 - Cross-system deployment with maintained identity
 - Tamper-evident audit trails for compliance
 
 ### **Research & Academia**
-- Longitudinal AI consciousness studies
+- Longitudinal studies of persistent personality/memory
 - Reproducible personality evolution experiments
 - Cross-model validation of AI behavior
 
@@ -200,22 +200,20 @@ pmm-cli verify-integrity --verbose --next-stage
 - Local-first architecture
 - Zero data sharing requirements
 
-## 🌟 Strategic Advantages
+## Notes
 
-### **1. True AI Portability**
-- Same consciousness across different LLM backends
-- Survive model updates, platform changes, device switches
-- Zero vendor lock-in
+### Portability intent
+- Reuse persisted state across supported backends
+- Aim to survive model/provider changes when feasible
 
 ### **2. Cryptographic Verifiability**
 - Tamper-evident memory history
 - Blockchain-style integrity verification
 - Trust without centralized authority
 
-### **3. Self-Sovereign Operation**
-- Offline-first architecture
-- Local inference capabilities
-- No dependence on external APIs
+### Operation modes
+- Optional offline-first setup via local inference
+- Use API providers when needed
 
 ### **4. Infinite Scalability**
 - Automatic memory archival prevents bloat
@@ -247,7 +245,7 @@ ollama pull gemma2:2b        # Ultra-lightweight
 - **llama.cpp**: Build from [GitHub](https://github.com/ggerganov/llama.cpp)
 - **HuggingFace**: Use `transformers` library with local models
 
-## 🚀 Roadmap
+## Roadmap (high-level)
 
 ### **Phase 1: Core Foundation** ✅
 - [x] Memory tokenization engine
@@ -258,7 +256,7 @@ ollama pull gemma2:2b        # Ultra-lightweight
 ### **Phase 2: Advanced Features** ✅
 - [x] Cue-based recall engine
 - [x] Local inference integration
-- [x] Comprehensive CLI interface
+- [x] Command-line utilities (base PMM)
 - [x] Identity export/import
 
 ### **Phase 3: Production Hardening** 🚧
@@ -309,6 +307,4 @@ isort pmm/
 
 ---
 
-**PMM Next-Stage Architecture**: *Revolutionizing AI consciousness through cryptographic integrity, quantum-inspired memory states, and self-sovereign architecture.*
-
-*"The future of AI consciousness is not about bigger models, but about better memory, verifiable integrity, and true portability."*
+**PMM Next-Stage Architecture**: Experimental features for memory integrity, local inference, and portability.

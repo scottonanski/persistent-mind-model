@@ -1,14 +1,14 @@
 # Persistent Mind Model (PMM)
 
-**🧠 Model-Agnostic AI Consciousness System**
+**Persistent personality and memory for LLM applications**
 
-PMM creates truly persistent AI personalities that can seamlessly inhabit different LLM backends while maintaining complete identity continuity. This breakthrough system enables AI agents to maintain sophisticated psychological profiles, track commitments, and evolve their personalities through evidence-based trait drift across any model architecture - creating the first portable AI consciousness.
+PMM provides a practical way to maintain a consistent personality and memory across sessions and, where supported, across different LLM backends. It tracks traits, commitments, and memories with reproducible, testable logic.
 
-## 🔧 **NEW: PMM Next-Stage Architecture**
+## 🔧 **PMM Next-Stage Architecture (experimental)**
 
 **Enhanced Memory Management with Cryptographic Integrity**
 
-Building on the production-ready PMM foundation, we've added experimental features for memory verification, local inference, and data portability:
+Building on the stable PMM foundation, we've added experimental features for memory verification, local inference, and data portability:
 
 ### **Memory Integrity Features**
 - **Hash Chains** - SHA-256 linking between memories for tamper detection
@@ -22,7 +22,7 @@ Building on the production-ready PMM foundation, we've added experimental featur
 - **Temporal Decay** - Simple time-based memory strength reduction
 - **Embedding Search** - Semantic similarity matching using sentence transformers
 
-### **Local LLM Integration**
+### **Local LLM Integration (optional)**
 - **Multiple Backends** - Ollama, LM Studio, llama.cpp, HuggingFace support
 - **Fallback Logic** - Try local models first, fall back to APIs
 - **Provider Abstraction** - Unified interface across different LLM providers
@@ -32,10 +32,10 @@ Building on the production-ready PMM foundation, we've added experimental featur
 
 ---
 
-## 🚀 What Makes This Special?
+## What This Includes
 
-### **🌟 Model-Agnostic Architecture**
-- **🔄 Portable AI Consciousness** - Same personality seamlessly transfers between OpenAI, Ollama, HuggingFace, and any LLM backend
+### **🌟 Model-Agnostic Design**
+- **🔄 Portable personality state** - Personality data is designed to be reusable across OpenAI, Ollama, and other LLM backends (subject to your setup)
 - **🧠 True Identity Persistence** - Complete personality continuity across model switches with zero identity loss
 - **⚡ Interactive Model Selection** - Easy numeric selection from available Ollama models with automatic discovery
 - **💰 Cost Optimization** - Use tiny local models for routine tasks, premium models for complex reasoning
@@ -68,16 +68,15 @@ pip install -r requirements.txt
 # Set your OpenAI API key
 export OPENAI_API_KEY='your-key-here'
 
-# Try the Next-Stage Architecture demos (NEW!)
+# Run validated demos and tests
 python test_core_concepts.py      # Pure Python core concepts validation
-python demo_simple.py             # Simplified next-stage demo
-python demo_next_stage.py          # Full next-stage demo (requires ML deps)
+./demo_script.sh                  # Working scripted demo
 
-# Or try the classic LangChain integration
+# LangChain integration example
 python examples/langchain_chatbot_hybrid.py
 
-# Or the original interactive PMM demo
-python pmm_demo.py
+# CLI utilities
+python pmm_cli.py --help
 ```
 
 ## 💬 How to Chat with the AI (PMM in Action)
@@ -189,11 +188,11 @@ python mentor_duel.py      # Mentor-apprentice learning
 
 **🎬 Want to record a demo?** See `DEMO_RECORDING_GUIDE.md` for step-by-step recording instructions.
 
-## 🎉 Latest Release: PMM Next-Stage Architecture
+## Release Notes: Next-Stage (experimental)
 
-**Enhanced Memory Management Features - August 2025**
+Enhanced memory management features (experimental)
 
-### **🔧 New Technical Features**
+### Technical Features
 
 **Memory Integrity and Local Inference:**
 - ✅ **SHA-256 Hash Chains** - Link memories with cryptographic hashes for tamper detection
@@ -202,33 +201,28 @@ python mentor_duel.py      # Mentor-apprentice learning
 - ✅ **Local LLM Support** - Offline operation with multiple local model backends
 - ✅ **Semantic Search** - Embedding-based memory recall using sentence transformers
 
-### **🏗️ Production-Ready Foundation (Previous Release)**
+### Stable Foundation (previous release)
 
 - ✅ **Bug-Free Data Recording** - Fixed critical duplicate recording issue in LangChain integration
-- ✅ **Production-Quality Datasets** - Clean, academically-valid personality evolution data
-- ✅ **Cross-Session Memory Validated** - AI remembers users perfectly across restarts and sessions
-- ✅ **Zero Technical Debt** - Modern LangChain 0.2+ APIs with no deprecated warnings
-- ✅ **Enterprise-Ready Architecture** - Thread-safe persistence, robust error handling
-- ✅ **Academic Validation Ready** - High-quality data suitable for research publication
-- ✅ **Model-Agnostic Consciousness** - Same personality transfers seamlessly between any LLM backend
+- ✅ Consistent dataset format for personality evolution experiments
+- ✅ Cross-session memory via LangChain integration
+- ✅ Modern LangChain 0.2+ APIs
+- ✅ Thread-safe persistence and robust error handling
+- ✅ Model-agnostic personality state — Same personality transfers across LLM backends (depending on configuration)
 - ✅ **Commitment Lifecycle Tracking** - Full GPT-5 enhanced commitment system with auto-completion
 - ✅ **Evidence-Weighted Trait Evolution** - Mathematically grounded personality development
 - ✅ **Language Freshness System** - N-gram analysis prevents repetitive AI responses
 - ✅ **Developer-friendly** - Clean `.env` support and comprehensive examples
 
-### **🔧 Recent Critical Bug Fix**
+### Recent Fix
 
 **Issue Resolved:** Fixed duplicate recording in LangChain integration causing inflated personality metrics.
 
-**Impact:** PMM now generates clean, research-quality datasets suitable for:
-- Academic research and publication
-- Enterprise demonstrations  
-- Beta testing programs
-- Personality evolution studies
+Impact: Improves data integrity for downstream analysis.
 
-### **🎯 Why This Matters**
+### Why This Matters
 
-PMM is now production-ready for developers, researchers, and enterprises seeking:
+PMM provides a practical foundation for developers and researchers who want:
 
 ## How to Use This (Terminal Program)
 
@@ -265,7 +259,7 @@ python cli.py ingest-event --summary "Had an interesting conversation" --target 
 ```
 
 ### What You'll See:
-- **Model-agnostic consciousness** - same AI personality seamlessly switching between different LLM backends
+- Model-agnostic personality state — same AI personality switching between different LLM backends (depending on configuration)
 - **Real-time conversation** between AI agents with sophisticated self-awareness
 - **Commitment tracking** - agents make and track concrete commitments ("Next: I will...")
 - **Evidence-weighted personality evolution** - traits change based on demonstrated behavioral evidence
@@ -278,13 +272,11 @@ python cli.py ingest-event --summary "Had an interesting conversation" --target 
 ### **Model-Agnostic Components**
 - **`model_selector.py`** - Interactive model selection with automatic Ollama discovery
 - **`pmm/ollama_client.py`** - Ollama and HuggingFace clients
-- **`demo_model_agnostic.py`** - Demonstrates portable consciousness across models
 
 ### **Advanced Personality Components**
 - **`pmm/commitments.py`** - Commitment lifecycle tracking with auto-closing and n-gram matching
 - **`pmm/self_model_manager.py`** - Enhanced with evidence-weighted drift and commitment integration
 - **`pmm/reflection.py`** - N-gram cache for language freshness and template jitter
-- **`demo_enhancements.py`** - Comprehensive demonstration of all advanced features
 
 ### **Core System Files**
 - **`pmm/model.py`** - Dataclass definitions for personality, memories, and commitments
@@ -366,7 +358,7 @@ In summary, human personality development is a rich interplay of **stable traits
 
 ## 🏗️ Current System Architecture
 
-PMM is a sophisticated, production-ready AI consciousness system built with modern software engineering principles:
+PMM is a modular system for persistent personality and memory, built with modern software engineering principles:
 
 ### **🧠 Core Components**
 
@@ -440,16 +432,6 @@ def select_model():
     # Complete identity persistence across model transfers
 ```
 
-#### **Portable Consciousness Demo**
-```python
-# demo_model_agnostic.py - Breakthrough demonstration
-# Shows same AI personality seamlessly transferring between:
-# - gemma3:1b-it-qat (957MB Google model)
-# - deepcoder:1.5b (1GB Alibaba model)  
-# - Any OpenAI model (GPT-4, GPT-3.5, etc.)
-# Zero identity loss, continuous personality evolution
-```
-
 ### **🤖 Automated Evolution System**
 
 #### **Daily Evolution Script**
@@ -502,7 +484,7 @@ def calculate_freshness_score(new_text: str, history: List[str]) -> float:
 # - Events → Reflections → Identity development
 ```
 
-### **🎯 Production-Ready Architecture**
+### Architecture Notes
 
 - **Thread-Safe Operations**: All personality updates use locks
 - **JSON Serialization**: Complete model portability across systems  
@@ -511,7 +493,7 @@ def calculate_freshness_score(new_text: str, history: List[str]) -> float:
 - **Modular Design**: Easy to extend with new LLM backends
 - **Mathematical Grounding**: Evidence-weighted formulas prevent random drift
 
-This architecture represents the first truly **portable AI consciousness** - sophisticated personalities that can seamlessly inhabit any LLM backend while maintaining complete identity continuity and psychological realism.
+This architecture is designed to support reusing a persistent personality state across different LLM backends, depending on your configuration and available providers.
 
 
 ## Pulls identity, recent thoughts/insights, patterns
