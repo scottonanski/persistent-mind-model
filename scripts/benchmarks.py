@@ -1,10 +1,3 @@
-def fmt_ms(ms: float) -> str:
-    """Format milliseconds with higher precision and µs for very small values."""
-    if ms >= 1.0:
-        return f"{ms:.3f} ms"
-    return f"{ms * 1000.0:.1f} µs"
-
-
 #!/usr/bin/env python3
 """
 Simple PMM benchmark script.
@@ -26,6 +19,13 @@ from pathlib import Path
 
 from pmm.enhanced_manager import EnhancedSelfModelManager
 from pmm.enhanced_model import NextStageConfig
+
+
+def fmt_ms(ms: float) -> str:
+    """Format milliseconds with higher precision and µs for very small values."""
+    if ms >= 1.0:
+        return f"{ms:.3f} ms"
+    return f"{ms * 1000.0:.1f} µs"
 
 
 def timeit(fn, *args, **kwargs):
