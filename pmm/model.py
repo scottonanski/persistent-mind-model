@@ -6,14 +6,19 @@ import uuid
 
 # ===== Core Identity =====
 
+
 @dataclass
 class CoreIdentity:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = field(default_factory=lambda: f"Agent-{str(uuid.uuid4())[:8]}")
-    birth_timestamp: str = field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    birth_timestamp: str = field(
+        default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
     aliases: List[str] = field(default_factory=list)
 
+
 # ===== Personality =====
+
 
 @dataclass
 class TraitScore:
@@ -48,10 +53,14 @@ class HexacoTraits:
 
 @dataclass
 class MBTIPoles:
-    E: float = 0.5; I: float = 0.5
-    S: float = 0.5; N: float = 0.5
-    T: float = 0.5; F: float = 0.5
-    J: float = 0.5; P: float = 0.5
+    E: float = 0.5
+    I: float = 0.5  # noqa: E741
+    S: float = 0.5
+    N: float = 0.5
+    T: float = 0.5
+    F: float = 0.5
+    J: float = 0.5
+    P: float = 0.5
 
 
 @dataclass
@@ -95,9 +104,13 @@ class Personality:
     mbti: MBTI = field(default_factory=MBTI)
     values_schwartz: List[ValueWeight] = field(default_factory=list)
     preferences: Preferences = field(default_factory=Preferences)
-    emotional_tendencies: EmotionalTendencies = field(default_factory=EmotionalTendencies)
+    emotional_tendencies: EmotionalTendencies = field(
+        default_factory=EmotionalTendencies
+    )
+
 
 # ===== Narrative Identity =====
+
 
 @dataclass
 class Chapter:
@@ -162,7 +175,9 @@ class NarrativeIdentity:
     future_scripts: FutureScripts = field(default_factory=FutureScripts)
     themes: List[str] = field(default_factory=list)
 
+
 # ===== Self Knowledge =====
+
 
 @dataclass
 class EffectHypothesis:
@@ -214,7 +229,9 @@ class SelfKnowledge:
     insights: List[Insight] = field(default_factory=list)
     commitments: Dict[str, Dict] = field(default_factory=dict)  # Store commitment data
 
+
 # ===== Metrics / Drift / Meta =====
+
 
 @dataclass
 class Metrics:
@@ -257,12 +274,16 @@ class MetaCognition:
     self_modification_count: int = 0
     identity_evolution: List[IdentityChange] = field(default_factory=list)
 
+
 # ===== Top-level Model =====
+
 
 @dataclass
 class PersistentMindModel:
     schema_version: int = 1
-    inception_moment: str = field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    inception_moment: str = field(
+        default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
     core_identity: CoreIdentity = field(default_factory=CoreIdentity)
     personality: Personality = field(default_factory=Personality)
     narrative_identity: NarrativeIdentity = field(default_factory=NarrativeIdentity)

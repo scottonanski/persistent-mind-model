@@ -1,5 +1,6 @@
 from pmm.self_model_manager import SelfModelManager
 
+
 def test_round_trip_ok(tmp_path):
     path = tmp_path / "m.json"
     mgr = SelfModelManager(filepath=str(path))

@@ -1,13 +1,14 @@
 import os
 import requests
 
+
 class OpenAIClient:
     def __init__(
         self,
         model: str = None,
         base: str = "https://api.openai.com/v1",
         temp: float = 0.4,
-        timeout: int = 40
+        timeout: int = 40,
     ):
         # Allow override from environment
         env_model = os.environ.get("OPENAI_MODEL")
@@ -44,14 +45,26 @@ class OpenAIClient:
             return (data["choices"][0]["message"]["content"] or "").strip()
         except requests.exceptions.HTTPError as e:
             if r.status_code == 503:
-                raise RuntimeError(f"OpenAI API temporarily unavailable (503). Try again in a few moments.") from e
+                raise RuntimeError(
+                    "OpenAI API temporarily unavailable (503). Try again in a few moments."
+                ) from e
             elif r.status_code == 429:
-                raise RuntimeError(f"OpenAI API rate limit exceeded (429). Wait before retrying.") from e
+                raise RuntimeError(
+                    "OpenAI API rate limit exceeded (429). Wait before retrying."
+                ) from e
             elif r.status_code >= 500:
-                raise RuntimeError(f"OpenAI API server error ({r.status_code}). Service may be down.") from e
+                raise RuntimeError(
+                    f"OpenAI API server error ({r.status_code}). Service may be down."
+                ) from e
             else:
-                raise RuntimeError(f"OpenAI API error ({r.status_code}): {r.text}") from e
+                raise RuntimeError(
+                    f"OpenAI API error ({r.status_code}): {r.text}"
+                ) from e
         except requests.exceptions.Timeout:
-            raise RuntimeError(f"OpenAI API request timed out after {self.timeout}s") from None
+            raise RuntimeError(
+                f"OpenAI API request timed out after {self.timeout}s"
+            ) from None
         except requests.exceptions.ConnectionError:
-            raise RuntimeError("Failed to connect to OpenAI API. Check internet connection.") from None
+            raise RuntimeError(
+                "Failed to connect to OpenAI API. Check internet connection."
+            ) from None

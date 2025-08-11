@@ -1,8 +1,9 @@
 from __future__ import annotations
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Dict
 from .model import PersistentMindModel, TraitScore, IdentityChange
 from datetime import timezone as tz
+
 UTC = tz.utc
 
 
@@ -83,7 +84,10 @@ def apply_effects(model: PersistentMindModel) -> Dict[str, float]:
             key = target.rsplit(".score", 1)[0]
             net[key] = round(net.get(key, 0.0) + real_applied, 4)
             model.meta_cognition.identity_evolution.append(
-                IdentityChange(t=now, change=f"{key} {'+' if real_applied>=0 else ''}{round(real_applied,4)} (conf {conf}) via {ev.id}")
+                IdentityChange(
+                    t=now,
+                    change=f"{key} {'+' if real_applied>=0 else ''}{round(real_applied,4)} (conf {conf}) via {ev.id}",
+                )
             )
             model.meta_cognition.self_modification_count += 1
         # mark processed

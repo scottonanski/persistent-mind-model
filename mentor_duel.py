@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-from dotenv import load_dotenv; load_dotenv()
 """
 Persistent Agent (Agent A) having recurring conversations with a mentor AI (Agent B).
 Mentor offers guidance but does NOT overwrite Agent A's values or personality.
 """
 
+from dotenv import load_dotenv
 from pmm.self_model_manager import SelfModelManager
 from pmm.reflection import reflect_once
 from pmm.llm import OpenAIClient
@@ -12,6 +12,9 @@ import time
 import random
 from pathlib import Path
 from inject_stimulus import EVENTS
+
+# Load environment variables after imports to satisfy linter
+load_dotenv()
 
 
 def load_agent(path, name):
@@ -29,7 +32,10 @@ def load_agent(path, name):
 agent_a = load_agent("agent_a.json", "Apprentice_AI")
 # Slightly increase drift delta for exploration & calibration
 try:
-    agent_a.set_drift_params(max_delta_per_reflection=0.03, notes_append="Mentor loop: increase delta for exploration & calibration.")
+    agent_a.set_drift_params(
+        max_delta_per_reflection=0.03,
+        notes_append="Mentor loop: increase delta for exploration & calibration.",
+    )
 except Exception:
     pass
 
@@ -47,7 +53,7 @@ def mentor_reply(apprentice_message: str) -> str:
     """Mentor generates advice in response to apprentice."""
     return mentor_client.chat(
         system=MENTOR_SYSTEM_PROMPT,
-        user=f"The apprentice just said: {apprentice_message}"
+        user=f"The apprentice just said: {apprentice_message}",
     )
 
 
@@ -57,11 +63,13 @@ def _get(obj, key):
         return getattr(obj, key)
     return obj[key]
 
+
 def _set(obj, key, value):
     if hasattr(obj, key):
         setattr(obj, key, value)
     else:
         obj[key] = value
+
 
 def apply_event_effects(mgr: SelfModelManager, effects):
     if not effects:
@@ -101,12 +109,16 @@ if __name__ == "__main__":
 
         # Inject a stimulus and apply its effects before reflecting
         stim = random.choice(EVENTS)
-        agent_a.add_event(summary=f"Stimulus: {stim['summary']}", effects=stim.get("effects", []))
+        agent_a.add_event(
+            summary=f"Stimulus: {stim['summary']}", effects=stim.get("effects", [])
+        )
         apply_event_effects(agent_a, stim.get("effects", []))
 
         # Apprentice reflects
         apprentice_reply = reflect_once(agent_a, OpenAIClient())
-        print(f"Apprentice: {apprentice_reply.content if apprentice_reply else '(no insight)'}")
+        print(
+            f"Apprentice: {apprentice_reply.content if apprentice_reply else '(no insight)'}"
+        )
         # Log apprentice thought and update patterns
         if apprentice_reply and apprentice_reply.content:
             agent_a.add_thought(apprentice_reply.content, trigger="mentor_round")
@@ -120,7 +132,9 @@ if __name__ == "__main__":
                 pass
 
         # Mentor responds to apprentice's last statement
-        mentor_feedback = mentor_reply(apprentice_reply.content if apprentice_reply else "")
+        mentor_feedback = mentor_reply(
+            apprentice_reply.content if apprentice_reply else ""
+        )
         print(f"Mentor: {mentor_feedback}")
         # Optionally log mentor thought and patterns for analysis
         try:
@@ -138,6 +152,7 @@ if __name__ == "__main__":
 
     # After conversation, show Big5 snapshot so drift is visible
     import json
+
     try:
         with open("agent_a.json") as f:
             m = json.load(f)

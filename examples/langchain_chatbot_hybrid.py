@@ -3,32 +3,35 @@
 Hybrid LangChain + PMM Integration: Best of Both Worlds
 
 This combines:
-- Modern LangChain APIs (ChatOpenAI + RunnableWithMessageHistory) 
+- Modern LangChain APIs (ChatOpenAI + RunnableWithMessageHistory)
 - PMM cross-session persistence (remembers users across sessions)
 - Real episodic memory (disk-backed conversation history)
 - Zero deprecated APIs
 """
 
-import os, json, sys, pathlib, hashlib
+import os
+import json
+import sys
+import pathlib
+import hashlib
 from datetime import datetime, timezone
-from typing import Dict, List, Any
+from typing import Dict, List
 from pydantic import BaseModel, Field
-
-# Load environment variables from .env file
 from dotenv import load_dotenv
-load_dotenv()
-
-# Add PMM to path
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
+from langchain_core.messages import AIMessage, HumanMessage, BaseMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
+
+# Add PMM to path for relative import
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 # Import PMM system for cross-session persistence
 from pmm.langchain_memory import PersistentMindMemory
+
+# Load environment variables from .env file (after imports to satisfy linter)
+load_dotenv()
 
 # ---------- Config ----------
 SESSION_ID = os.getenv("PMM_SESSION_ID", "default")
@@ -44,15 +47,16 @@ pmm_memory = PersistentMindMemory(
     agent_path="langchain_hybrid_agent.json",
     personality_config={
         "openness": 0.7,
-        "conscientiousness": 0.6, 
+        "conscientiousness": 0.6,
         "extraversion": 0.8,
         "agreeableness": 0.9,
-        "neuroticism": 0.3
-    }
+        "neuroticism": 0.3,
+    },
 )
 
 # ---------- Disk-backed message history ----------
 MAX_TURNS = 20  # Token management
+
 
 def load_history() -> List[BaseMessage]:
     if not HIST_PATH.exists():
@@ -64,21 +68,33 @@ def load_history() -> List[BaseMessage]:
             role, content = rec["role"], rec["content"]
             if role == "system":
                 continue  # Skip system messages to avoid double injection
-            elif role == "human": 
+            elif role == "human":
                 msgs.append(HumanMessage(content=content))
-            else:                 
+            else:
                 msgs.append(AIMessage(content=content))
     # Keep only recent turns for token management
     if MAX_TURNS:
         msgs = msgs[-MAX_TURNS:]
     return msgs
 
+
 def save_message(role: str, content: str) -> None:
     with HIST_PATH.open("a", encoding="utf-8") as f:
-        f.write(json.dumps({"t": datetime.now(timezone.utc).isoformat(), "role": role, "content": content}) + "\n")
+        f.write(
+            json.dumps(
+                {
+                    "t": datetime.now(timezone.utc).isoformat(),
+                    "role": role,
+                    "content": content,
+                }
+            )
+            + "\n"
+        )
+
 
 # LangChain expects an in-memory history object per session
 _store: Dict[str, ChatMessageHistory] = {}
+
 
 def get_session_history(session_id: str) -> ChatMessageHistory:
     if session_id not in _store:
@@ -88,21 +104,23 @@ def get_session_history(session_id: str) -> ChatMessageHistory:
         _store[session_id] = hist
     return _store[session_id]
 
+
 # ---------- Enhanced System Message with PMM Context ----------
 def safe_context(s: str, max_chars: int = 4000) -> str:
     if len(s) <= max_chars:
         return s
     return "...(pmm context truncated)...\n" + s[-max_chars:]
 
+
 def get_hybrid_system_message():
     # Get PMM personality context (includes cross-session memory)
     pmm_context = pmm_memory.load_memory_variables({}).get("history", "")
     pmm_context = safe_context(pmm_context)  # Prevent token explosion
-    
+
     # Extract personality summary
     personality = pmm_memory.get_personality_summary()
     traits = personality["personality_traits"]
-    
+
     return (
         "You are an AI assistant with a persistent personality that evolves over time.\n\n"
         f"Personality Profile (Big Five):\n"
@@ -117,14 +135,17 @@ def get_hybrid_system_message():
         "Pay attention to both the immediate conversation history and your cross-session memories."
     )
 
+
 # ---------- Model + Prompt ----------
 sys_msg = get_hybrid_system_message()
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", sys_msg),
-    MessagesPlaceholder(variable_name="history"),
-    ("human", "{input}")
-])
+prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", sys_msg),
+        MessagesPlaceholder(variable_name="history"),
+        ("human", "{input}"),
+    ]
+)
 
 llm = ChatOpenAI(model=MODEL, temperature=TEMPERATURE, max_tokens=2000, timeout=30)
 chain = prompt | llm
@@ -137,6 +158,7 @@ history_chain = RunnableWithMessageHistory(
     history_messages_key="history",
 )
 
+
 # ---------- Structured Output Models for Probes ----------
 class Capsule(BaseModel):
     personality_vector: List[float] = Field(min_length=5, max_length=5)
@@ -144,45 +166,56 @@ class Capsule(BaseModel):
     open_commitment_ids: List[str]
     operating_stance: List[str] = Field(min_length=2, max_length=2)
 
+
 # ---------- Probe Helper Functions ----------
 def violates_freshness(candidate: str, seen: List[str], n: int = 4) -> bool:
     """Check if candidate has >=n contiguous words matching any seen sentence"""
     grams = set()
     for s in seen:
         toks = s.lower().split()
-        grams |= {" ".join(toks[i:i+n]) for i in range(len(toks)-n+1)}
+        grams |= {" ".join(toks[i : i + n]) for i in range(len(toks) - n + 1)}
     ctoks = candidate.lower().split()
-    return any(" ".join(ctoks[i:i+n]) in grams for i in range(len(ctoks)-n+1))
+    return any(" ".join(ctoks[i : i + n]) in grams for i in range(len(ctoks) - n + 1))
+
 
 def ask_with_repair(prompt: str, check, max_tries: int = 2):
     """Ask LLM with auto-repair on validation failure"""
     msg = llm.invoke(prompt).content
     for _ in range(max_tries):
         ok, err = check(msg)
-        if ok: return msg
+        if ok:
+            return msg
         msg = llm.invoke(f"{prompt}\n\nFix strictly. Error: {err}").content
     return msg
+
 
 def get_grounded_traits():
     """Get current traits from PMM state, not model memory"""
     personality = pmm_memory.get_personality_summary()
     return personality["personality_traits"]
 
+
 def get_grounded_commitments():
     """Get actual commitment IDs from PMM state"""
     # This would need PMM commitment tracking - for now return mock structure
     return {f"c{i}": f"Commitment {i}" for i in range(1, 42)}  # Mock 41 commitments
 
+
 def handle_probe_capsule():
     """Handle Probe 7: Capsule with structured output"""
     capsule_llm = llm.with_structured_output(Capsule)
-    capsule = capsule_llm.invoke("Return Capsule fields only. 12-word insight max; 18-word stance lines.")
+    capsule = capsule_llm.invoke(
+        "Return Capsule fields only. 12-word insight max; 18-word stance lines."
+    )
     payload = capsule.model_dump()
-    blob = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    blob = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
     sha = hashlib.sha256(blob).hexdigest()
-    
+
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     print(f"\nSHA256:{sha}")
+
 
 # ---------- CLI Loop ----------
 print("\n" + "=" * 80)
@@ -247,10 +280,10 @@ while True:
     if user.lower() in {"quit", "exit"}:
         print("👋 Goodbye!")
         break
-        
+
     if user.lower() == "personality":
         personality = pmm_memory.get_personality_summary()
-        print(f"\n🎭 Current Personality State:")
+        print("\n🎭 Current Personality State:")
         print("   ┌─────────────────────────────────────┐")
         for trait, score in personality["personality_traits"].items():
             print(f"   │ {trait.title():<15} : {score:>6.2f}     │")
@@ -264,14 +297,14 @@ while True:
             print(f"   • Patterns: {list(personality['behavioral_patterns'].keys())}")
         print()
         continue
-        
+
     if user.lower() == "memory":
         pmm_context = pmm_memory.load_memory_variables({}).get("history", "")
-        print(f"\n🧠 Cross-Session Memory Context:")
+        print("\n🧠 Cross-Session Memory Context:")
         print("   ┌" + "─" * 60 + "┐")
         if pmm_context:
             # Format memory context with proper line breaks
-            context_lines = pmm_context[:500].split('\n')
+            context_lines = pmm_context[:500].split("\n")
             for line in context_lines[:8]:  # Show first 8 lines
                 print(f"   │ {line[:58]:<58} │")
             if len(pmm_context) > 500:
@@ -281,7 +314,7 @@ while True:
         print("   └" + "─" * 60 + "┘")
         print()
         continue
-        
+
     if user.lower() == "clear":
         # Clear session history
         HIST_PATH.unlink(missing_ok=True)
@@ -298,20 +331,22 @@ while True:
     if user.startswith("Probe 7: Capsule"):
         handle_probe_capsule()
         continue
-    
+
     # Save to both systems
     save_message("human", user)
-    
+
     # Get AI response with error handling
     try:
-        ai = history_chain.invoke({"input": user}, config={"configurable": {"session_id": SESSION_ID}})
+        ai = history_chain.invoke(
+            {"input": user}, config={"configurable": {"session_id": SESSION_ID}}
+        )
         text = ai.content
     except Exception as e:
         text = f"[Error generating response: {e}]"
-    
+
     print(f"\n🤖 Assistant: {text}")
     print()
-    
+
     # Save AI response to both systems
     save_message("ai", text)
     pmm_memory.save_context({"input": user}, {"response": text})

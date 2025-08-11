@@ -10,8 +10,7 @@ except Exception:  # jsonschema not installed yet; make validation a no-op
 
 
 class SchemaValidator:
-    """Wrap jsonschema validation. If schema file or jsonschema is missing, validation is skipped.
-    """
+    """Wrap jsonschema validation. If schema file or jsonschema is missing, validation is skipped."""
 
     def __init__(self, schema_path: str = "schema/pmm.schema.json"):
         self._enabled = False
