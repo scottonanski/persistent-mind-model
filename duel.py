@@ -207,9 +207,9 @@ def agent_step(
         b5_after = _big5_snapshot(agent_mgr)
         # Compute actual applied drift this call
         drift_applied = {k: round(b5_after[k] - b5_before[k], 6) for k in b5_before}
-        if any(abs(v) >= 0.0001 for v in drift_applied.values()):
+        if any(abs(v) >= 0.00001 for v in drift_applied.values()):
             drift_str = ", ".join(
-                [f"{k}:{v:+.3f}" for k, v in drift_applied.items() if abs(v) >= 0.0001]
+                [f"{k}:{v:+.6f}" for k, v in drift_applied.items() if abs(v) >= 0.00001]
             )
             print(f"   🔄 Drift applied: {drift_str}")
             # Log evidence signals if available
@@ -246,7 +246,16 @@ def agent_step(
             except Exception as ex:
                 print(f"   ⚠️  Evidence logging failed: {type(ex).__name__}")
         else:
-            print("   ⚪ No significant drift this turn")
+            # Note when traits are effectively clamped at bounds, explaining lack of visible drift
+            clamped_traits = [
+                k for k, v in b5_before.items() if v >= 0.999 or v <= 0.001
+            ]
+            if clamped_traits:
+                print(
+                    f"   ⚪ No significant drift this turn (clamped: {', '.join(clamped_traits)})"
+                )
+            else:
+                print("   ⚪ No significant drift this turn")
     except Exception as e:
         print(f"   ⚠️  Drift application failed: {type(e).__name__}: {str(e)}")
 
@@ -261,11 +270,43 @@ def agent_step(
     overlap = _overlap_pct(
         prev_insight_text or "", response.content if response else ""
     )
+
+    # Compute 8-insight n-gram overlap aligned with reflect_once freshness guard
+    overlap8_pct = 0.0
+    try:
+        insights = agent_mgr.model.self_knowledge.insights or []
+        # Use last 8 insights BEFORE the current one (reflect_once already appended it)
+        prior = insights[:-1][-8:]
+        ngram_cache = set()
+        for ins in prior:
+            words = (getattr(ins, "content", "") or "").lower().split()
+            for n in range(2, 5):
+                for i in range(len(words) - n + 1):
+                    gram = " ".join(words[i : i + n])
+                    if all(len(w) > 2 for w in words[i : i + n]):
+                        ngram_cache.add(gram)
+
+        cur_txt = (response.content if response else "").lower()
+        cur_words = cur_txt.split()
+        cur_ngrams = set()
+        for n in range(2, 5):
+            for i in range(len(cur_words) - n + 1):
+                gram = " ".join(cur_words[i : i + n])
+                if all(len(w) > 2 for w in cur_words[i : i + n]):
+                    cur_ngrams.add(gram)
+
+        overlap_ratio = (
+            len(cur_ngrams & ngram_cache) / len(cur_ngrams) if cur_ngrams else 0.0
+        )
+        overlap8_pct = round(100.0 * overlap_ratio, 1)
+    except Exception:
+        pass
     metrics = {
         "big5": cur_b5,
         "delta": delta,  # This shows immediate per-utterance delta (usually 0.0)
         "commitments": commitments,
         "overlap_pct_prev": overlap,
+        "overlap_pct_8": overlap8_pct,
     }
     return (response.content if response else "(no insight)", metrics)
 
@@ -285,14 +326,14 @@ if __name__ == "__main__":
         reply_a, info_a = agent_step(agent_a, "Agent_B", last_message, stimulator_a)
         print(f"\nA: {reply_a}")
         print(
-            f"   · commitments: {info_a['commitments']}  · ΔBig5: {info_a['delta']}  · overlap(prev): {info_a['overlap_pct_prev']}%"
+            f"   · commitments: {info_a['commitments']}  · ΔBig5: {info_a['delta']}  · overlap(prev): {info_a['overlap_pct_prev']}%  · overlap(8): {info_a['overlap_pct_8']}%"
         )
 
         # Agent B speaks to Agent A
         reply_b, info_b = agent_step(agent_b, "Agent_A", reply_a, stimulator_b)
         print(f"\nB: {reply_b}")
         print(
-            f"   · commitments: {info_b['commitments']}  · ΔBig5: {info_b['delta']}  · overlap(prev): {info_b['overlap_pct_prev']}%"
+            f"   · commitments: {info_b['commitments']}  · ΔBig5: {info_b['delta']}  · overlap(prev): {info_b['overlap_pct_prev']}%  · overlap(8): {info_b['overlap_pct_8']}%"
         )
 
         last_message = reply_b
