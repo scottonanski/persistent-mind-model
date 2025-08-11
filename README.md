@@ -4,6 +4,18 @@
 
 PMM provides a practical way to maintain a consistent personality and memory across sessions and, where supported, across different LLM backends. It tracks traits, commitments, and memories with reproducible, testable logic.
 
+## ⚡ **Quickstart (60 seconds)**
+
+```bash
+git clone https://github.com/scottonanski/persistent-mind-model.git
+cd persistent-mind-model/examples
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python langchain_chatbot_hybrid.py
+```
+
+**⭐ If Echo helps you, please star the repo and open a Discussion to say hi.**
+
 ## 🔧 **PMM Next-Stage Architecture (experimental)**
 
 **Enhanced Memory Management with Cryptographic Integrity**
