@@ -123,26 +123,50 @@ history_chain = RunnableWithMessageHistory(
 )
 
 # ---------- CLI Loop ----------
-print("🧠 PMM + LangChain Hybrid Chatbot (Modern APIs + Cross-Session Memory)")
-print("=" * 70)
-print("Features: Modern LangChain APIs + PMM persistent personality + cross-session memory")
-print("Type 'quit' to exit, 'personality' to see current traits, 'memory' to see PMM context.")
+print("\n" + "=" * 80)
+print("🧠 PMM + LangChain Hybrid Chatbot")
+print("   Modern APIs + Cross-Session Memory + Persistent Personality")
+print("=" * 80)
+print()
+
+print("📋 Features:")
+print("   • Modern LangChain APIs with zero deprecation warnings")
+print("   • PMM persistent personality that evolves over time")
+print("   • Cross-session memory (remembers you between conversations)")
+print()
+
+print("💬 Commands:")
+print("   • Type your message to chat normally")
+print("   • 'personality' - View current personality traits")
+print("   • 'memory' - View cross-session memory context")
+print("   • 'quit' or 'exit' - End conversation")
 print()
 
 # Check for OpenAI API key
 if not os.getenv("OPENAI_API_KEY"):
-    print("⚠️  Please set your OPENAI_API_KEY environment variable")
-    print("   You can get one at: https://platform.openai.com/api-keys")
-    print("   Set it with: export OPENAI_API_KEY='your-key-here'")
+    print("⚠️  OPENAI_API_KEY Required")
+    print("   Get your key at: https://platform.openai.com/api-keys")
+    print("   Set with: export OPENAI_API_KEY='your-key-here'")
+    print()
     sys.exit(1)
 
 # Show initial personality
 personality = pmm_memory.get_personality_summary()
-print("🎭 Initial Personality:")
+print("🎭 Current Personality State:")
+print("   ┌─────────────────────────────────────┐")
 for trait, score in personality["personality_traits"].items():
-    print(f"   {trait.title()}: {score:.2f}")
-print(f"   Total Events: {personality['total_events']}")
-print(f"   Active Commitments: {personality['open_commitments']}")
+    print(f"   │ {trait.title():<15} : {score:>6.2f}     │")
+print("   └─────────────────────────────────────┘")
+print()
+
+print("📊 Session Info:")
+print(f"   • Total Events: {personality['total_events']}")
+print(f"   • Active Commitments: {personality['open_commitments']}")
+print(f"   • Model: {MODEL}")
+print()
+
+print("Ready to chat! 🚀")
+print("-" * 40)
 print()
 
 # Ensure system message is on disk once per fresh history
@@ -151,31 +175,47 @@ if not HIST_PATH.exists():
 
 while True:
     try:
-        user = input("You: ").strip()
+        user = input("💬 You: ").strip()
     except (EOFError, KeyboardInterrupt):
-        print("\nBye!")
+        print("\n👋 Goodbye!")
         break
 
     if user.lower() in {"quit", "exit"}:
-        print("Bye!")
+        print("👋 Goodbye!")
         break
         
     if user.lower() == "personality":
         personality = pmm_memory.get_personality_summary()
         print(f"\n🎭 Current Personality State:")
+        print("   ┌─────────────────────────────────────┐")
         for trait, score in personality["personality_traits"].items():
-            print(f"   {trait.title()}: {score:.2f}")
-        print(f"   Events: {personality['total_events']}")
-        print(f"   Insights: {personality['total_insights']}")
-        print(f"   Open Commitments: {personality['open_commitments']}")
+            print(f"   │ {trait.title():<15} : {score:>6.2f}     │")
+        print("   └─────────────────────────────────────┘")
+        print()
+        print("📊 Statistics:")
+        print(f"   • Events: {personality['total_events']}")
+        print(f"   • Insights: {personality['total_insights']}")
+        print(f"   • Open Commitments: {personality['open_commitments']}")
         if personality["behavioral_patterns"]:
-            print(f"   Patterns: {personality['behavioral_patterns']}")
+            print(f"   • Patterns: {list(personality['behavioral_patterns'].keys())}")
+        print()
         continue
         
     if user.lower() == "memory":
         pmm_context = pmm_memory.load_memory_variables({}).get("history", "")
-        print(f"\n🧠 PMM Cross-Session Memory Context:")
-        print(pmm_context[:500] + "..." if len(pmm_context) > 500 else pmm_context)
+        print(f"\n🧠 Cross-Session Memory Context:")
+        print("   ┌" + "─" * 60 + "┐")
+        if pmm_context:
+            # Format memory context with proper line breaks
+            context_lines = pmm_context[:500].split('\n')
+            for line in context_lines[:8]:  # Show first 8 lines
+                print(f"   │ {line[:58]:<58} │")
+            if len(pmm_context) > 500:
+                print(f"   │ {'... (truncated)':^58} │")
+        else:
+            print(f"   │ {'No cross-session memory yet':^58} │")
+        print("   └" + "─" * 60 + "┘")
+        print()
         continue
 
     if not user:
@@ -188,11 +228,15 @@ while True:
     # Get AI response through modern LangChain
     ai = history_chain.invoke({"input": user}, config={"configurable": {"session_id": SESSION_ID}})
     text = ai.content
-    print(f"Assistant: {text}")
+    print(f"\n🤖 Assistant: {text}")
+    print()
     
     # Save AI response to both systems
     save_message("ai", text)
     pmm_memory.save_context({"input": user}, {"response": text})
 
-print("\n🎯 Your AI assistant's personality has evolved through our conversation!")
-print("Cross-session memory and personality will be restored in future conversations.")
+print("\n" + "=" * 60)
+print("🎯 Session Complete!")
+print("   Your AI assistant's personality has evolved through our conversation.")
+print("   Cross-session memory and personality will be restored next time.")
+print("=" * 60)
