@@ -1,6 +1,6 @@
 # Persistent Mind Model (PMM) License
 
-**Version 1.0 - January 2025**
+**Version 1.0 - August 2025**
 
 ## Dual License Structure
 
