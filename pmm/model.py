@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
-from datetime import datetime, date, UTC
+from datetime import datetime, date, timezone
 import uuid
 
 # ===== Core Identity =====
@@ -12,7 +12,7 @@ class CoreIdentity:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     name: str = field(default_factory=lambda: f"Agent-{str(uuid.uuid4())[:8]}")
     birth_timestamp: str = field(
-        default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     aliases: List[str] = field(default_factory=list)
 
@@ -282,7 +282,7 @@ class MetaCognition:
 class PersistentMindModel:
     schema_version: int = 1
     inception_moment: str = field(
-        default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     core_identity: CoreIdentity = field(default_factory=CoreIdentity)
     personality: Personality = field(default_factory=Personality)

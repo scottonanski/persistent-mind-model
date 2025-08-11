@@ -1,10 +1,8 @@
 from __future__ import annotations
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Dict
 from .model import PersistentMindModel, TraitScore, IdentityChange
-from datetime import timezone as tz
 
-UTC = tz.utc
 
 
 def _days_since(yyyy_mm_dd: str) -> int:
@@ -34,7 +32,7 @@ def apply_effects(model: PersistentMindModel) -> Dict[str, float]:
     """Apply pending effects_hypothesis to traits.
     Returns net drift per trait-path (without .score).
     """
-    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     cfg = model.drift_config
     net: Dict[str, float] = {}
 

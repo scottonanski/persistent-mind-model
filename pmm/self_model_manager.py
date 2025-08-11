@@ -3,7 +3,7 @@ import json
 import threading
 import os
 from dataclasses import asdict
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Optional, List
 
 from .model import (
@@ -276,7 +276,7 @@ class SelfModelManager:
         etype: str = "experience",
     ) -> Event:
         ev_id = f"ev{len(self.model.self_knowledge.autobiographical_events)+1}"
-        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         eff_objs: List[EffectHypothesis] = []
         for e in effects or []:
             eff_objs.append(
@@ -295,7 +295,7 @@ class SelfModelManager:
 
     def add_thought(self, content: str, trigger: str = "") -> Thought:
         th_id = f"th{len(self.model.self_knowledge.thoughts)+1}"
-        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         th = Thought(id=th_id, t=ts, content=content, trigger=trigger)
         self.model.self_knowledge.thoughts.append(th)
         self.save_model()
@@ -303,7 +303,7 @@ class SelfModelManager:
 
     def add_insight(self, content: str) -> Insight:
         in_id = f"in{len(self.model.self_knowledge.insights)+1}"
-        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         ins = Insight(id=in_id, t=ts, content=content)
         self.model.self_knowledge.insights.append(ins)
 
@@ -506,7 +506,7 @@ class SelfModelManager:
             return
         bmin = self.model.drift_config.bounds.min
         bmax = self.model.drift_config.bounds.max
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         b5 = self.model.personality.traits.big5
         with self.lock:
             for k, v in updates.items():

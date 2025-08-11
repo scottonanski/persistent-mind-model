@@ -4,7 +4,7 @@ Commitment lifecycle management for Persistent Mind Model.
 Tracks agent commitments from creation to completion.
 """
 
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 
@@ -62,7 +62,7 @@ class CommitmentTracker:
             return ""
 
         cid = f"c{len(self.commitments) + 1}"
-        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         commitment = Commitment(
             cid=cid,
@@ -85,7 +85,7 @@ class CommitmentTracker:
 
         commitment = self.commitments[cid]
         commitment.status = status
-        commitment.closed_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        commitment.closed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         commitment.close_note = note
         return True
 
@@ -223,7 +223,7 @@ class CommitmentTracker:
     def expire_old_commitments(self, days_old: int = 30) -> List[str]:
         """Mark old commitments as expired."""
         expired_cids = []
-        cutoff = datetime.now(UTC) - timedelta(days=days_old)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days_old)
 
         for cid, commitment in self.commitments.items():
             if commitment.status != "open":

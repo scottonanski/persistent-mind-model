@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import List
 from .self_model_manager import SelfModelManager, _log
 from .llm import OpenAIClient
@@ -150,7 +150,7 @@ def reflect_once(mgr: SelfModelManager, llm: OpenAIClient) -> Insight | None:
         txt = txt[:400] + "..."
 
     ins_id = f"in{len(mgr.model.self_knowledge.insights)+1}"
-    ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Extract commitment
     _commitment = _extract_commitment(txt)
