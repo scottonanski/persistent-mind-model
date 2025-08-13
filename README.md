@@ -404,4 +404,23 @@ curl http://localhost:8000/emergence
 
 ## License
 
-MIT License - See LICENSE file for details.
+**Dual License Structure:**
+
+### Non-Commercial License (Free)
+- ✅ Personal projects and experimentation
+- ✅ Academic research and educational purposes  
+- ✅ Open source projects (non-commercial)
+- ✅ Evaluation and testing
+- ❌ Commercial use or monetization
+
+### Commercial License (Paid)
+For commercial use, contact: **s.onanski@gmail.com**
+
+**Attribution Required:**
+- Copyright notice: "© 2025 Scott Onanski - Persistent Mind Model"
+- Link to original repository
+- License notice in derivative works
+
+**Questions?** Contact s.onanski@gmail.com for licensing clarification.
+
+**Copyright © 2025 Scott Onanski. All rights reserved.**
