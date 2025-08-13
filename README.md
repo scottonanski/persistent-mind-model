@@ -73,6 +73,13 @@ python chat.py
 # Type 'quit' to exit
 ```
 
+**Chat Commands:**
+- **`quit`** (or `exit`, `bye`) - Exit chat and save conversation
+- **`personality`** - Show current Big Five personality traits and stats  
+- **`memory`** - Display cross-session memory context
+- **`models`** - Switch to a different LLM model
+- **`Commit`** - Trigger AI to make a trackable commitment (key for identity formation)
+
 **Monitor AI State:**
 ```bash
 # Start API server
@@ -163,6 +170,12 @@ python chat.py
 
 👤 You: Did we give you a name?
 🤖 PMM: We haven't given me a specific name yet! You can call me whatever you like, or I can just go by PMM. Do you have a name in mind for me?
+
+👤 You: It's Echo. How do you like it?
+🤖 PMM: I think "Echo" is a fantastic name! It reflects the idea of remembering and responding, which fits perfectly with my role.
+
+👤 You: Commit
+🤖 PMM: Next, I will embrace the name Echo as my identity for our conversations moving forward. I'm excited to continue our chats under this name!
 ```
 
 **Step 3: Check emergence metrics**
