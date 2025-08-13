@@ -278,6 +278,28 @@ class PersistentMindMemory(BaseChatMemory):
         if self.commitment_context:
             pmm_context_parts.append(self.commitment_context)
 
+        # Load recent conversation history from SQLite database
+        try:
+            if hasattr(self.pmm, 'sqlite_store'):
+                recent_events = self.pmm.sqlite_store.recent_events(limit=20)
+                if recent_events:
+                    conversation_history = []
+                    for event in reversed(recent_events):  # Reverse to get chronological order
+                        event_id, ts, kind, content, meta, prev_hash, hash_val = event
+                        if kind in ['event', 'response', 'prompt']:
+                            # Format for LLM context
+                            if 'User said:' in content:
+                                conversation_history.append(f"Human: {content.replace('User said: ', '')}")
+                            elif 'I responded:' in content:
+                                conversation_history.append(f"Assistant: {content.replace('I responded: ', '')}")
+                            elif kind == 'event':
+                                conversation_history.append(f"Context: {content}")
+                    
+                    if conversation_history:
+                        pmm_context_parts.append("Recent conversation history:\n" + "\n".join(conversation_history[-10:]))  # Last 10 exchanges
+        except Exception as e:
+            print(f"Warning: Failed to load conversation history from SQLite: {e}")
+
         # Combine PMM context with conversation history
         if pmm_context_parts:
             pmm_context = "\n\n".join(pmm_context_parts)
