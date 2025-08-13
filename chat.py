@@ -216,6 +216,7 @@ def main():
     
     # Create enhanced system prompt with PMM context
     def get_pmm_system_prompt():
+        # Get FRESH memory context each time (this is the fix!)
         pmm_context = pmm_memory.load_memory_variables({}).get("history", "")
         personality = pmm_memory.get_personality_summary()
         traits = personality["personality_traits"]
@@ -228,7 +229,7 @@ def main():
             f"- Extraversion: {traits['extraversion']:.3f}\n"
             f"- Agreeableness: {traits['agreeableness']:.3f}\n"
             f"- Neuroticism: {traits['neuroticism']:.3f}\n\n"
-            f"CROSS-SESSION MEMORY:\n{pmm_context[:1000]}\n\n"
+            f"CROSS-SESSION MEMORY:\n{pmm_context[:1500]}\n\n"
             f"You have persistent memory across sessions and remember users. Respond authentically based on your personality traits and memory. "
             f"If you make commitments, use 'Next, I will...' format."
         )
@@ -377,6 +378,9 @@ def main():
             
             # Add user input to conversation history
             conversation_history.append({"role": "user", "content": user_input})
+            
+            # CRITICAL FIX: Refresh system prompt with latest memory context before each response
+            conversation_history[0] = {"role": "system", "content": get_pmm_system_prompt()}
             
             # Show API call info
             current_config = get_model_config(model_name)

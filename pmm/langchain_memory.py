@@ -366,7 +366,7 @@ class PersistentMindMemory(BaseChatMemory):
                                 conversation_history.append(f"Assistant: {ai_msg}")
                                 
                                 # Extract commitments and identity info
-                                if 'next, i will' in ai_msg.lower() or 'my name is' in ai_msg.lower():
+                                if 'next, i will' in ai_msg.lower() or 'scott' in ai_msg.lower():
                                     key_facts.append(f"COMMITMENT/IDENTITY: {ai_msg}")
                                     
                             elif kind == 'event':
