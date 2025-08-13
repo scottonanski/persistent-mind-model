@@ -220,6 +220,106 @@ From actual ChatGPT-4 testing session:
 
 **Continue chatting and watch the scores evolve in real-time!**
 
+## Proof It's Not Just LARPing
+
+**Skeptical? Good.** Here are the specific commands to verify PMM isn't just a hallucination machine:
+
+### **Hash-Chain Integrity Verification**
+```bash
+curl http://localhost:8000/integrity
+```
+**Evidence:** Every conversation event has cryptographic SHA-256 hash linking to previous events. Hallucinations can't maintain cryptographic integrity across sessions.
+
+### **Database Direct Inspection**
+```bash
+# Install SQLite browser
+sudo apt install sqlitebrowser  # Linux
+# brew install --cask db-browser-for-sqlite  # Mac
+
+# Examine raw data structures
+sqlitebrowser pmm.db
+```
+**Evidence:** Raw SQLite database shows structured psychological state (events, commitments, trait changes with timestamps) - not just chat logs or fabricated responses.
+
+### **Cross-Session Memory Test**
+```bash
+# Session 1: Establish unique identifier
+python chat.py
+# > "Hi, I'm TestUser123 and I prefer technical explanations"
+# > quit
+
+# Session 2: Test genuine persistence  
+python chat.py
+# > "What's my name and communication preference?"
+```
+**Evidence:** If AI remembers "TestUser123" and "technical explanations" without re-input, that's verifiable persistence, not hallucination.
+
+### **Commitment Tracking Verification**
+```bash
+# Make specific, trackable commitment
+# > "Next, I will always explain concepts with concrete examples"
+
+# Verify it's actually stored
+curl http://localhost:8000/commitments
+
+# Test behavioral consistency in later conversations
+# > "Explain machine learning"
+# (Should include concrete examples as committed)
+```
+**Evidence:** System tracks specific promises and measures fulfillment - behavioral consistency beyond simple recall.
+
+### **Personality Drift Mathematical Proof**
+```bash
+# Record baseline traits
+curl http://localhost:8000/traits
+
+# Have conversations with different interaction styles
+# (formal vs casual, technical vs simple, etc.)
+
+# Measure evidence-based changes
+curl http://localhost:8000/traits
+```
+**Evidence:** Personality traits change mathematically based on interaction patterns, not random drift or fabricated evolution.
+
+### **Stage Progression Validation**
+```bash
+# Start with fresh database
+rm pmm.db
+
+# Conduct systematic identity-formation conversation
+python chat.py
+# Ask increasingly self-referential questions
+# Monitor emergence metrics
+curl http://localhost:8000/emergence
+```
+**Evidence:** Measurable S0→S1→S2→S3→S4 progression following predictable psychological patterns with quantifiable IAS/GAS scores.
+
+### **Test Suite Mathematical Validation**
+```bash
+pytest tests/test_emergence.py -v
+```
+**Evidence:** 8 specific tests validate emergence scoring follows mathematical rules, not random generation.
+
+### **The Smoking Gun: What LARPing Can't Do**
+
+**If PMM were just hallucinating:**
+- ❌ Database would contain only generic chat logs
+- ❌ Hash chain would be broken or fabricated  
+- ❌ Cross-session memory would fail consistently
+- ❌ Commitments wouldn't be tracked or fulfilled
+- ❌ Personality changes would be random, not evidence-based
+- ❌ Stage progression would be inconsistent or fabricated
+
+**What PMM actually provides:**
+- ✅ Cryptographically verified event integrity
+- ✅ Structured psychological state persistence
+- ✅ Behavioral consistency tracking and measurement
+- ✅ Mathematical personality evolution with evidence weighting
+- ✅ Reproducible identity emergence following psychological models
+- ✅ Verifiable commitment fulfillment across sessions
+
+**PMM is designed to be skeptic-proof.** Every claim is backed by verifiable data structures, cryptographic integrity, and mathematical measurement. Try the verification commands above and see the evidence for yourself.
+
 ## API Endpoints
 
 **Start monitoring server:**
