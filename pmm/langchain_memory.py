@@ -33,7 +33,7 @@ from pydantic import Field
 
 from .self_model_manager import SelfModelManager
 from .reflection import reflect_once
-from .llm import OpenAIClient
+from .adapters.openai_adapter import OpenAIAdapter
 from .commitments import CommitmentTracker
 
 
@@ -143,6 +143,65 @@ class PersistentMindMemory(BaseChatMemory):
 
         self.personality_context = "\n".join(context_parts)
 
+    def _auto_extract_key_info(self, user_input: str) -> None:
+        """
+        Automatically extract and remember key information from user input.
+
+        This method detects:
+        - Names ("My name is X", "I am X", "Call me X")
+        - Preferences ("I like X", "I prefer X")
+        - Important facts about the user
+        """
+        try:
+            user_lower = user_input.lower().strip()
+
+            # Extract names
+            name_patterns = [
+                r"my name is (\w+)",
+                r"i am (\w+)",
+                r"call me (\w+)",
+                r"i'm (\w+)",
+            ]
+
+            import re
+
+            for pattern in name_patterns:
+                match = re.search(pattern, user_lower)
+                if match:
+                    name = match.group(1).title()
+                    # Store as a high-priority event
+                    self.pmm.add_event(
+                        summary=f"IMPORTANT: User's name is {name}",
+                        effects=[],
+                        etype="identity_info",
+                    )
+                    print(f" Automatically remembered: User's name is {name}")
+                    break
+
+            # Extract preferences and other key info
+            preference_patterns = [
+                r"i like (.+)",
+                r"i prefer (.+)",
+                r"i work (?:on|at|with) (.+)",
+                r"i am (.+?) (?:and|but|,|\.|$)",
+            ]
+
+            for pattern in preference_patterns:
+                match = re.search(pattern, user_lower)
+                if match and len(match.group(1)) < 50:  # Avoid capturing too much
+                    info = match.group(1).strip()
+                    if info and len(info) > 2:  # Valid info
+                        self.pmm.add_event(
+                            summary=f"PREFERENCE: User {match.group(0)}",
+                            effects=[],
+                            etype="preference_info",
+                        )
+                        break
+
+        except Exception:
+            # Silently handle errors in auto-extraction
+            pass
+
     def _update_commitment_context(self) -> None:
         """Generate commitment context for LLM prompts."""
         try:
@@ -200,6 +259,10 @@ class PersistentMindMemory(BaseChatMemory):
                     effects=[],
                     etype="conversation",
                 )
+
+                # Automatically extract and remember key information
+                self._auto_extract_key_info(human_input)
+
                 pass  # Event added successfully
             except Exception:
                 pass  # Silently handle errors in production
@@ -278,6 +341,62 @@ class PersistentMindMemory(BaseChatMemory):
         if self.commitment_context:
             pmm_context_parts.append(self.commitment_context)
 
+        # Load recent conversation history from SQLite database
+        try:
+            if hasattr(self.pmm, "sqlite_store"):
+                # Load more events to capture key information like names
+                recent_events = self.pmm.sqlite_store.recent_events(limit=50)
+                if recent_events:
+                    conversation_history = []
+                    key_facts = []  # Extract key facts like names
+
+                    for event in reversed(
+                        recent_events
+                    ):  # Reverse to get chronological order
+                        event_id, ts, kind, content, meta, prev_hash, hash_val = event
+                        if kind in ["event", "response", "prompt"]:
+                            # Format for LLM context
+                            if "User said:" in content:
+                                user_msg = content.replace("User said: ", "")
+                                conversation_history.append(f"Human: {user_msg}")
+
+                                # Extract key information automatically
+                                if (
+                                    "my name is" in user_msg.lower()
+                                    or "i am" in user_msg.lower()
+                                ):
+                                    key_facts.append(f"IMPORTANT: {user_msg}")
+
+                            elif "I responded:" in content:
+                                ai_msg = content.replace("I responded: ", "")
+                                conversation_history.append(f"Assistant: {ai_msg}")
+
+                                # Extract commitments and identity info
+                                if (
+                                    "next, i will" in ai_msg.lower()
+                                    or "scott" in ai_msg.lower()
+                                ):
+                                    key_facts.append(f"COMMITMENT/IDENTITY: {ai_msg}")
+
+                            elif kind == "event":
+                                conversation_history.append(f"Context: {content}")
+
+                    if conversation_history:
+                        # Add key facts at the top for emphasis
+                        if key_facts:
+                            pmm_context_parts.append(
+                                "Key Information to Remember:\n"
+                                + "\n".join(key_facts[-5:])
+                            )
+
+                        # Add recent conversation history
+                        pmm_context_parts.append(
+                            "Recent conversation history:\n"
+                            + "\n".join(conversation_history[-15:])
+                        )  # Last 15 exchanges
+        except Exception as e:
+            print(f"Warning: Failed to load conversation history from SQLite: {e}")
+
         # Combine PMM context with conversation history
         if pmm_context_parts:
             pmm_context = "\n\n".join(pmm_context_parts)
@@ -322,7 +441,7 @@ class PersistentMindMemory(BaseChatMemory):
         Returns the generated insight or None if reflection fails.
         """
         try:
-            insight = reflect_once(self.pmm, OpenAIClient())
+            insight = reflect_once(self.pmm, OpenAIAdapter())
             if insight:
                 self._update_personality_context()
                 self._update_commitment_context()
