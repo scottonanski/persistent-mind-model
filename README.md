@@ -30,6 +30,11 @@ python chat.py
 pytest
 ```
 
+**You can switch between different AI models anytime by typing:**
+```bash
+models
+```
+
 **Start monitoring API:**
 ```bash
 uvicorn pmm.api.probe:app --port 8000
