@@ -296,6 +296,11 @@ class PersistentMindMemory(BaseChatMemory):
                                 conversation_history.append(f"Context: {content}")
                     
                     if conversation_history:
+                        # Debug: Print what we're loading
+                        print(f"DEBUG: Loading {len(conversation_history)} conversation items from SQLite")
+                        for i, item in enumerate(conversation_history[-5:]):  # Show last 5
+                            print(f"DEBUG: [{i}] {item[:100]}...")
+                        
                         pmm_context_parts.append("Recent conversation history:\n" + "\n".join(conversation_history[-10:]))  # Last 10 exchanges
         except Exception as e:
             print(f"Warning: Failed to load conversation history from SQLite: {e}")
