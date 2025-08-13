@@ -4,6 +4,7 @@ from typing import List, Optional
 from fastapi import FastAPI, Query
 from pmm.storage.sqlite_store import SQLiteStore
 from pmm.storage.integrity import verify_chain
+from pmm.emergence import compute_emergence_scores, EmergenceAnalyzer, EmergenceEvent
 
 app = FastAPI(title="PMM Probe API", version="0.1.0")
 
@@ -69,6 +70,21 @@ def _commitments_with_status(db_path: str, limit: int):
         out.append(d)
     return out[::-1]  # return newest first
 
+def _get_emergence_events(db_path: str, kind: str = "response", limit: int = 5) -> List[EmergenceEvent]:
+    """Convert database rows to EmergenceEvent objects for analysis."""
+    rows = _load_events(db_path, limit, kind)
+    events = []
+    for row in rows:
+        event = EmergenceEvent(
+            id=row["id"],
+            timestamp=row["ts"],
+            kind=row["kind"],
+            content=row["content"],
+            meta=row["meta"]
+        )
+        events.append(event)
+    return events
+
 # ---- Routes ---------------------------------------------------------------
 
 @app.get("/health")
@@ -113,3 +129,45 @@ def traits():
         },
         "note": "Populate once traits are stored in SQLite."
     }
+
+@app.get("/emergence")
+def emergence(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    window: int = Query(5, ge=1, le=20, description="Number of recent responses to analyze")
+):
+    """
+    PMM Emergence Loop: Analyze AI personality convergence through IAS/GAS scoring.
+    
+    Returns:
+    - IAS (Identity Adoption Score): 0.6 * pmmspec_match + 0.4 * self_ref_rate
+    - GAS (Growth Acceleration Score): weighted combination of experience seeking, novelty, commitment closure
+    - Stage: S0 (Substrate) → S1 (Resistance) → S2 (Adoption) → S3 (Self-Model) → S4 (Growth-Seeking)
+    """
+    try:
+        # Get recent response events for analysis
+        events = _get_emergence_events(db, kind="response", limit=window)
+        
+        # Create analyzer with custom event data
+        analyzer = EmergenceAnalyzer()
+        
+        # Override the get_recent_events method with our data
+        analyzer.get_recent_events = lambda kind="response", limit=window: events
+        
+        # Compute emergence scores
+        scores = analyzer.compute_scores(window)
+        
+        # Add metadata about the analysis
+        scores["db_path"] = db
+        scores["window_size"] = window
+        
+        return scores
+        
+    except Exception as e:
+        return {
+            "error": str(e),
+            "IAS": 0.0,
+            "GAS": 0.0,
+            "stage": "S0: Substrate",
+            "timestamp": "error",
+            "events_analyzed": 0
+        }
