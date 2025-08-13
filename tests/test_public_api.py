@@ -30,7 +30,7 @@ def test_basic_event_and_thought_management():
 
         # Test model persistence
         mgr.save_model()
-        
+
         # Load in new manager instance
         mgr2 = SelfModelManager(model_path=model_path)
         assert len(mgr2.model.self_knowledge.autobiographical_events) >= 2

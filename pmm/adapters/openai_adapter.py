@@ -8,9 +8,10 @@ from openai import OpenAI
 
 _OPENAI_TIMEOUT = 30
 
+
 class OpenAIAdapter(ModelAdapter):
     """OpenAI adapter with retry logic and timeout handling."""
-    
+
     def __init__(self, model: str = "gpt-4o-mini", api_key: str | None = None):
         api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not api_key:
@@ -29,7 +30,7 @@ class OpenAIAdapter(ModelAdapter):
                     model=self.model,
                     messages=messages,
                     max_tokens=max_tokens,
-                    timeout=self.timeout
+                    timeout=self.timeout,
                 )
                 result = response.choices[0].message.content.strip()
                 print(f"[API] Response received: {len(result)} chars")
@@ -38,5 +39,5 @@ class OpenAIAdapter(ModelAdapter):
                 print(f"[API] Attempt {attempt + 1} failed: {e}")
                 if attempt == self.max_retries - 1:
                     raise
-                time.sleep(2 ** attempt)  # Exponential backoff
+                time.sleep(2**attempt)  # Exponential backoff
         raise RuntimeError("All retry attempts failed")

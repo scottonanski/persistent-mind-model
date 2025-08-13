@@ -41,10 +41,10 @@ class SelfModelManager:
         self.lock = threading.Lock()
         self.validator = SchemaValidator()
         self.commitment_tracker = CommitmentTracker()
-        
+
         # Initialize SQLiteStore for API compatibility
         self.sqlite_store = SQLiteStore("pmm.db")
-        
+
         self.model = self.load_model()
         # Sync commitments from model to tracker
         self._sync_commitments_from_model()
@@ -295,29 +295,28 @@ class SelfModelManager:
             id=ev_id, t=ts, type=etype, summary=summary, effects_hypothesis=eff_objs
         )
         self.model.self_knowledge.autobiographical_events.append(ev)
-        
+
         # Also write to SQLite for API compatibility
         try:
             import hashlib
-            import time
-            
+
             # Get previous hash for chain integrity
             prev_hash = self.sqlite_store.latest_hash()
-            
+
             # Create hash for this event
             event_data = f"{ts}|event|{summary}|{ev_id}"
             current_hash = hashlib.sha256(event_data.encode()).hexdigest()
-            
+
             self.sqlite_store.append_event(
                 kind="event",
                 content=summary,
                 meta={"type": etype, "event_id": ev_id},
                 hsh=current_hash,
-                prev=prev_hash
+                prev=prev_hash,
             )
         except Exception as e:
             print(f"Warning: Failed to write event to SQLite: {e}")
-        
+
         self.save_model()
         return ev
 
