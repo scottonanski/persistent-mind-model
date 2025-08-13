@@ -298,10 +298,22 @@ class SelfModelManager:
         
         # Also write to SQLite for API compatibility
         try:
-            self.sqlite_store.add_event(
+            import hashlib
+            import time
+            
+            # Get previous hash for chain integrity
+            prev_hash = self.sqlite_store.latest_hash()
+            
+            # Create hash for this event
+            event_data = f"{ts}|event|{summary}|{ev_id}"
+            current_hash = hashlib.sha256(event_data.encode()).hexdigest()
+            
+            self.sqlite_store.append_event(
                 kind="event",
                 content=summary,
-                meta={"type": etype, "event_id": ev_id}
+                meta={"type": etype, "event_id": ev_id},
+                hsh=current_hash,
+                prev=prev_hash
             )
         except Exception as e:
             print(f"Warning: Failed to write event to SQLite: {e}")
