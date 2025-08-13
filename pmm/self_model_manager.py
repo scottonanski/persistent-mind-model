@@ -18,6 +18,7 @@ from .model import (
 from .validation import SchemaValidator
 from .metrics import compute_identity_coherence, compute_self_consistency
 from .drift import apply_effects
+from .storage.sqlite_store import SQLiteStore
 from .commitments import CommitmentTracker
 
 # Minimal debug logging
@@ -40,6 +41,10 @@ class SelfModelManager:
         self.lock = threading.Lock()
         self.validator = SchemaValidator()
         self.commitment_tracker = CommitmentTracker()
+        
+        # Initialize SQLiteStore for API compatibility
+        self.sqlite_store = SQLiteStore("pmm.db")
+        
         self.model = self.load_model()
         # Sync commitments from model to tracker
         self._sync_commitments_from_model()
@@ -290,6 +295,17 @@ class SelfModelManager:
             id=ev_id, t=ts, type=etype, summary=summary, effects_hypothesis=eff_objs
         )
         self.model.self_knowledge.autobiographical_events.append(ev)
+        
+        # Also write to SQLite for API compatibility
+        try:
+            self.sqlite_store.add_event(
+                kind="event",
+                content=summary,
+                meta={"type": etype, "event_id": ev_id}
+            )
+        except Exception as e:
+            print(f"Warning: Failed to write event to SQLite: {e}")
+        
         self.save_model()
         return ev
 

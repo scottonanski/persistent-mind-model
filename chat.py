@@ -191,7 +191,7 @@ def main():
     model_config = get_model_config(model_name)
     
     pmm_memory = PersistentMindMemory(
-        agent_path="pmm_chat_agent.json",
+        agent_path="persistent_self_model.json",
         personality_config={
             "openness": 0.7,
             "conscientiousness": 0.6,
