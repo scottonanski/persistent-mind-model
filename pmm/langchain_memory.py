@@ -33,7 +33,7 @@ from pydantic import Field
 
 from .self_model_manager import SelfModelManager
 from .reflection import reflect_once
-from .llm import OpenAIClient
+from .adapters.openai_adapter import OpenAIAdapter
 from .commitments import CommitmentTracker
 
 
@@ -322,7 +322,7 @@ class PersistentMindMemory(BaseChatMemory):
         Returns the generated insight or None if reflection fails.
         """
         try:
-            insight = reflect_once(self.pmm, OpenAIClient())
+            insight = reflect_once(self.pmm, OpenAIAdapter())
             if insight:
                 self._update_personality_context()
                 self._update_commitment_context()

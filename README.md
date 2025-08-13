@@ -1,253 +1,219 @@
 # Persistent Mind Model (PMM)
 
-**Persistent personality and memory for LLM applications**
+**Cryptographically verifiable AI personality with cross-session memory**
 
-*If this helps you, ⭐ the repo and join Discussions.*
+PMM creates AI agents with persistent personalities that remember conversations, track commitments, and evolve traits based on evidence. All interactions are logged in a tamper-evident hash-chain for integrity verification.
 
-PMM provides a practical way to maintain a consistent personality and memory across sessions and, where supported, across different LLM backends. It tracks traits, commitments, and memories with reproducible, testable logic.
-
-## ⚡ **Quickstart (60 seconds)**
+## ⚡ **Quick Start**
 
 ```bash
-git clone https://github.com/scottonanski/persistent-mind-model.git
-cd persistent-mind-model/examples
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python langchain_chatbot_hybrid.py
-```
-
-**⭐ If Echo helps you, please star the repo and open a Discussion to say hi.**
-
-## 🔧 **PMM Next-Stage Architecture (experimental)**
-
-**Enhanced Memory Management with Cryptographic Integrity**
-
-Building on the stable PMM foundation, we've added experimental features for memory verification, local inference, and data portability:
-
-### **Memory Integrity Features**
-- **Hash Chains** - SHA-256 linking between memories for tamper detection
-- **Chain Verification** - Check if memory history has been modified
-- **Snapshots** - Periodic full-state saves for integrity checking
-- **Export/Import** - Save and restore complete memory state with verification
-
-### **Memory State Modeling**
-- **Activation Values** - Floating point (0.0-1.0) representing memory strength
-- **Phase Angles** - Semantic positioning using angle values (0-2π radians)
-- **Temporal Decay** - Simple time-based memory strength reduction
-- **Embedding Search** - Semantic similarity matching using sentence transformers
-
-### **Local LLM Integration (optional)**
-- **Multiple Backends** - Ollama, LM Studio, llama.cpp, HuggingFace support
-- **Fallback Logic** - Try local models first, fall back to APIs
-- **Provider Abstraction** - Unified interface across different LLM providers
-- **Offline Operation** - Run without internet connectivity
-
-**📚 See `README_NEXT_STAGE.md` and `NEXT_STAGE_ARCHITECTURE.md` for technical details.**
-
----
-
-## What This Includes
-
-### **🌟 Model-Agnostic Design**
-- **🔄 Portable personality state** - Personality data is designed to be reusable across OpenAI, Ollama, and other LLM backends (subject to your setup)
-- **🧠 True Identity Persistence** - Complete personality continuity across model switches with zero identity loss
-- **⚡ Interactive Model Selection** - Easy numeric selection from available Ollama models with automatic discovery
-- **💰 Cost Optimization** - Use tiny local models for routine tasks, premium models for complex reasoning
-- **🔒 Privacy Control** - Local models for sensitive thoughts, cloud models for general processing
-- **🛡️ Redundancy** - Never lose your AI personality even if providers change
-
-### **🎯 Advanced Personality Features**
-- **🎯 Commitment Lifecycle Tracking** - Agents make concrete commitments ("Next: I will...") and automatically track completion
-- **⚖️ Evidence-Weighted Trait Drift** - Personality changes based on demonstrated behavioral evidence, not random drift
-- **🔄 Language Freshness System** - N-gram analysis prevents repetitive reflections, ensuring varied and creative self-expression
-- **🧠 Pattern-Driven Behavioral Steering** - Actions influence personality development through sophisticated psychological principles
-- **📊 Deep Provenance Tracking** - Rich links between insights, behavioral patterns, and commitments for full auditability
-
-### **Core Personality System**
-- **Creates AI agents with persistent personalities** that remember past conversations and experiences
-- **Tracks personality traits** (Big Five: openness, conscientiousness, extraversion, agreeableness, neuroticism) with mathematically grounded evolution
-- **Logs autobiographical memories** - agents remember significant events and reflect on them with meta-cognitive awareness
-- **Enables sophisticated agent-to-agent conversations** where AIs influence each other's development through commitment tracking
-- **Supports mentor-apprentice mode** where a mentor AI guides a learning apprentice with measurable progress
-- **Applies evidence-weighted drift** - personality changes only when supported by behavioral evidence and commitment completion
-
-## Quick Start
-
-```bash
-# Clone and setup
 git clone https://github.com/scottonanski/persistent-mind-model.git
 cd persistent-mind-model
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
-# Set your OpenAI API key
 export OPENAI_API_KEY='your-key-here'
 
-# Run validated demos and tests
-python test_core_concepts.py      # Pure Python core concepts validation
-./demo_script.sh                  # Working scripted demo
+# Test the complete integration
+python3 test_complete_integration.py
 
-# LangChain integration example (production-ready)
-python examples/langchain_chatbot_hybrid.py
-
-# Probe testing system (grounded state access)
-python probe_tester.py
-
-# CLI utilities
-python pmm_cli.py --help
+# Or run individual components
+python3 examples/langchain_chatbot_hybrid.py  # Chat interface
+python3 scripts/run_test_harness.py           # Core functionality test
+uvicorn pmm.api.probe:app --port 8000         # Monitoring API
 ```
 
-## 💬 How to Chat with the AI (PMM in Action)
+## 🏗️ **Architecture**
 
-**The easiest way to see PMM working is the LangChain chatbot:**
+### **Core Components (Production Ready)**
 
+**PMM Runtime** (`pmm/core/runtime.py`)
+- Orchestrates LLM interactions with persistent state
+- Logs all prompts/responses to hash-chained SQLite database
+- Extracts commitments from "Next, I will..." patterns
+- Tracks evidence when users say "Done" or "completed"
+
+**Storage Layer** (`pmm/storage/`)
+- **SQLite WAL Database** - Append-only event logging with ACID properties
+- **Hash-Chain Integrity** - SHA-256 linking prevents tampering
+- **Event Types**: prompt, response, reflection, commitment, evidence
+
+**LLM Adapters** (`pmm/adapters/`)
+- **OpenAI Adapter** - gpt-4o-mini with retry logic and timeouts
+- **Model-Agnostic Interface** - Easy to add new providers
+- **Cost Optimization** - Minimal context for efficient API usage
+
+**Monitoring API** (`pmm/api/probe.py`)
+- **Read-Only FastAPI** endpoints for system observability
+- **Real-Time Integrity** verification of hash-chain
+- **Commitment Tracking** with open/closed status
+- **Event History** with filtering and pagination
+
+### **Advanced Features (Experimental)**
+
+**Next-Stage Architecture** - See `NEXT_STAGE_ARCHITECTURE.md`
+- Memory tokenization with quantum-inspired states
+- Local LLM integration (Ollama, llama.cpp)
+- Semantic memory recall with embeddings
+- Complete identity export/import with verification
+
+## ✅ **What Actually Works**
+
+### **Persistent Memory & Personality**
+- **Cross-session continuity** - AI remembers you between conversations
+- **Big Five trait tracking** - Openness, conscientiousness, extraversion, agreeableness, neuroticism
+- **Autobiographical events** - Complete history of interactions with timestamps
+- **Commitment extraction** - Automatically captures "Next, I will..." statements
+- **Evidence-based closure** - Commitments marked complete when user provides evidence
+
+### **Cryptographic Integrity**
+- **SHA-256 hash-chain** - Every event cryptographically linked to prevent tampering
+- **Integrity verification** - Real-time validation that history hasn't been modified
+- **Append-only logging** - Immutable record of all interactions
+- **Chain verification** - Survives process restarts and system migrations
+
+### **Production Monitoring**
+- **FastAPI probe endpoints** - `/health`, `/integrity`, `/commitments`, `/events/recent`
+- **Real-time observability** - Monitor AI behavior and commitment tracking
+- **JSON API responses** - Easy integration with dashboards and monitoring tools
+- **Read-only safety** - Monitoring endpoints cannot modify AI state
+
+### **Cost-Efficient Operation**
+- **gpt-4o-mini integration** - 10x cheaper than GPT-4 with full functionality
+- **Minimal context** - Optimized prompts reduce API costs
+- **Retry logic** - Handles API failures gracefully with exponential backoff
+- **Hardware optimized** - Runs efficiently on modest hardware (tested on RTX 3080, 32GB RAM)
+
+## 🧪 **Testing & Validation**
+
+### **Comprehensive Integration Test**
 ```bash
-# Start the chatbot
-python examples/langchain_chatbot_hybrid.py
+# Tests core functionality + FastAPI probe + hash-chain integrity
+python3 test_complete_integration.py
 ```
+**What it validates:**
+- ✅ gpt-4o-mini API integration with retry logic
+- ✅ Commitment extraction from "Next, I will..." patterns  
+- ✅ Evidence hook when user says "Done" or "completed"
+- ✅ Hash-chain integrity across process restarts
+- ✅ All 5 FastAPI probe endpoints (`/health`, `/integrity`, `/commitments`, `/events/recent`, `/traits`)
+- ✅ SQLite WAL database with append-only logging
 
-**What you'll see:**
-1. **Initial personality display** - Shows the AI's Big Five personality traits
-2. **Natural conversation** - Chat normally, the AI responds with its personality
-3. **Memory persistence** - It remembers everything across sessions
-4. **Personality evolution** - Traits slowly change based on your interactions
-
-**Special commands while chatting:**
-- Type `personality` - See current personality traits and stats
-- Type `memory` - View the AI's cross-session memory context
-- Type `clear` - Clear session history (preserves PMM cross-session memory)
-- Type `quit` - Exit the chat
-
-**🎯 Test Cross-Session Memory:**
-1. Run the chatbot and introduce yourself: "My name is [Your Name]"
-2. Chat for a bit, then exit with Ctrl+C
-3. Restart the chatbot and say "Hello!"
-4. Watch it remember you: "Hey there, [Your Name]! Welcome back!"
-
-**Example conversation:**
-```
-You: Hello. 
-Assistant: Hey there! It's great to see you again. What's on your mind today?
-
-You: Every time I run this program, I would like you to address me by my first name. 
-Assistant: Got it, Scott! I'll be sure to address you by your first name every time we chat.
-
-You: personality
-🎭 Current Personality State:
-   Openness: 0.70
-   Conscientiousness: 0.60
-   Extraversion: 0.80
-   Agreeableness: 0.90
-   Neuroticism: 0.30
-   Events: 106
-   Insights: 17
-   Open Commitments: 19
-   Patterns: {'experimentation': 33, 'identity': 22, 'reflection': 16, 'user_goal_alignment': 15, 'stability': 13, 'growth': 31, 'calibration': 1, 'source_citation': 2, 'error_correction': 1}
-
-You: Right now, I would like you to remember these concepts, and incorporate them into your PMM.
-Assistant: I appreciate the request, but I currently don't have the capability to permanently store...
-
-You: The PMM is something that runs contextually along the substrate of the model. Simply say "Next, I will" followed by my request.
-Assistant: Got it! 
-
-Next, I will remember the concepts related to memory organization, event segmentation, boundary and event cells, the role of dopamine and theta rhythms in memory formation, and their implications for memory disorders, incorporating them into my understanding within the context of our ongoing conversation.
-
-🧠 Generated insight: I observe that my recent interactions have remained consistent, focusing on established concepts...
-
-You: Okay, great. Now I want you to establish a recursive, reflective paradigm of self-analysis. In similar fashion, I would like you to say "Next, I will..." followed by the command I just gave you.
-Assistant: Next, I will establish a recursive, reflective paradigm of self-analysis to enhance my understanding and adaptability in our interactions.
-
-[Exit and restart]
-
-You: Hello!
-Assistant: Hey there, Scott! What's on your mind today?
-```
-
-### Advanced Setup Options
-
-#### Option A: OpenAI (Cloud)
+### **Individual Component Tests**
 ```bash
-# Create a .env file
-echo "OPENAI_API_KEY=your_actual_api_key_here" > .env
+# Core PMM functionality (2-3 turns + restart)
+python3 scripts/run_test_harness.py
 
-# Get your API key at: https://platform.openai.com/api-keys
+# Start monitoring API server
+uvicorn pmm.api.probe:app --reload --port 8000
+
+# Test API endpoints
+curl 'http://127.0.0.1:8000/health'
+curl 'http://127.0.0.1:8000/integrity' 
+curl 'http://127.0.0.1:8000/commitments'
 ```
 
-#### Option B: Ollama (Local)
+## 💬 **Chat Interface**
+
+### **LangChain Integration** (Production Ready)
 ```bash
-# Install Ollama
-curl -fsSL https://ollama.ai/install.sh | sh
-
-# Pull a model (choose one)
-ollama pull gemma3:1b-it-qat    # Small, fast (957MB)
-ollama pull llama3.2:3b         # Medium (1.9GB)
-ollama pull qwen2.5:7b          # Large, high quality (4.4GB)
-
-# Start Ollama server
-ollama serve
-```
-
-### LangChain Integration Setup
-
-The LangChain demo combines modern LangChain APIs with PMM's persistent personality system:
-
-```bash
-# Ensure you have your OpenAI API key set
-export OPENAI_API_KEY='your-key-here'
-
-# Run the hybrid LangChain + PMM chatbot
-python examples/langchain_chatbot_hybrid.py
+# Interactive chat with persistent memory
+python3 examples/langchain_chatbot_hybrid.py
 ```
 
 **Features:**
 - **Cross-session memory** - AI remembers you between conversations
-- **Personality evolution** - Traits change based on your interactions
-- **Modern LangChain APIs** - Uses RunnableWithMessageHistory
-- **Special commands**: 
-  - Type `personality` to see current Big Five traits
-  - Type `memory` to see cross-session context
-  - Type `quit` to exit
+- **Commitment tracking** - Say "Next, I will..." to create tracked commitments
+- **Evidence closure** - Say "Done" or "completed" to close commitments
+- **Personality evolution** - Big Five traits evolve based on interactions
 
-**Environment Variables (Optional):**
+**Special commands:**
+- `personality` - View current Big Five traits and stats
+- `memory` - See cross-session memory context  
+- `clear` - Reset session (preserves cross-session memory)
+- `quit` - Exit chat
+
+**Test cross-session memory:**
+1. Introduce yourself: "My name is [Your Name]"
+2. Exit and restart the program
+3. Say "Hello!" - it will remember you
+
+## 📊 **Monitoring & Observability**
+
+### **FastAPI Probe Endpoints**
 ```bash
-export PMM_SESSION_ID="your_session"     # Default: "default"
-export OPENAI_CHAT_MODEL="gpt-4o-mini"   # Default: "gpt-4o-mini"
-export PMM_TEMP="0.7"                     # Default: 0.7
+# Start monitoring server
+uvicorn pmm.api.probe:app --reload --port 8000
 ```
 
-### Complete Demo Suite
-```bash
-# Complete demo showcasing all PMM capabilities
-./demo_script.sh
+**Available endpoints:**
+- `GET /health?db=pmm.db` - Database status and event count
+- `GET /integrity?db=pmm.db` - Hash-chain verification
+- `GET /events/recent?limit=50&kind=commitment` - Recent events with filtering
+- `GET /commitments?limit=100` - Commitment tracking with open/closed status
+- `GET /traits` - Placeholder for future trait persistence
 
-# Production-ready probe testing system
-python probe_tester.py     # Grounded state validation
+**Example API responses:**
+```json
+// GET /integrity
+{"ok": true, "events": 12}
 
-# Or run individual components:
-python model_selector.py    # Interactive model selection
-python duel.py             # Agent personality evolution
-python mentor_duel.py      # Mentor-apprentice learning
+// GET /commitments  
+{"items": [{"id": 1, "content": "Next, I will...", "status": "closed", "hash": "abc123..."}]}
 ```
 
-**🎬 Want to record a demo?** See `DEMO_RECORDING_GUIDE.md` for step-by-step recording instructions.
+### **Environment Setup**
+```bash
+# Create .env file
+echo "OPENAI_API_KEY=your_actual_api_key_here" > .env
 
-## Release Notes: Next-Stage (experimental)
+# Optional: Configure model and session
+export OPENAI_CHAT_MODEL="gpt-4o-mini"   # Default model
+export PMM_SESSION_ID="your_session"     # Session identifier
+```
 
-Enhanced memory management features (experimental)
+## 📁 **File Structure**
 
-### Technical Features
+```
+pmm/
+├── adapters/           # LLM provider interfaces
+│   ├── base.py        # ModelAdapter ABC
+│   └── openai_adapter.py  # gpt-4o-mini with retries
+├── storage/           # Data persistence layer
+│   ├── sqlite_store.py    # WAL database operations
+│   └── integrity.py       # SHA-256 hash-chain
+├── core/              # Runtime orchestration
+│   └── runtime.py         # Main PMM runtime
+├── api/               # Monitoring endpoints
+│   └── probe.py           # FastAPI read-only API
+└── [legacy]/          # Experimental next-stage features
 
-**Memory Integrity and Local Inference:**
-- ✅ **SHA-256 Hash Chains** - Link memories with cryptographic hashes for tamper detection
-- ✅ **Memory State Vectors** - Activation/phase values inspired by quantum mechanics concepts
-- ✅ **Export/Import System** - Save and restore complete memory state with verification
-- ✅ **Local LLM Support** - Offline operation with multiple local model backends
-- ✅ **Semantic Search** - Embedding-based memory recall using sentence transformers
+scripts/
+└── run_test_harness.py    # Core functionality test
 
-### Stable Foundation (previous release)
+examples/
+└── langchain_chatbot_hybrid.py  # Production chat interface
 
-- ✅ **Bug-Free Data Recording** - Fixed critical duplicate recording issue in LangChain integration
-- ✅ Consistent dataset format for personality evolution experiments
-- ✅ Cross-session memory via LangChain integration
+test_complete_integration.py   # Full system validation
+```
+
+## 🚀 **Production Readiness**
+
+**What's Ready for Production:**
+- ✅ **Core PMM Runtime** - Stable, tested, hash-chain verified
+- ✅ **OpenAI Integration** - gpt-4o-mini with proper error handling
+- ✅ **SQLite Persistence** - ACID compliance with WAL mode
+- ✅ **FastAPI Monitoring** - Read-only endpoints for observability
+- ✅ **LangChain Interface** - Modern APIs with cross-session memory
+
+**Experimental Features** (see `NEXT_STAGE_ARCHITECTURE.md`):
+- 🧪 Memory tokenization with quantum-inspired states
+- 🧪 Local LLM integration (Ollama, llama.cpp)
+- 🧪 Semantic memory recall with embeddings
+- 🧪 Complete identity export/import
+
+---
+
+*PMM validates "The ONanski Paradox" - revolutionary AI advances through innovative architectural combinations, not just scaling compute.*
 - ✅ Modern LangChain 0.2+ APIs
 - ✅ Thread-safe persistence and robust error handling
 - ✅ Model-agnostic personality state — Same personality transfers across LLM backends (depending on configuration)

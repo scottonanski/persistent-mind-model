@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List
 from .self_model_manager import SelfModelManager, _log
-from .llm import OpenAIClient
+from .adapters.openai_adapter import OpenAIAdapter
 from .model import Insight
 
 
@@ -64,7 +64,7 @@ def _build_context(mgr: SelfModelManager) -> str:
 PROMPT = """Produce one concise, first-person meta-insight (≤3 sentences) about my evolving behavior or mindset.\nGround it in the CONTEXT; avoid fluff and poetry. Prefer observations linked to recent events and current traits.\nIf nothing new stands out, briefly acknowledge steadiness but add one specific micro-adjustment to try next. Vary wording across runs.\n\nCONTEXT:\n"""
 
 
-def reflect_once(mgr: SelfModelManager, llm: OpenAIClient) -> Insight | None:
+def reflect_once(mgr: SelfModelManager, llm: OpenAIAdapter) -> Insight | None:
     ctx = _build_context(mgr)
 
     # Enhanced n-gram cache from last 8 insights
