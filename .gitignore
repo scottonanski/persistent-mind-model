@@ -193,6 +193,13 @@ backups/
 docs/build/
 docs/_build/
 
+# SQLite databases (local state, do not commit)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
 # IDE and editor files
 .DS_Store
 Thumbs.db
