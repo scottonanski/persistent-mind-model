@@ -279,6 +279,9 @@ class SelfModelManager:
         effects: Optional[List[dict]] = None,
         *,
         etype: str = "experience",
+        tags: Optional[List[str]] = None,
+        full_text: Optional[str] = None,
+        embedding: Optional[bytes] = None,
     ) -> Event:
         ev_id = f"ev{len(self.model.self_knowledge.autobiographical_events)+1}"
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -310,9 +313,17 @@ class SelfModelManager:
             self.sqlite_store.append_event(
                 kind="event",
                 content=summary,
-                meta={"type": etype, "event_id": ev_id},
+                meta={
+                    "type": etype,
+                    "event_id": ev_id,
+                    **({"full": full_text} if full_text else {}),
+                    **({"tags": tags} if tags else {}),
+                },
                 hsh=current_hash,
                 prev=prev_hash,
+                summary=summary,
+                keywords=tags or [],
+                embedding=embedding,
             )
         except Exception as e:
             print(f"Warning: Failed to write event to SQLite: {e}")
@@ -545,6 +556,36 @@ class SelfModelManager:
                 ts.last_update = today
                 ts.origin = origin
             self.save_model(self.model)
+
+    def set_name(self, new_name: str, origin: str = "manual") -> None:
+        """Persistently set the agent's name and log an identity change event.
+
+        Basic validation ensures the name looks like a single alphabetic token.
+        """
+        if not new_name:
+            return
+        name = new_name.strip().strip('.,!?;:"')
+        # allow simple alphabetic names; relax here in future if needed
+        if len(name) < 2 or not name.isalpha():
+            return
+        with self.lock:
+            old = self.model.core_identity.name
+            if old == name:
+                return
+            self.model.core_identity.name = name
+            try:
+                # Record an autobiographical event for traceability
+                self.add_event(
+                    summary=f"Identity update: Name changed from '{old}' to '{name}' (origin={origin})",
+                    effects=None,
+                    etype="identity_change",
+                )
+            except Exception:
+                # Ensure name still persists even if event logging fails
+                self.save_model(self.model)
+            else:
+                # add_event already saves the model; no extra action needed
+                pass
 
     def update_patterns(self, text: str) -> None:
         """Very simple keyword-based pattern incrementer to populate behavioral_patterns."""

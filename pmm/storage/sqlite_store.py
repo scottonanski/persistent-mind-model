@@ -24,6 +24,19 @@ class SQLiteStore:
     def __init__(self, path: str = "pmm.db"):
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.executescript(DDL)
+        # Try to add optional efficient-thought columns if they do not exist yet
+        try:
+            self.conn.execute("ALTER TABLE events ADD COLUMN summary TEXT")
+        except Exception:
+            pass
+        try:
+            self.conn.execute("ALTER TABLE events ADD COLUMN keywords TEXT")  # JSON-encoded list[str]
+        except Exception:
+            pass
+        try:
+            self.conn.execute("ALTER TABLE events ADD COLUMN embedding BLOB")
+        except Exception:
+            pass
         self.conn.commit()
 
     def latest_hash(self) -> Optional[str]:
@@ -39,10 +52,22 @@ class SQLiteStore:
         meta: Dict[str, Any],
         hsh: str,
         prev: Optional[str],
+        *,
+        summary: Optional[str] = None,
+        keywords: Optional[list] = None,
+        embedding: Optional[bytes] = None,
     ):
-        """Append new event to the chain."""
+        """Append new event to the chain.
+
+        summary/keywords/embedding are optional and persisted when available.
+        keywords will be JSON-encoded for storage.
+        """
+        kw_json = json.dumps(keywords or [], ensure_ascii=False)
         self.conn.execute(
-            "INSERT INTO events(ts,kind,content,meta,prev_hash,hash) VALUES(?,?,?,?,?,?)",
+            """
+            INSERT INTO events(ts,kind,content,meta,prev_hash,hash,summary,keywords,embedding)
+            VALUES(?,?,?,?,?,?,?,?,?)
+            """,
             (
                 time.strftime("%Y-%m-%d %H:%M:%S"),
                 kind,
@@ -50,6 +75,9 @@ class SQLiteStore:
                 json.dumps(meta, ensure_ascii=False),
                 prev,
                 hsh,
+                summary,
+                kw_json,
+                embedding,
             ),
         )
         self.conn.commit()
@@ -58,7 +86,7 @@ class SQLiteStore:
         """Get all events in chronological order."""
         return list(
             self.conn.execute(
-                "SELECT id,ts,kind,content,meta,prev_hash,hash FROM events ORDER BY id"
+                "SELECT id,ts,kind,content,meta,prev_hash,hash,summary,keywords,embedding FROM events ORDER BY id"
             )
         )
 
@@ -66,7 +94,10 @@ class SQLiteStore:
         """Get recent events for context."""
         return list(
             self.conn.execute(
-                "SELECT id,ts,kind,content,meta,prev_hash,hash FROM events ORDER BY id DESC LIMIT ?",
+                """
+                SELECT id,ts,kind,content,meta,prev_hash,hash,summary,keywords,embedding
+                FROM events ORDER BY id DESC LIMIT ?
+                """,
                 (limit,),
             )
         )

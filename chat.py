@@ -7,6 +7,7 @@ Main entry point for chatting with your autonomous AI personality.
 import os
 import sys
 import argparse
+import threading
 
 # Add current directory to path for PMM imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dotenv import load_dotenv
 from pmm.langchain_memory import PersistentMindMemory
 from langchain_openai import ChatOpenAI
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from pmm.config import (
     get_default_model,
     get_model_config,
@@ -187,6 +188,14 @@ def main():
     print("🧠 PMM Chat - Your Persistent AI Mind")
     print("=====================================\n")
 
+    # Feature toggles
+    SUMMARY_ENABLED = (
+        os.getenv("PMM_ENABLE_SUMMARY", "false").strip().lower() in ("1", "true", "yes", "on")
+    )
+    EMBEDDINGS_ENABLED = (
+        os.getenv("PMM_ENABLE_EMBEDDINGS", "false").strip().lower() in ("1", "true", "yes", "on")
+    )
+
     # Model selection
     if args.model:
         # Allow number or name from CLI
@@ -235,9 +244,14 @@ def main():
             "agreeableness": 0.9,
             "neuroticism": 0.3,
         },
+        enable_summary=SUMMARY_ENABLED,
+        enable_embeddings=EMBEDDINGS_ENABLED,
     )
 
     print(f"🤖 Using model: {model_name} ({model_config.description})")
+    print(
+        f"🧩 Thought Summarization: {'ON' if SUMMARY_ENABLED else 'OFF'} | 🔎 Semantic Embeddings: {'ON' if EMBEDDINGS_ENABLED else 'OFF'}"
+    )
 
     # Show personality state
     personality = pmm_memory.get_personality_summary()
@@ -248,7 +262,7 @@ def main():
 
     # Initialize LangChain components based on provider
     if model_config.provider == "ollama":
-        llm = Ollama(model=model_name, temperature=0.7)
+        llm = OllamaLLM(model=model_name, temperature=0.7)
     else:  # openai
         llm = ChatOpenAI(model=model_name, temperature=0.7)
 
@@ -258,9 +272,11 @@ def main():
         pmm_context = pmm_memory.load_memory_variables({}).get("history", "")
         personality = pmm_memory.get_personality_summary()
         traits = personality["personality_traits"]
+        agent_name = pmm_memory.pmm.model.core_identity.name
 
         return (
             f"You are a Persistent Mind Model (PMM) with genuine memory and autonomous personality evolution.\n\n"
+            f"IDENTITY: {agent_name}\n"
             f"PERSONALITY TRAITS (Big Five):\n"
             f"- Openness: {traits['openness']:.3f}\n"
             f"- Conscientiousness: {traits['conscientiousness']:.3f}\n"
@@ -274,7 +290,7 @@ def main():
 
     print(f"\n🤖 PMM is ready! Using {model_name} ({model_config.provider})")
     print(
-        "💡 Commands: 'quit' to exit, 'personality' for traits, 'memory' for context, 'models' to switch"
+        "💡 Commands: 'quit' to exit, 'personality' for traits, 'memory' for context, 'models' to switch, 'status' for PMM status"
     )
     print("Start chatting...")
 
@@ -401,7 +417,7 @@ def main():
 
                     # Recreate LLM with new model based on provider
                     if model_config.provider == "ollama":
-                        llm = Ollama(model=model_config.name, temperature=0.7)
+                        llm = OllamaLLM(model=model_config.name, temperature=0.7)
                     else:  # openai
                         llm = ChatOpenAI(model=model_config.name, temperature=0.7)
 
@@ -427,6 +443,34 @@ def main():
                 else:
                     print("❌ Model selection cancelled")
                 print("=" * 50 + "\n")
+                continue
+            elif user_input.lower() == "status":
+                # Report feature toggles and DB stats
+                try:
+                    rows = pmm_memory.pmm.sqlite_store.all_events()
+                    total_events = len(rows)
+                    events_with_summaries = sum(1 for r in rows if len(r) >= 8 and r[7])
+                except Exception:
+                    total_events = len(
+                        pmm_memory.pmm.model.self_knowledge.autobiographical_events
+                    )
+                    events_with_summaries = sum(
+                        1
+                        for e in pmm_memory.pmm.model.self_knowledge.autobiographical_events
+                        if getattr(e, "summary", None)
+                    )
+                db_path = "pmm.db"
+                try:
+                    size_bytes = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+                except Exception:
+                    size_bytes = 0
+                size_kb = size_bytes / 1024.0
+                print("\n📊 PMM Status:")
+                print(f"   • Thought Summarization: {'ON' if SUMMARY_ENABLED else 'OFF'}")
+                print(f"   • Semantic Embeddings: {'ON' if EMBEDDINGS_ENABLED else 'OFF'}")
+                print(f"   • Database file: {db_path} ({size_kb:.1f} KB)")
+                print(f"   • Total events: {total_events}")
+                print(f"   • Events with summaries: {events_with_summaries}")
                 continue
 
             # Add user input to conversation history
@@ -458,8 +502,14 @@ def main():
             # Add AI response to conversation history
             conversation_history.append({"role": "assistant", "content": response_text})
 
-            # Save to PMM memory system (this is what makes it remember across sessions!)
-            pmm_memory.save_context({"input": user_input}, {"response": response_text})
+            # Save to PMM memory system (async to avoid UI stalls)
+            def _persist_context(u: str, r: str):
+                try:
+                    pmm_memory.save_context({"input": u}, {"response": r})
+                except Exception as _e:
+                    print(f"[warn] save_context failed: {_e}")
+
+            threading.Thread(target=_persist_context, args=(user_input, response_text), daemon=True).start()
 
         except KeyboardInterrupt:
             print("\n\n👋 Chat interrupted. Your conversation is saved!")
