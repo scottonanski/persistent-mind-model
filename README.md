@@ -25,6 +25,10 @@ export OPENAI_API_KEY='sk-your-key-here'
 python chat.py
 ```
 
+> Branch notice: you are on the experimental branch `self-code-analysis`
+>
+> This branch adds grounded self-code analysis with background reflection, a `code reflect` command, and prompt UX improvements. See details below.
+
 **Run tests:**
 ```bash
 pytest
@@ -88,6 +92,12 @@ python chat.py
 
 PMM can now introspect its own code to ground technical answers in real source.
 
+What’s included in this branch:
+- **Background self-reflection thread** that periodically creates concise `reflection` events about key code areas.
+- **`code reflect <query>` command** to analyze indexed Python code on-demand with AST parsing + regex fallback.
+- **Prompt UX fix** so background logs don’t interfere with the `👤 You:` prompt.
+- **`repo sync` robustness**: safer repo name slugging via `_re.sub`.
+
 What it does:
 - **Background reflection**: a safe daemon thread periodically scans top topics (e.g., `_index_own_codebase`, `sqlite_store`) and appends short `reflection` events. You’ll see logs like `[pmm][info] reflecting on topic: sqlite_store`.
 - **On-demand analysis**: use `code reflect <query>` to parse and describe the most relevant Python snippets from previously indexed code.
@@ -105,6 +115,25 @@ code reflect _index_own_codebase
 dump
 ```
 
+Configuration:
+- `PMM_CODE_ROOT` (default: `.`) — directory to index.
+- `PMM_CODE_MAX_MB` (default: `2`) — skip files larger than this many MB.
+- `PMM_CODE_EXT` — comma-separated extensions to include (includes `.py` by default).
+- `PMM_CODE_INDEX` — `Auto` or `Off` to control startup indexing.
+
+Examples:
+```bash
+# Reflect on the SQLite storage layer
+code reflect sqlite_store
+
+# Reflect on the system prompt construction
+code reflect get_pmm_system_prompt
+
+# Point PMM at another repo and reflect
+repo sync https://github.com/scottonanski/persistent-mind-model
+code reflect _index_own_codebase
+```
+
 What you’ll see:
 - `[CODE CONTEXT]` lines like `- E1152 (chat.py [601-800]). CODE: chat.py [601-800] ...`
 - `[CODE EXPLANATION]` with detected `functions/classes` and optional docstring preview
@@ -113,6 +142,12 @@ What you’ll see:
 Notes:
 - Code is indexed from `PMM_CODE_ROOT` (default: current repo). Large files are skipped beyond `PMM_CODE_MAX_MB`.
 - Reflection logs are printed to stderr and the user prompt is preserved.
+ - Non-Python files are skipped by the explainer; they still appear in context when relevant.
+
+Limitations (experimental):
+- Retrieval is keyword-based; future work may add semantic/embedding ranking.
+- Reflections run on a fixed interval; backoff/jitter under consideration.
+- Adjacent chunk merging for display is a planned improvement.
 
 **Monitor AI State:**
 ```bash
