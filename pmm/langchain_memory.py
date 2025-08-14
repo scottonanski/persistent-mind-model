@@ -1,33 +1,18 @@
 """
-LangChain Memory Wrapper for Persistent Mind Model
+PersistentMindMemory (LangChain adapter)
 
-This module provides a LangChain-compatible memory interface that integrates
-PMM's persistent personality system with any LangChain application.
+Purpose:
+- Persist explicit, provenance-backed identity/event summaries to PMM.
+- Return a concise, provenance-first context block (facts + recent turns)
+  for use by an LLM.
 
-Key Features:
-- Drop-in replacement for LangChain memory systems
-- Persistent personality traits (Big Five, HEXACO)
-- Automatic commitment extraction and tracking
-- Model-agnostic consciousness transfer
-- Behavioral pattern evolution over time
-
-Usage:
-    from pmm.langchain_memory import PersistentMindMemory
-
-    memory = PersistentMindMemory(
-        agent_path="my_agent.json",
-        personality_config={
-            "openness": 0.7,
-            "conscientiousness": 0.8
-        }
-    )
-
-    # Use with any LangChain chain
-    from langchain.chains import ConversationChain
-    chain = ConversationChain(memory=memory, llm=your_llm)
+Notes:
+- No heuristic inference. Only store explicit identity statements.
+- No external APIs required. Reflection gated/disabled by default.
 """
 
 from typing import Any, Dict, List, Optional
+import sys
 from threading import Thread
 from langchain.memory.chat_memory import BaseChatMemory
 from pydantic import Field
@@ -36,6 +21,12 @@ from .self_model_manager import SelfModelManager
 from .reflection import reflect_once
 from .adapters.openai_adapter import OpenAIAdapter
 from .commitments import CommitmentTracker
+
+# Reflection is present but disabled by default to keep this module local-only
+REFLECTION_ENABLED = False
+
+def _log(level: str, msg: str) -> None:
+    print(f"[pmm][{level}] {msg}", file=sys.stderr)
 
 
 class PersistentMindMemory(BaseChatMemory):
@@ -54,16 +45,9 @@ class PersistentMindMemory(BaseChatMemory):
     input_key: str = Field(default="input")
     output_key: str = Field(default="response")
     conversation_count: int = Field(default=0)
-    enable_summary: bool = Field(default=False)
-    enable_embeddings: bool = Field(default=False)
 
     def __init__(
-        self,
-        agent_path: str,
-        personality_config: Optional[Dict[str, float]] = None,
-        *,
-        enable_summary: bool = False,
-        enable_embeddings: bool = False,
+        self, agent_path: str, personality_config: Optional[Dict[str, float]] = None
     ):
         """
         Initialize the LangChain-compatible memory wrapper.
@@ -74,8 +58,6 @@ class PersistentMindMemory(BaseChatMemory):
         """
         super().__init__()
         self.pmm = SelfModelManager(agent_path)
-        self.enable_summary = bool(enable_summary)
-        self.enable_embeddings = bool(enable_embeddings)
 
         # Initialize personality if provided
         if personality_config:
@@ -155,117 +137,47 @@ class PersistentMindMemory(BaseChatMemory):
 
     def _auto_extract_key_info(self, user_input: str) -> None:
         """
-        Automatically extract and remember key information from user input.
-
-        This method detects:
-        - Names ("My name is X", "I am X", "Call me X")
-        - Preferences ("I like X", "I prefer X")
-        - Important facts about the user
+        Store ONLY explicit identity statements with provenance.
+        Patterns:
+          - "My name is X"
+          - "Call me X"
         """
         try:
             raw = user_input.strip()
-            user_lower = raw.lower()
 
-            # Extract names (more conservative to avoid false positives like "I'm just...")
             import re
-            stopwords = {
-                "just",
-                "good",
-                "fine",
-                "okay",
-                "ok",
-                "testing",
-                "running",
-                "logging",
-                "ready",
-                "back",
-                "here",
-                "there",
-                "busy",
-                "tired",
-                "great",
-                "awesome",
-            }
+            name_pats = [
+                r"\bMy name is ([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b",
+                r"\bCall me ([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b",
+            ]
 
-            def _remember_user_name(name: str) -> None:
+            def _store_user_name(name: str) -> None:
                 if not name:
                     return
-                # Title-case single/multi-token name
-                clean = name.strip().strip('.,!?;:"')
-                if not clean:
+                tokens = [t for t in name.strip().split() if t]
+                if not (1 <= len(tokens) <= 3):
                     return
-                # Limit to 1-3 tokens, alphabetic, capitalized tokens
-                parts = [p for p in clean.split() if p]
-                if not (1 <= len(parts) <= 3):
+                if any((not t.isalpha()) or (not t[0].isupper()) for t in tokens):
                     return
-                for p in parts:
-                    if not p.isalpha() or not p[0].isupper():
-                        return
-                remembered = " ".join(parts)
+                clean = " ".join(tokens)
                 self.pmm.add_event(
-                    summary=f"IMPORTANT: User's name is {remembered}",
+                    summary=f"User’s name is {clean}.",
                     effects=[],
                     etype="identity_info",
+                    full_text=raw,
+                    tags=["identity","name"],
                 )
-                print(f" Automatically remembered: User's name is {remembered}")
+                _log("info", f"remembered explicit identity: name={clean}")
 
-            # Pattern order: strongest first, using original casing for capitalization heuristics
-            # 1) "My name is X"
-            m = re.search(r"\bMy name is ([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b", raw)
-            if m:
-                _remember_user_name(m.group(1))
-            else:
-                # 2) "Call me X"
-                m = re.search(r"\bCall me ([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b", raw)
+            for pat in name_pats:
+                m = re.search(pat, raw)
                 if m:
-                    _remember_user_name(m.group(1))
-                else:
-                    # 3) "I am X" or "I'm X" only if the next token isn't a stopword and is Capitalized
-                    m = re.search(r"\bI\s*(?:am|'m)\s+([A-Z][a-zA-Z]+)(?:\b|\s*$|[\.,!?:;])", raw)
-                    if m:
-                        candidate = m.group(1)
-                        if candidate.lower() not in stopwords:
-                            _remember_user_name(candidate)
-
-            # Detect agent name assignments and persist them
-            agent_name_patterns = [
-                r"your name is (\w+)",
-                r"we will call you (\w+)",
-                r"let's call you (\w+)",
-                r"i'll call you (\w+)",
-                r"you're (\w+)",
-            ]
-
-            for pattern in agent_name_patterns:
-                match = re.search(pattern, user_lower)
-                if match:
-                    agent_name = match.group(1).title()
-                    self.pmm.set_name(agent_name, origin="chat_detect")
-                    print(f" Persisted agent name change to: {agent_name}")
+                    _store_user_name(m.group(1))
                     break
 
-            # Extract preferences and other key info
-            preference_patterns = [
-                r"i like (.+)",
-                r"i prefer (.+)",
-                r"i work (?:on|at|with) (.+)",
-                r"i am (.+?) (?:and|but|,|\.|$)",
-            ]
-
-            for pattern in preference_patterns:
-                match = re.search(pattern, user_lower)
-                if match and len(match.group(1)) < 50:  # Avoid capturing too much
-                    info = match.group(1).strip()
-                    if info and len(info) > 2:  # Valid info
-                        self.pmm.add_event(
-                            summary=f"PREFERENCE: User {match.group(0)}",
-                            effects=[],
-                            etype="preference_info",
-                        )
-                        break
-
+            # No role/job/relationship heuristics. No "I'm/I am" capture.
         except Exception:
-            # Silently handle errors in auto-extraction
+            # Do not throw from auto-extraction
             pass
 
     def _update_commitment_context(self) -> None:
@@ -316,52 +228,14 @@ class PersistentMindMemory(BaseChatMemory):
             if not ai_output and outputs:
                 ai_output = list(outputs.values())[0] if outputs.values() else ""
 
-        # Helper: simple summarization + keyword extraction (heuristic fallback)
-        def _summarize_and_extract(text: str) -> (str, List[str]):
-            raw = (text or "").strip()
-            if not raw:
-                return "", []
-            # Summary: first sentence up to ~160 chars
-            import re
-            first_sentence = re.split(r"(?<=[.!?])\s+", raw)[0]
-            summary = first_sentence[:160]
-            # Keywords: capitalize-like tokens (dedup, length bounds)
-            tokens = re.findall(r"\b[A-Z][a-zA-Z]{2,}\b", raw)
-            # Also pick top unique nouns-ish approximations (fallback only)
-            kws: List[str] = []
-            seen = set()
-            for t in tokens:
-                lt = t.lower()
-                if lt not in seen:
-                    seen.add(lt)
-                    kws.append(t)
-                if len(kws) >= 8:
-                    break
-            return summary, kws
-
         # Store conversation as PMM event
         if human_input:
             try:
-                if self.enable_summary:
-                    s, kws = _summarize_and_extract(human_input)
-                    summary_text = s or (
-                        f"User said: {human_input[:100]}{'...' if len(human_input) > 100 else ''}"
-                    )
-                    tags = kws
-                else:
-                    summary_text = (
-                        f"User said: {human_input[:100]}{'...' if len(human_input) > 100 else ''}"
-                    )
-                    tags = []
-
-                # Add user input as an autobiographical event (store full text in meta)
+                # Add user input as an autobiographical event
                 self.pmm.add_event(
-                    summary=summary_text,
+                    summary=f"User said: {human_input[:100]}{'...' if len(human_input) > 100 else ''}",
                     effects=[],
                     etype="conversation",
-                    tags=tags,
-                    full_text=human_input,
-                    embedding=(summary_text.encode("utf-8") if self.enable_embeddings and summary_text else None),
                 )
 
                 # Automatically extract and remember key information
@@ -377,25 +251,10 @@ class PersistentMindMemory(BaseChatMemory):
                 self.pmm.add_thought(ai_output, trigger="langchain_conversation")
 
                 # Add AI response as an event too
-                if self.enable_summary:
-                    s, kws = _summarize_and_extract(ai_output)
-                    summary_text = s or (
-                        f"I responded: {ai_output[:100]}{'...' if len(ai_output) > 100 else ''}"
-                    )
-                    tags = kws
-                else:
-                    summary_text = (
-                        f"I responded: {ai_output[:100]}{'...' if len(ai_output) > 100 else ''}"
-                    )
-                    tags = []
-
                 self.pmm.add_event(
-                    summary=summary_text,
+                    summary=f"I responded: {ai_output[:100]}{'...' if len(ai_output) > 100 else ''}",
                     effects=[],
                     etype="self_expression",
-                    tags=tags,
-                    full_text=ai_output,
-                    embedding=(summary_text.encode("utf-8") if self.enable_embeddings and summary_text else None),
                 )
             except Exception:
                 pass  # Silently handle errors in production
@@ -440,122 +299,55 @@ class PersistentMindMemory(BaseChatMemory):
         super().save_context(inputs, outputs)
 
     def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, str]:
-        """
-        Load memory variables for LLM prompts.
-
-        Returns personality context, commitments, and conversation history
-        formatted for optimal LLM performance.
-        """
-        # Get base memory variables from LangChain
-        base_variables = super().load_memory_variables(inputs)
-        if base_variables is None:
-            base_variables = {}
-
-        # Add PMM personality context
-        pmm_context_parts = []
+        """Return a concise, provenance-first PMM context under `history`."""
+        base = super().load_memory_variables(inputs) or {}
+        pmm_context_parts: List[str] = []
 
         if self.personality_context:
             pmm_context_parts.append(self.personality_context)
-
         if self.commitment_context:
             pmm_context_parts.append(self.commitment_context)
 
-        # Load recent conversation history from SQLite database
+        facts: List[str] = []
+        recent_lines: List[str] = []
         try:
             if hasattr(self.pmm, "sqlite_store"):
-                # Load more events to capture key information like names
-                recent_events = self.pmm.sqlite_store.recent_events(limit=50)
-                if recent_events:
-                    conversation_history = []
-                    key_facts = []  # Extract key facts like names
-
-                    for event in reversed(recent_events):  # chronological order
-                        # Support both legacy 7-column and new 10-column schemas
-                        event_id, ts, kind, content, meta, prev_hash, hash_val = event[:7]
-                        summary = None
-                        keywords = None
+                rows = self.pmm.sqlite_store.recent_events(limit=120)
+                rows = list(reversed(rows))  # chronological
+                import json as _json
+                for (eid, ts, kind, content, meta, prev_hash, hash_val) in rows:
+                    m = {}
+                    if meta:
                         try:
-                            summary = event[7]
+                            m = _json.loads(meta) if isinstance(meta, str) else (meta or {})
                         except Exception:
-                            summary = None
-                        try:
-                            keywords = event[8]
-                        except Exception:
-                            keywords = None
-                        # embedding at event[9] if present (unused here)
+                            m = {}
+                    etype = m.get("type") or m.get("etype")
+                    summary = (content or "")[:200]
+                    if etype == "identity_info":
+                        facts.append(f"- E{eid} ({ts}): {summary}")
+                    if kind in ("event", "response", "prompt"):
+                        if summary.startswith("User said:"):
+                            recent_lines.append("Human: " + summary.replace("User said: ", ""))
+                        elif summary.startswith("I responded:"):
+                            recent_lines.append("Assistant: " + summary.replace("I responded: ", ""))
+                        else:
+                            recent_lines.append("Context: " + summary)
 
-                        # Prefer summary when available
-                        display_text = summary or content or ""
-
-                        if kind in ["event", "response", "prompt"]:
-                            # Format for LLM context
-                            if "User said:" in display_text:
-                                user_msg = display_text.replace("User said: ", "")
-                                conversation_history.append(f"Human: {user_msg}")
-
-                                # Extract key information automatically
-                                if (
-                                    "my name is" in user_msg.lower()
-                                    or "i am" in user_msg.lower()
-                                ):
-                                    key_facts.append(f"IMPORTANT: {user_msg}")
-
-                            elif "I responded:" in display_text:
-                                ai_msg = display_text.replace("I responded: ", "")
-                                conversation_history.append(f"Assistant: {ai_msg}")
-
-                                # Extract commitments and identity info
-                                if (
-                                    "next, i will" in ai_msg.lower()
-                                    or "scott" in ai_msg.lower()
-                                ):
-                                    key_facts.append(f"COMMITMENT/IDENTITY: {ai_msg}")
-
-                            elif kind == "event":
-                                conversation_history.append(f"Context: {display_text}")
-
-                            # Include keywords when available (JSON string)
-                            try:
-                                if keywords:
-                                    import json as _json
-                                    kw_list = _json.loads(keywords)
-                                    if isinstance(kw_list, list) and kw_list:
-                                        # Add a compact keywords line
-                                        key_facts.append(
-                                            "KEYWORDS: " + ", ".join(map(str, kw_list[:6]))
-                                        )
-                            except Exception:
-                                pass
-
-                    if conversation_history:
-                        # Add key facts at the top for emphasis
-                        if key_facts:
-                            pmm_context_parts.append(
-                                "Key Information to Remember:\n"
-                                + "\n".join(key_facts[-5:])
-                            )
-
-                        # Add recent conversation history
-                        pmm_context_parts.append(
-                            "Recent conversation history:\n"
-                            + "\n".join(conversation_history[-15:])
-                        )  # Last 15 exchanges
+                if facts:
+                    pmm_context_parts.append("PMM FACTS (provenance)\n" + "\n".join(facts[-8:]))
+                if recent_lines:
+                    pmm_context_parts.append("Recent conversation\n" + "\n".join(recent_lines[-12:]))
         except Exception as e:
-            print(f"Warning: Failed to load conversation history from SQLite: {e}")
+            _log("warn", f"load_memory_variables: {e}")
 
-        # Combine PMM context with conversation history
         if pmm_context_parts:
-            pmm_context = "\n\n".join(pmm_context_parts)
-
-            # Inject personality context into the conversation
-            if self.memory_key in base_variables:
-                base_variables[self.memory_key] = (
-                    f"{pmm_context}\n\n{base_variables[self.memory_key]}"
-                )
+            block = "\n\n".join(pmm_context_parts)
+            if self.memory_key in base and base[self.memory_key]:
+                base[self.memory_key] = block + "\n\n" + base[self.memory_key]
             else:
-                base_variables[self.memory_key] = pmm_context
-
-        return base_variables
+                base[self.memory_key] = block
+        return base
 
     def get_personality_summary(self) -> Dict[str, Any]:
         """Get current personality state for debugging/monitoring."""
@@ -582,10 +374,12 @@ class PersistentMindMemory(BaseChatMemory):
 
     def trigger_reflection(self) -> Optional[str]:
         """
-        Manually trigger PMM reflection process with a short timeout to avoid UI stalls.
+        Manually trigger PMM reflection process. Disabled by default.
 
-        Returns the generated insight content or None if reflection times out or fails.
+        Returns the generated insight content or None.
         """
+        if not REFLECTION_ENABLED:
+            return None
         result: Dict[str, Optional[Any]] = {"insight": None}
 
         def _worker():

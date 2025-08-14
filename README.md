@@ -78,7 +78,41 @@ python chat.py
 - **`personality`** - Show current Big Five personality traits and stats  
 - **`memory`** - Display cross-session memory context
 - **`models`** - Switch to a different LLM model
+- **`status`** - Show counts and basic runtime info
+- **`dump`** - Show the last few events
+- **`code reflect <query>`** - Explain PMM code relevant to `<query>`
+- **`repo sync <url-or-path>`** - Shallow-clone or point at a local repo and index its code
 - **`Commit`** - Trigger AI to make a trackable commitment (key for identity formation)
+
+### New: Self Code Analysis (branch: `self-code-analysis`)
+
+PMM can now introspect its own code to ground technical answers in real source.
+
+What it does:
+- **Background reflection**: a safe daemon thread periodically scans top topics (e.g., `_index_own_codebase`, `sqlite_store`) and appends short `reflection` events. You’ll see logs like `[pmm][info] reflecting on topic: sqlite_store`.
+- **On-demand analysis**: use `code reflect <query>` to parse and describe the most relevant Python snippets from previously indexed code.
+- **Grounded responses**: system prompt instructs the AI to cite `[CODE CONTEXT]` and `[CODE EXPLANATION]` with EIDs, file paths, and line ranges.
+
+How to use:
+```bash
+# Start chat
+python chat.py
+
+# Ask PMM to explain its code
+code reflect _index_own_codebase
+
+# Inspect recent reflections
+dump
+```
+
+What you’ll see:
+- `[CODE CONTEXT]` lines like `- E1152 (chat.py [601-800]). CODE: chat.py [601-800] ...`
+- `[CODE EXPLANATION]` with detected `functions/classes` and optional docstring preview
+- Non-Python files (e.g., `.json`, `.md`) are explicitly marked as `skipped`
+
+Notes:
+- Code is indexed from `PMM_CODE_ROOT` (default: current repo). Large files are skipped beyond `PMM_CODE_MAX_MB`.
+- Reflection logs are printed to stderr and the user prompt is preserved.
 
 **Monitor AI State:**
 ```bash

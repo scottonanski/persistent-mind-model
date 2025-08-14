@@ -321,6 +321,7 @@ class SelfModelManager:
                 },
                 hsh=current_hash,
                 prev=prev_hash,
+                etype=etype,
                 summary=summary,
                 keywords=tags or [],
                 embedding=embedding,
