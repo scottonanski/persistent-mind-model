@@ -17,6 +17,30 @@ PMM has achieved what no other system has: **genuinely autonomous AI agents** wi
 
 **🔬 Scientific Breakthrough:** First system with **cryptographic audit trails** proving AI autonomy rather than just sophisticated retrieval
 
+## 🆚 **How PMM Compares to Alternatives**
+
+| **Capability / Feature** | **PMM** | **AutoGPT** | **BabyAGI** | **LangChain Memory** | **Claude "Memory"** |
+|---------------------------|---------|-------------|-------------|---------------------|-------------------|
+| **Persistent Identity** | ✅ Self-model JSON + SQLite with Big Five traits | ❌ Ephemeral agents | ❌ Ephemeral | ⚠️ Text only, no identity | ⚠️ Server-side, no control |
+| **Model-Agnostic** | ✅ Any LLM backend | ❌ OpenAI-tied | ❌ OpenAI-tied | ⚠️ No persistent transfer | ❌ Claude-only |
+| **Commitment Tracking** | ✅ Auto-extraction, stored in DB | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Evidence Closure Loops** | ✅ Cryptographic hash linking | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Cryptographic Audit Trail** | ✅ Hash-chain with /integrity API | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Reflection Hygiene** | ✅ Event-driven, prevents spam | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Emergence Scoring** | ✅ S0→S4 stage detection | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Production CLI** | ✅ Interactive + batch modes | ❌ Dev-focused | ❌ Basic | ⚠️ Integration required | ❌ Web-only |
+| **Probe API** | ✅ Real-time introspection | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Licensing** | ✅ Dual + prior art protection | ❌ MIT | ❌ MIT | ❌ MIT/Apache | Proprietary |
+
+### **🎯 Key Differentiators:**
+- **No public framework** combines identity persistence + cryptographic auditability + behavioral commitments
+- **AutoGPT/BabyAGI** are goal agents but lack true self or memory beyond current run
+- **LangChain memory** is just text buffers - no personality or behavioral tracking
+- **Claude memory** is server-controlled, not verifiable or portable
+- **PMM's probe API** turns AI inner life into externally verifiable telemetry
+
+**PMM is the first open, model-agnostic, verifiable autonomous AI agent platform** 🚀
+
 ## 🎯 **Phase 3B: Autonomous Agent Capabilities**
 
 ### **✅ Cryptographic Commitment-Evidence Loops**
