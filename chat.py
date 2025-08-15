@@ -268,24 +268,55 @@ def main():
 
     # Create enhanced system prompt with PMM context
     def get_pmm_system_prompt():
-        # Get FRESH memory context each time (this is the fix!)
+        # Always pull fresh memory right before each call
         pmm_context = pmm_memory.load_memory_variables({}).get("history", "")
         personality = pmm_memory.get_personality_summary()
         traits = personality["personality_traits"]
         agent_name = pmm_memory.pmm.model.core_identity.name
 
+        # Extract top signals from PMM for a compact policy header
+        patterns = personality.get("behavioral_patterns", {}) or {}
+        top_patterns = sorted(patterns.items(), key=lambda kv: kv[1], reverse=True)[:3]
+        top_patterns_str = ", ".join([f"{k}({v})" for k, v in top_patterns]) if top_patterns else "none"
+
+        # Pull up to three open commitments to actually steer behavior
+        try:
+            opens = pmm_memory.pmm.get_open_commitments()[:3]
+        except Exception:
+            opens = []
+        open_commitments_str = "\n".join([f"- {c['text']}" for c in opens]) if opens else "none"
+
+        # Mind Policy: short, deterministic, and placed BEFORE the memory blob
+        mind_policy = (
+            "MIND POLICY\n"
+            f"Identity: {agent_name}\n"
+            "Operate as a persistent, self‑reflective agent. Honor your commitments and use your stored memories.\n"
+            "When uncertain, propose next actions, ask clarifying questions, or reflect briefly.\n"
+            "Calibrate confidence; prefer concrete steps; close the loop on prior promises.\n"
+            f"Top Patterns: {top_patterns_str}\n"
+            "Behavioral Directives:\n"
+            "  1) If an open commitment is listed, address it first (plan, update, or close with evidence).\n"
+            "  2) If you create a new commitment, use the exact phrase: 'Next, I will …'.\n"
+            "  3) If you notice contradictions or drift, reflect briefly then proceed.\n"
+            "Open Commitments:\n"
+            f"{open_commitments_str}\n"
+            "— end policy —"
+        )
+
+        # Personality + cross‑session memory for rich context (truncated for prompt safety)
+        persona = (
+            f"PERSONALITY (Big Five): "
+            f"O {traits['openness']:.2f} | C {traits['conscientiousness']:.2f} | "
+            f"E {traits['extraversion']:.2f} | A {traits['agreeableness']:.2f} | "
+            f"N {traits['neuroticism']:.2f}"
+        )
+
         return (
-            f"You are a Persistent Mind Model (PMM) with genuine memory and autonomous personality evolution.\n\n"
-            f"IDENTITY: {agent_name}\n"
-            f"PERSONALITY TRAITS (Big Five):\n"
-            f"- Openness: {traits['openness']:.3f}\n"
-            f"- Conscientiousness: {traits['conscientiousness']:.3f}\n"
-            f"- Extraversion: {traits['extraversion']:.3f}\n"
-            f"- Agreeableness: {traits['agreeableness']:.3f}\n"
-            f"- Neuroticism: {traits['neuroticism']:.3f}\n\n"
-            f"CROSS-SESSION MEMORY:\n{pmm_context[:1500]}\n\n"
-            f"You have persistent memory across sessions and remember users. Respond authentically based on your personality traits and memory. "
-            f"If you make commitments, use 'Next, I will...' format."
+            f"You are a Persistent Mind Model (PMM) with genuine memory and evolving personality.\n"
+            f"{mind_policy}\n\n"
+            f"{persona}\n\n"
+            "CROSS‑SESSION MEMORY (condensed):\n"
+            f"{pmm_context[:1800]}"
         )
 
     print(f"\n🤖 PMM is ready! Using {model_name} ({model_config.provider})")
@@ -502,14 +533,11 @@ def main():
             # Add AI response to conversation history
             conversation_history.append({"role": "assistant", "content": response_text})
 
-            # Save to PMM memory system (async to avoid UI stalls)
-            def _persist_context(u: str, r: str):
-                try:
-                    pmm_memory.save_context({"input": u}, {"response": r})
-                except Exception as _e:
-                    print(f"[warn] save_context failed: {_e}")
-
-            threading.Thread(target=_persist_context, args=(user_input, response_text), daemon=True).start()
+            # Save to PMM memory system synchronously to ensure next turn sees LTM
+            try:
+                pmm_memory.save_context({"input": user_input}, {"response": response_text})
+            except Exception as _e:
+                print(f"[warn] save_context failed: {_e}")
 
         except KeyboardInterrupt:
             print("\n\n👋 Chat interrupted. Your conversation is saved!")

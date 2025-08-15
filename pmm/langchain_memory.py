@@ -289,154 +289,131 @@ class PersistentMindMemory(BaseChatMemory):
         Save conversation context to PMM system.
 
         This method:
-        1. Stores the conversation as PMM events
-        2. Extracts and tracks commitments from responses
-        3. Updates behavioral patterns
-        4. Triggers personality evolution if needed
+        1) Stores the conversation as PMM events + internal thoughts
+        2) Extracts and tracks commitments from responses
+        3) Updates behavioral patterns
+        4) Auto‑closes commitments from new evidence
+        5) Triggers reflection on cadence and on new commitments
+        6) Applies personality drift immediately after reflection
         """
-        # Get human input and AI output - handle various LangChain key formats
+        # ---- 0) Normalize IO ----
         human_input = (
             inputs.get(self.input_key, "")
             or inputs.get("input", "")
             or inputs.get("question", "")
         )
 
-        # LangChain ConversationChain typically uses the first available output value
         ai_output = ""
         if outputs:
-            # Try common output keys
             ai_output = (
                 outputs.get(self.output_key, "")
                 or outputs.get("response", "")
                 or outputs.get("text", "")
                 or outputs.get("answer", "")
             )
-
-            # If no standard keys, get the first value
             if not ai_output and outputs:
                 ai_output = list(outputs.values())[0] if outputs.values() else ""
 
-        # Helper: simple summarization + keyword extraction (heuristic fallback)
-        def _summarize_and_extract(text: str) -> (str, List[str]):
-            raw = (text or "").strip()
-            if not raw:
-                return "", []
-            # Summary: first sentence up to ~160 chars
-            import re
-            first_sentence = re.split(r"(?<=[.!?])\s+", raw)[0]
-            summary = first_sentence[:160]
-            # Keywords: capitalize-like tokens (dedup, length bounds)
-            tokens = re.findall(r"\b[A-Z][a-zA-Z]{2,}\b", raw)
-            # Also pick top unique nouns-ish approximations (fallback only)
-            kws: List[str] = []
-            seen = set()
-            for t in tokens:
-                lt = t.lower()
-                if lt not in seen:
-                    seen.add(lt)
-                    kws.append(t)
-                if len(kws) >= 8:
-                    break
-            return summary, kws
-
-        # Store conversation as PMM event
+        # ---- 1) Log human event + auto‑extract key info ----
         if human_input:
             try:
-                if self.enable_summary:
-                    s, kws = _summarize_and_extract(human_input)
-                    summary_text = s or (
-                        f"User said: {human_input[:100]}{'...' if len(human_input) > 100 else ''}"
-                    )
-                    tags = kws
-                else:
-                    summary_text = (
-                        f"User said: {human_input[:100]}{'...' if len(human_input) > 100 else ''}"
-                    )
-                    tags = []
-
-                # Add user input as an autobiographical event (store full text in meta)
                 self.pmm.add_event(
-                    summary=summary_text,
-                    effects=[],
-                    etype="conversation",
-                    tags=tags,
-                    full_text=human_input,
-                    embedding=(summary_text.encode("utf-8") if self.enable_embeddings and summary_text else None),
+                    summary=f"User said: {human_input[:200]}{'...' if len(human_input) > 200 else ''}",
+                    effects=[], etype="conversation",
                 )
-
-                # Automatically extract and remember key information
                 self._auto_extract_key_info(human_input)
-
-                pass  # Event added successfully
+                # NEW: auto‑close commitments from human message
+                try:
+                    self.pmm.auto_close_commitments_from_event(human_input)
+                except Exception:
+                    pass
             except Exception:
-                pass  # Silently handle errors in production
+                pass  # never crash chat on memory write
 
+        # ---- 2) Log assistant thought + event ----
         if ai_output:
             try:
-                # Add AI response as thought
                 self.pmm.add_thought(ai_output, trigger="langchain_conversation")
-
-                # Add AI response as an event too
-                if self.enable_summary:
-                    s, kws = _summarize_and_extract(ai_output)
-                    summary_text = s or (
-                        f"I responded: {ai_output[:100]}{'...' if len(ai_output) > 100 else ''}"
-                    )
-                    tags = kws
-                else:
-                    summary_text = (
-                        f"I responded: {ai_output[:100]}{'...' if len(ai_output) > 100 else ''}"
-                    )
-                    tags = []
-
                 self.pmm.add_event(
-                    summary=summary_text,
-                    effects=[],
-                    etype="self_expression",
-                    tags=tags,
-                    full_text=ai_output,
-                    embedding=(summary_text.encode("utf-8") if self.enable_embeddings and summary_text else None),
+                    summary=f"I responded: {ai_output[:200]}{'...' if len(ai_output) > 200 else ''}",
+                    effects=[], etype="self_expression",
                 )
             except Exception:
-                pass  # Silently handle errors in production
+                pass
 
-            # Extract and track commitments
+            # ---- 3) Commitments: extract + add; auto‑close from assistant output ----
+            new_commitment_text = None
             try:
                 tracker = CommitmentTracker()
-                commitment_text, _ = tracker.extract_commitment(ai_output)
-                if commitment_text:
+                new_commitment_text, _ = tracker.extract_commitment(ai_output)
+                if new_commitment_text:
                     self.pmm.add_commitment(
-                        text=commitment_text, source_insight_id="langchain_interaction"
+                        text=new_commitment_text, source_insight_id="langchain_interaction"
                     )
             except Exception:
                 pass
 
-            # Update behavioral patterns based on conversation
+            try:
+                self.pmm.auto_close_commitments_from_event(ai_output)
+            except Exception:
+                pass
+
+            # ---- 4) Patterns update ----
             try:
                 self.pmm.update_patterns(ai_output)
             except Exception:
                 pass
 
-            # Trigger reflection if we have enough events (every 3 interactions)
+            # ---- 5) Reflection triggers ----
+            # (a) cadence: every 4 events (~2 back‑and‑forths)
+            # (b) immediate after creating a new commitment (planning reflection)
+            should_reflect = False
             try:
                 event_count = len(self.pmm.model.self_knowledge.autobiographical_events)
-                if (
-                    event_count > 0 and event_count % 6 == 0
-                ):  # Every 3 back-and-forth exchanges
-                    insight = self.trigger_reflection()
-                    if insight:
-                        print(f"\n🧠 Generated insight: {insight[:100]}...")
-            except Exception:
-                pass
+                print(f"🔍 DEBUG: Event count: {event_count}, new_commitment: {bool(new_commitment_text)}")
+                if event_count > 0 and event_count % 4 == 0:
+                    print(f"🔍 DEBUG: Cadence trigger - event count {event_count} divisible by 4")
+                    should_reflect = True
+                if new_commitment_text:
+                    print(f"🔍 DEBUG: Commitment trigger - new commitment: {new_commitment_text}")
+                    should_reflect = True
+                print(f"🔍 DEBUG: Should reflect: {should_reflect}")
+            except Exception as e:
+                print(f"🔍 DEBUG: Reflection trigger check failed: {e}")
 
-        # Update context for next interaction
+            if should_reflect:
+                print("🔍 DEBUG: Reflection triggered, starting...")
+                try:
+                    insight = self.trigger_reflection()
+                    print(f"🔍 DEBUG: Reflection completed, insight: {bool(insight)}")
+                except Exception as e:
+                    print(f"🔍 DEBUG: Reflection failed: {e}")
+                    insight = None
+
+                if insight:
+                    print(f"\n🧠 Insight: {insight[:160]}{'...' if len(insight) > 160 else ''}")
+                    # (c) auto‑close from reflection + apply drift immediately
+                    try:
+                        print("🔍 DEBUG: Auto-closing commitments from reflection...")
+                        self.pmm.auto_close_commitments_from_reflection(insight)
+                        print("🔍 DEBUG: Auto-close completed")
+                    except Exception as e:
+                        print(f"🔍 DEBUG: Auto-close failed: {e}")
+                    try:
+                        print("🔍 DEBUG: Applying trait drift...")
+                        self.pmm.apply_drift_and_save()
+                        print("🔍 DEBUG: Trait drift completed")
+                    except Exception as e:
+                        print(f"🔍 DEBUG: Trait drift failed: {e}")
+
+        # ---- 6) Refresh prompt contexts ----
         self._update_personality_context()
         self._update_commitment_context()
 
-        # Save PMM state
+        # ---- 7) Persist PMM ----
         self.pmm.save_model()
 
-        # Call parent save_context for LangChain compatibility
+        # ---- 8) Keep LangChain compatibility ----
         super().save_context(inputs, outputs)
 
     def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, str]:
@@ -586,28 +563,42 @@ class PersistentMindMemory(BaseChatMemory):
 
         Returns the generated insight content or None if reflection times out or fails.
         """
-        result: Dict[str, Optional[Any]] = {"insight": None}
+        result: Dict[str, Optional[Any]] = {"insight": None, "error": None}
 
         def _worker():
             try:
-                result["insight"] = reflect_once(self.pmm, OpenAIAdapter())
-            except Exception:
+                print("🔍 DEBUG: Worker thread starting reflect_once...")
+                insight_obj = reflect_once(self.pmm, OpenAIAdapter())
+                print(f"🔍 DEBUG: reflect_once returned: {type(insight_obj)} - {bool(insight_obj)}")
+                result["insight"] = insight_obj
+            except Exception as e:
+                print(f"🔍 DEBUG: Worker thread exception: {e}")
+                result["error"] = str(e)
                 result["insight"] = None
 
         try:
+            print("🔍 DEBUG: Starting reflection worker thread...")
             t = Thread(target=_worker, daemon=True)
             t.start()
-            t.join(timeout=8.0)  # prevent blocking the chat loop
+            t.join(timeout=15.0)  # Increased timeout for gpt-4o-mini
+            
             if t.is_alive():
+                print("🔍 DEBUG: Reflection timed out after 15 seconds")
                 return None
 
+            print(f"🔍 DEBUG: Worker completed. Error: {result.get('error')}")
             insight = result.get("insight")
+            print(f"🔍 DEBUG: Insight object: {type(insight)} - {bool(insight)}")
+            
             if insight:
+                print(f"🔍 DEBUG: Insight content length: {len(insight.content)}")
                 self._update_personality_context()
                 self._update_commitment_context()
                 return insight.content
-        except Exception:
-            pass
+            else:
+                print("🔍 DEBUG: No insight generated")
+        except Exception as e:
+            print(f"🔍 DEBUG: trigger_reflection exception: {e}")
         return None
 
     @property

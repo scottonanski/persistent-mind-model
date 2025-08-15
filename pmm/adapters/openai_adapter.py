@@ -41,3 +41,11 @@ class OpenAIAdapter(ModelAdapter):
                     raise
                 time.sleep(2**attempt)  # Exponential backoff
         raise RuntimeError("All retry attempts failed")
+
+    def chat(self, system: str, user: str, max_tokens: int = 512) -> str:
+        """Chat interface for reflection system - converts to messages format."""
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
+        ]
+        return self.generate(messages, max_tokens)

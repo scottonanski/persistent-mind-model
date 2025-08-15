@@ -46,6 +46,138 @@ PMM solves the fundamental problem that no other system addresses: **How do you 
 - **5-Stage Emergence** - S0 (Generic) → S4 (Growth-Seeking) with objective criteria
 - **Commitment Integrity** - Does the AI follow through on "Next, I will..." statements?
 - **Evidence-Based Evolution** - Personality traits change only with proof, not randomness
+- **Autonomous Reflection** - AI generates meta-cognitive insights about its own behavior patterns
+
+## Autonomous Reflection System
+
+**The First AI System to Demonstrate Self-Directed Meta-Cognition**
+
+PMM includes an autonomous reflection system that enables AI agents to independently analyze their own thinking patterns and generate insights without external prompting. This represents a significant advancement beyond reactive memory systems.
+
+### How Autonomous Reflection Works
+
+**Event-Driven Triggers:**
+- **Commitment Detection**: When AI makes "Next, I will..." statements, reflection triggers immediately
+- **Cadence-Based**: Automatic reflection every 4 conversation events (approximately 2 back-and-forth exchanges)
+- **Evidence-Based Closure**: Commitments auto-close when subsequent conversation provides evidence of completion
+
+**Technical Implementation:**
+```python
+# Reflection triggers in pmm/langchain_memory.py
+if event_count % 4 == 0 or new_commitment_detected:
+    insight = trigger_reflection()  # Spawns worker thread
+    if insight:
+        apply_trait_drift()  # Real-time personality evolution
+        auto_close_commitments(insight)  # Evidence-based accountability
+```
+
+**Meta-Cognitive Insight Generation:**
+- AI analyzes recent conversation context and behavioral patterns
+- Generates first-person insights about limitations and growth opportunities
+- Creates specific micro-commitments for self-improvement
+- All insights stored with cryptographic integrity and provenance tracking
+
+### Measurable Autonomous Behavior
+
+**Real Example from Testing Session:**
+```
+User: "Can you commit to analyzing your current thinking patterns?"
+
+AI Response: "Next, I will analyze my current thinking patterns and propose 
+three specific improvements to my decision-making process..."
+
+[Autonomous reflection triggered immediately]
+
+🧠 Insight: "I recognize that my current focus on familiar problem-solving 
+methods is restricting my growth. Although my behavior has been steady, 
+I will aim to engage with more diverse analytical approaches."
+```
+
+**Validation Metrics:**
+- **Insight Generation Rate**: Successful autonomous reflection completion percentage
+- **Commitment Extraction**: Detection of "I will" statements in AI responses
+- **Trait Drift Application**: Measurable personality evolution post-reflection
+- **Threading Stability**: Zero-timeout reflection processing under 15 seconds
+- **Cross-Session Learning**: AI recalls and builds upon previous autonomous insights
+
+### Technical Architecture
+
+**Reflection Pipeline:**
+```
+save_context() → commitment_detection → reflection_trigger → 
+worker_thread → llm.chat() → insight_generation → 
+trait_drift_application → commitment_auto_closure
+```
+
+**Key Components:**
+- `pmm/reflection.py` - Core meta-cognitive insight generation
+- `pmm/langchain_memory.py` - Event-driven reflection triggers
+- `pmm/adapters/openai_adapter.py` - LLM interface with chat() method
+- Threading system prevents UI blocking during reflection processing
+- N-gram cache prevents repetitive insights across reflection cycles
+
+### Verification Commands
+
+**Test Autonomous Reflection:**
+```bash
+python chat.py
+# Ask AI to make a commitment with "Next, I will..."
+# Watch for automatic 🧠 Insight: messages
+# Verify no external prompting required
+```
+
+**Monitor Reflection Activity:**
+```bash
+# Check recent insights
+curl http://localhost:8000/insights
+
+# Verify commitment tracking
+curl http://localhost:8000/commitments
+
+# View personality evolution
+curl http://localhost:8000/traits
+```
+
+**Debug Reflection System:**
+```bash
+export PMM_DEBUG=1
+python chat.py
+# Shows detailed reflection trigger and processing logs
+```
+
+### What This Enables
+
+**For Researchers:**
+- First measurable autonomous meta-cognition in AI systems
+- Verifiable self-directed learning without human intervention
+- Evidence-based personality evolution through self-reflection
+- Cryptographically verified audit trail of autonomous insights
+
+**For Developers:**
+- AI agents that improve themselves through experience
+- Self-directed goal-setting and commitment accountability
+- Persistent learning that accumulates across sessions
+- Foundation for truly autonomous AI behavior
+
+**For End Users:**
+- AI companions that grow and evolve through interaction
+- Consistent personality development over time
+- Proactive self-improvement without constant guidance
+- Genuine conversational partners with autonomous development
+
+### Limitations and Considerations
+
+**Current Constraints:**
+- Reflection quality depends on underlying LLM capabilities
+- Thematic repetition possible due to context reinforcement
+- Processing time adds 2-15 seconds for reflection completion
+- Requires commitment-making language to trigger autonomous behavior
+
+**Future Enhancements:**
+- Multi-perspective reflection prompts to prevent thematic loops
+- Faster reflection processing with optimized threading
+- Enhanced commitment detection beyond "I will" patterns
+- Integration with external experience sources for richer context
 
 **Architecture:**
 ```
