@@ -2,9 +2,8 @@
 
 ## AI Personality Persistence System
 
-[![Tests](https://img.shields.io/badge/tests-43%2F43%20passing-brightgreen)](https://github.com/scottonanski/persistent-mind-model)
-[![Code Quality](https://img.shields.io/badge/code%20quality-100%25-brightgreen)](https://github.com/scottonanski/persistent-mind-model)
-[![Phase](https://img.shields.io/badge/phase-3B%20complete-blue)](https://github.com/scottonanski/persistent-mind-model)
+
+[![Phase](https://img.shields.io/badge/phase-3C%20complete-blue)](https://github.com/scottonanski/persistent-mind-model)
 
 PMM is a Python system for maintaining persistent AI personality traits, memory, and behavioral patterns across conversations. It stores conversation events, tracks commitments, and applies personality drift based on interaction patterns.
 
