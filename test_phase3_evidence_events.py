@@ -242,7 +242,8 @@ def test_evidence_event_integration():
 
             # Verify commitment was closed (evidence integration working)
             assert (
-                "Auto-closed" in closed_commitment.close_note or "Evidence:" in closed_commitment.close_note
+                "Auto-closed" in closed_commitment.close_note
+                or "Evidence:" in closed_commitment.close_note
             ), "Closure should indicate automatic closure or evidence reference"
 
         print("✅ Evidence event integration tests passed")
