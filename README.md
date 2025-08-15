@@ -139,12 +139,39 @@ What you’ll see:
 - `[CODE EXPLANATION]` with detected `functions/classes` and optional docstring preview
 - Non-Python files (e.g., `.json`, `.md`) are explicitly marked as `skipped`
 
-Notes:
-- Code is indexed from `PMM_CODE_ROOT` (default: current repo). Large files are skipped beyond `PMM_CODE_MAX_MB`.
-- Reflection logs are printed to stderr and the user prompt is preserved.
- - Non-Python files are skipped by the explainer; they still appear in context when relevant.
+ Notes:
+ - Code is indexed from `PMM_CODE_ROOT` (default: current repo). Large files are skipped beyond `PMM_CODE_MAX_MB`.
+ - Reflection logs are printed to stderr and the user prompt is preserved.
+  - Non-Python files are skipped by the explainer; they still appear in context when relevant.
 
-Limitations (experimental):
+### New: PMM Self-Reflection Thread (identity, commitments, Big Five)
+
+PMM runs a lightweight daemon that periodically introspects identity state and appends compact `reflection` events to autobiographical memory.
+
+Details:
+- **Thread start:** `chat.py` → `_start_self_reflection_thread(pmm_memory, interval_seconds=300)`
+- **Cadence:** every 300s by default (internal constant)
+- **Inputs:** core identity name, recent `identity_change` events, open commitments (`pmm/self_model_manager.py`), current Big Five traits
+- **Outputs:**
+  - `etype="reflection"`, `tags=["self", "reflection"]` — structured summary with Big Five values and deltas vs last snapshot
+  - Optional narrative when trait shifts detected: `tags=["self", "reflection", "personality"]`
+
+Run and verify:
+```bash
+python chat.py
+# stderr: [pmm][info] self reflection thread started
+# wait ~5 minutes for first cycle
+
+# Inspect via monitoring API
+uvicorn pmm.api.probe:app --port 8000
+curl http://localhost:8000/events/recent | jq '.[] | select(.etype=="reflection") | .tags, .summary'
+```
+
+Notes:
+- Daemonized and guarded to start once; errors are caught and loop continues.
+- Events stored in `pmm/storage/sqlite_store.py` with hash-chain integrity.
+
+ Limitations (experimental):
 - Retrieval is keyword-based; future work may add semantic/embedding ranking.
 - Reflections run on a fixed interval; backoff/jitter under consideration.
 - Adjacent chunk merging for display is a planned improvement.

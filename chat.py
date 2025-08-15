@@ -354,6 +354,159 @@ def main():
             + "CROSS-SESSION MEMORY (truncated):\n" + base_context[:1500]
         )
 
+    # --- Command registry: load from memory, seed defaults, and bind actions ---
+    def _parse_command_row(row):
+        import json as _json  # local to avoid import order issues
+        # row: (id, ts, etype, summary, content, meta)
+        eid, ts, _etype, summary, content, meta = row
+        name = None
+        desc = None
+        try:
+            m = _json.loads(meta) if isinstance(meta, str) else (meta or {})
+        except Exception:
+            m = {}
+        # Prefer explicit meta fields
+        name = m.get("name") or m.get("command") or name
+        desc = m.get("description") or m.get("desc") or desc
+        # Try content as JSON
+        if not name and isinstance(content, str) and content.strip().startswith("{"):
+            try:
+                cj = _json.loads(content)
+                name = cj.get("name") or name
+                desc = cj.get("description") or desc
+            except Exception:
+                pass
+        # Fallback: parse summary patterns like "command: status - Show counts"
+        if isinstance(summary, str):
+            s = summary.strip()
+            low = s.lower()
+            if low.startswith("command:"):
+                rest = s.split(":", 1)[1].strip()
+                if " - " in rest:
+                    nm, ds = rest.split(" - ", 1)
+                    name = name or nm.strip()
+                    desc = desc or ds.strip()
+                else:
+                    name = name or rest
+            elif low.startswith("cmd:"):
+                rest = s.split(":", 1)[1].strip()
+                name = name or rest
+        if name:
+            return name.strip(), (desc or "(no description)").strip()
+        return None, None
+
+    def _load_command_registry():
+        try:
+            rows = pmm_memory.pmm.sqlite_store.recent_by_etype("command", limit=200)
+        except Exception:
+            rows = []
+        reg = {}
+        for row in rows:
+            nm, ds = _parse_command_row(row)
+            if nm and nm not in reg:
+                reg[nm] = ds
+        return reg
+
+    def _seed_default_commands():
+        defaults = [
+            {"name": "help", "description": "List available PMM commands from memory"},
+            {"name": "personality", "description": "Show current Big Five trait snapshot"},
+            {"name": "memory", "description": "Show cross-session memory summary"},
+            {"name": "status", "description": "Show counts by event type and quick stats"},
+            {"name": "dump", "description": "Show last 5 raw events (debug)"},
+            {"name": "evolution", "description": "Show recent self-reflections and personality drift"},
+        ]
+        existing = _load_command_registry()
+        added = 0
+        for cmd in defaults:
+            if cmd["name"] not in existing:
+                try:
+                    pmm_memory.pmm.add_event(
+                        summary=f"command: {cmd['name']} - {cmd['description']}",
+                        effects=[],
+                        etype="command",
+                        full_text=None,
+                        tags=["system", "command"],
+                    )
+                    added += 1
+                except Exception:
+                    pass
+        if added:
+            _log("info", f"seeded {added} default commands")
+
+    def _print_command_list(reg):
+        if not reg:
+            print("\n🧩 No commands in memory yet.")
+            return
+        print("\n🧩 PMM Commands (from memory):")
+        for nm in sorted(reg.keys()):
+            print(f"   • {nm:<12} - {reg[nm]}")
+
+    def _handle_evolution():
+        # Show last few reflection events and any trait deltas if present in text
+        print("\n🌱 Recent Evolution:")
+        try:
+            rows = pmm_memory.pmm.sqlite_store.recent_by_etype("reflection", limit=5)
+        except Exception:
+            rows = []
+        if not rows:
+            print("   • (no reflections yet)")
+        else:
+            for (eid, ts, _et, summary, content, _meta) in rows:
+                line = (summary or content or "").strip().splitlines()[0][:100]
+                print(f"   • E{eid} ({ts}): {line}")
+
+    # Bind command names to handlers
+    def _make_action_map():
+        return {
+            "help": lambda: _print_command_list(_load_command_registry()),
+            "personality": lambda: (
+                (lambda p: (
+                    print("\n🎭 Current Personality State:"),
+                    [print(f"   • {t.title():<15} : {s:>6.2f}") for t, s in p["personality_traits"].items()],
+                    print(f"\n📊 Stats: {p['total_events']} events, {p['open_commitments']} commitments"),
+                ))(pmm_memory.get_personality_summary())
+            ),
+            "memory": lambda: (
+                (lambda ctx: (
+                    print("\n🧠 Cross-Session Memory Context:"),
+                    print(ctx[:500] if ctx else "No cross-session memory yet"),
+                ))(pmm_memory.load_memory_variables({}).get("history", ""))
+            ),
+            "status": lambda: (
+                (lambda counts, facts, rel, total: (
+                    print("\n📊 Status:"),
+                    print(f"   • total_events: {total}"),
+                    (print("   • counts_by_etype:") or [print(f"     - {et}: {c}") for et, c in counts]) if counts else None,
+                    print(f"   • sample_facts: {len(facts)} | sample_related: {len(rel)}"),
+                ))(
+                    (pmm_memory.pmm.sqlite_store.counts_by_etype() if getattr(pmm_memory.pmm, "sqlite_store", None) else []),
+                    _load_identity_facts(5),
+                    _semantic_matches_keyword("status", 3),
+                    len(getattr(pmm_memory.pmm.model.self_knowledge, "autobiographical_events", []) or []),
+                )
+            ),
+            "dump": lambda: (
+                (lambda rows: (
+                    print("\n🗃️  Last 5 events:"),
+                    (print("   (none)") if not rows else [
+                        (lambda rid, et, summ, has_emb: print(f"   • {rid:>5} | {(et or '(null)'):<16} | {((summ or '').replace('\n',' ')[:60]):<60} | embed={'✓' if has_emb else '✗'}"))(*r)
+                        for r in rows
+                    ])
+                ))(
+                    (pmm_memory.pmm.sqlite_store.conn.execute(
+                        "SELECT id,etype,summary,embedding IS NOT NULL FROM events ORDER BY id DESC LIMIT 5"
+                    ).fetchall() if getattr(pmm_memory.pmm, "sqlite_store", None) else [])
+                )
+            ),
+            "evolution": _handle_evolution,
+        }
+
+    # Seed defaults once, then load registry and actions
+    _seed_default_commands()
+    _command_registry = _load_command_registry()
+    _actions = _make_action_map()
+
     # --- PMM provenance facts helper (minimal, local-only) ---
     import json as _json
 
@@ -681,11 +834,150 @@ def main():
         t.start()
         setattr(pmm_memory, "_code_reflect_thread_started", True)
 
+    # --- Background: periodic self-reflection (identity, commitments, traits) -------
+    def _start_self_reflection_thread(pmm_memory, interval_seconds: int = 300):
+        """Start a daemon thread that periodically introspects identity, commitments, and Big Five.
+        Produces compact 'reflection' events to enrich autobiographical memory.
+        """
+        # Guard against multiple starts
+        if getattr(pmm_memory, "_self_reflect_thread_started", False):
+            return
+
+        def _runner():
+            _log("info", "self reflection thread started")
+            # Keep last Big Five snapshot in-memory for delta computation
+            last_snapshot = getattr(pmm_memory, "_last_big5_snapshot", None)
+            while True:
+                try:
+                    # Identity basics
+                    try:
+                        name = (pmm_memory.pmm.model.core_identity.name or "").strip()
+                    except Exception:
+                        name = ""
+
+                    # Recent identity events (if any)
+                    id_notes = []
+                    try:
+                        rows = pmm_memory.pmm.sqlite_store.recent_by_etype("identity_change", limit=5)
+                        for (_eid, ts, et, summary, content, meta) in rows:
+                            if summary:
+                                id_notes.append(f"- {ts}: {summary}")
+                    except Exception:
+                        pass
+
+                    # Commitments snapshot (up to 5)
+                    commits_preview = []
+                    try:
+                        opens = pmm_memory.pmm.get_open_commitments()
+                        for c in (opens or [])[:5]:
+                            txt = c.get("text") or c.get("title") or "(no text)"
+                            status = c.get("status", "open")
+                            due = c.get("due")
+                            tail = f" (due {due})" if due else ""
+                            commits_preview.append(f"- [{status}] {txt}{tail}")
+                    except Exception:
+                        pass
+
+                    # Big Five snapshot and deltas
+                    deltas = []
+                    try:
+                        big5 = pmm_memory.pmm.get_big5() or {}
+                    except Exception:
+                        big5 = {}
+                    if big5:
+                        if last_snapshot is None:
+                            last_snapshot = dict(big5)
+                        else:
+                            for k in ("openness","conscientiousness","extraversion","agreeableness","neuroticism"):
+                                try:
+                                    prev = float(last_snapshot.get(k, 0.0))
+                                    cur = float(big5.get(k, prev))
+                                except Exception:
+                                    prev, cur = 0.0, 0.0
+                                delta = cur - prev
+                                if abs(delta) >= 0.01:
+                                    arrow = "↑" if delta > 0 else "↓"
+                                    deltas.append(f"{k}: {prev:.3f} {arrow} {cur:.3f} ({delta:+.3f})")
+                            last_snapshot = dict(big5)
+                        # persist snapshot on the memory object for future cycles
+                        try:
+                            setattr(pmm_memory, "_last_big5_snapshot", dict(last_snapshot))
+                        except Exception:
+                            pass
+
+                    # Compose reflection summary
+                    lines = ["REFLECT(self): periodic self-introspection"]
+                    if name:
+                        lines.append(f"identity: name={name}")
+                    if id_notes:
+                        lines.append("recent identity events:")
+                        lines.extend(id_notes)
+                    if commits_preview:
+                        lines.append("open commitments (up to 5):")
+                        lines.extend(commits_preview)
+                    if big5:
+                        lines.append("big5 snapshot:")
+                        lines.append(
+                            "  "
+                            + ", ".join(
+                                f"{k}={float(big5.get(k, 0.0)):.3f}"
+                                for k in ("openness","conscientiousness","extraversion","agreeableness","neuroticism")
+                            )
+                        )
+                    if deltas:
+                        lines.append("trait changes (|Δ|>=0.01):")
+                        for d in deltas:
+                            lines.append("  " + d)
+
+                    summary = "\n".join(lines)
+                    try:
+                        pmm_memory.pmm.add_event(
+                            summary=summary,
+                            effects=[],
+                            etype="reflection",
+                            full_text=None,
+                            tags=["self", "reflection"],
+                        )
+                        _log("info", "added self-reflection event")
+                    except Exception:
+                        pass
+
+                    # Optional short self-report narrative
+                    if deltas:
+                        try:
+                            narr = "I feel " + "; ".join(
+                                d.split(":",1)[0] + (" more" if "+" in d else " less")
+                                for d in deltas
+                            )
+                            pmm_memory.pmm.add_event(
+                                summary=f"Self-report: {narr}",
+                                effects=[],
+                                etype="reflection",
+                                full_text=None,
+                                tags=["self", "reflection", "personality"],
+                            )
+                        except Exception:
+                            pass
+
+                    _time.sleep(interval_seconds)
+                except Exception:
+                    # Never die; wait a bit and continue
+                    _time.sleep(interval_seconds)
+
+        t = threading.Thread(target=_runner, name="pmm_self_reflect", daemon=True)
+        t.start()
+        setattr(pmm_memory, "_self_reflect_thread_started", True)
+
     # kick off background reflection (non-blocking, safe no-op if already started)
     try:
         _start_code_reflection_thread(pmm_memory, interval_seconds=180)
     except Exception as _e:
         _log("warn", f"code reflect thread not started: {_e}")
+    # kick off self-reflection thread (non-blocking)
+    try:
+        _start_self_reflection_thread(pmm_memory, interval_seconds=300)
+    except Exception as _e:
+        _log("warn", f"self reflect thread not started: {_e}")
 
     # --- Ranked code/doc context blocks (keyword only, local) ---
     def _rank_events(pmm_memory, query: str, kinds=("code_chunk", "web_doc"), limit_scan=1000, top=3):
@@ -889,6 +1181,24 @@ def main():
             if user_input.lower() in ["quit", "exit", "bye"]:
                 print("👋 Goodbye! Your conversation is saved with persistent memory.")
                 break
+            # Natural language help
+            if user_input.strip().lower() in ("help", "commands") or (
+                any(kw in user_input.strip().lower() for kw in ("what can you do", "what are your commands", "how do i use you"))
+            ):
+                _print_command_list(_load_command_registry())
+                continue
+            # Dispatch dynamic commands if present
+            if user_input.strip().lower() in _load_command_registry().keys():
+                cmd = user_input.strip().lower()
+                action = _actions.get(cmd)
+                if action:
+                    try:
+                        action()
+                    except Exception as e:
+                        print(f"❌ Command '{cmd}' failed: {e}")
+                else:
+                    print(f"ℹ️ Command '{cmd}' is known but has no bound action.")
+                continue
             elif user_input.lower() == "personality":
                 personality = pmm_memory.get_personality_summary()
                 print("\n🎭 Current Personality State:")
