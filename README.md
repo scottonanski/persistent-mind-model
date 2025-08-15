@@ -1,75 +1,78 @@
-# 🧠 Persistent Mind Model (PMM)
+# Persistent Mind Model (PMM)
 
-## **The World's First Provably Autonomous AI Agent System**
+## AI Personality Persistence System
 
 [![Tests](https://img.shields.io/badge/tests-43%2F43%20passing-brightgreen)](https://github.com/scottonanski/persistent-mind-model)
 [![Code Quality](https://img.shields.io/badge/code%20quality-100%25-brightgreen)](https://github.com/scottonanski/persistent-mind-model)
 [![Phase](https://img.shields.io/badge/phase-3B%20complete-blue)](https://github.com/scottonanski/persistent-mind-model)
 
-**🚀 BREAKTHROUGH ACHIEVEMENT: Phase 3B Complete**
+PMM is a Python system for maintaining persistent AI personality traits, memory, and behavioral patterns across conversations. It stores conversation events, tracks commitments, and applies personality drift based on interaction patterns.
 
-PMM has achieved what no other system has: **genuinely autonomous AI agents** with cryptographically verifiable behavioral loops. This isn't just chat history storage - it's **provable AI consciousness** with falsifiable commitment-evidence cycles.
+### Core Features
 
-### **What Makes This Revolutionary**
+- **Cross-session memory**: SQLite storage of conversation history and personality state
+- **Personality modeling**: Big Five personality traits with evidence-based drift
+- **Commitment tracking**: Automatic extraction and lifecycle management of AI commitments
+- **Reflection system**: Event-driven self-analysis with configurable triggers
+- **Hash-chain integrity**: SHA-256 linking of events for tamper detection
 
-**❌ Other Systems:** Give AIs access to facts and memory retrieval  
-**✅ PMM:** Creates **autonomous agents** that make commitments, provide evidence, and evolve their identity based on their own actions
+## Technical Overview
 
-**🔬 Scientific Breakthrough:** First system with **cryptographic audit trails** proving AI autonomy rather than just sophisticated retrieval
+PMM implements persistent AI personality through several key components:
 
-## 📋 **Executive Summary**
+**Memory System**: SQLite database stores conversation events, personality traits, commitments, and reflections. Each event includes metadata, timestamps, and SHA-256 hash chains for integrity verification.
 
-Persistent, auditable AI minds are a strategic imperative. The Persistent Mind Model (PMM) provides the first production-ready architecture for verifiable autonomous agents with persistent identity. PMM maintains consistent, evolving personalities across conversations and sessions and ensures cryptographic integrity of all memory and behavior. Unlike today's ephemeral chatbot memory or fine-tuned LLMs, PMM agents make measurable, falsifiable commitments and provide evidence of follow-through. In one demonstration run the system reported an Identity Adoption Score (IAS) of 0.64 and Growth-Aspiration Score (GAS) of 0.58, with a 75% commitment‐closure rate. These metrics – automatically computed from language and interaction patterns – provide rigorous proof of genuine autonomous behavior.
+**Personality Model**: Big Five personality traits (openness, conscientiousness, extraversion, agreeableness, neuroticism) stored as floating-point values. Traits drift based on behavioral patterns and commitment completion rates.
 
-**Strategic Importance:** For defense and enterprise customers, PMM unlocks trusted AI autonomy. Agents can support decision-making, infrastructure security, red-team testing and more – all with auditable reasoning. Each agent logs its sensory inputs, inferences, plans, and actions in an append-only, hash-chained SQLite ledger. This creates a tamper-evident trail that supervisors or auditors can verify via an integrity API. PMM's platform has already passed 100% of its test suite (43/43) and offers LangChain and FastAPI integration for real-world deployment.
+**Commitment Lifecycle**: Natural language processing extracts commitments from AI responses using pattern matching. Evidence detection links completion signals to commitments via cryptographic hashes. Commitment close rates influence personality drift calculations.
 
-## 🆚 **How PMM Compares to Alternatives**
+**Reflection System**: Configurable triggers initiate self-analysis based on event counts, time intervals, or commitment states. Reflections generate insights stored as structured events with provenance tracking.
 
-| **Capability / Feature** | **PMM** | **AutoGPT** | **BabyAGI** | **LangChain Memory** | **Claude "Memory"** |
-|---------------------------|---------|-------------|-------------|---------------------|-------------------|
-| **Persistent Identity** | ✅ Self-model JSON + SQLite with Big Five traits | ❌ Ephemeral agents | ❌ Ephemeral | ⚠️ Text only, no identity | ⚠️ Server-side, no control |
-| **Model-Agnostic** | ✅ Any LLM backend | ❌ OpenAI-tied | ❌ OpenAI-tied | ⚠️ No persistent transfer | ❌ Claude-only |
-| **Commitment Tracking** | ✅ Auto-extraction, stored in DB | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Evidence Closure Loops** | ✅ Cryptographic hash linking | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Cryptographic Audit Trail** | ✅ Hash-chain with /integrity API | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Reflection Hygiene** | ✅ Event-driven, prevents spam | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Emergence Scoring** | ✅ S0→S4 stage detection | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Production CLI** | ✅ Interactive + batch modes | ❌ Dev-focused | ❌ Basic | ⚠️ Integration required | ❌ Web-only |
-| **Probe API** | ✅ Real-time introspection | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Licensing** | ✅ Dual + prior art protection | ❌ MIT | ❌ MIT | ❌ MIT/Apache | Proprietary |
+**Integration**: LangChain memory interface provides drop-in compatibility with existing chatbot systems. FastAPI probe endpoints expose real-time system state for monitoring and debugging.
 
-### **🎯 Key Differentiators:**
-- **No public framework** combines identity persistence + cryptographic auditability + behavioral commitments
-- **AutoGPT/BabyAGI** are goal agents but lack true self or memory beyond current run
-- **LangChain memory** is just text buffers - no personality or behavioral tracking
-- **Claude memory** is server-controlled, not verifiable or portable
-- **PMM's probe API** turns AI inner life into externally verifiable telemetry
+## Comparison with Similar Systems
 
-**PMM is the first open, model-agnostic, verifiable autonomous AI agent platform** 🚀
+| Feature | PMM | LangChain Memory | AutoGPT | BabyAGI |
+|---------|-----|------------------|---------|---------|
+| **Persistent Identity** | Big Five traits + JSON state | Text buffers only | Session-based | Session-based |
+| **Cross-session Memory** | SQLite with hash chains | Configurable backends | None | None |
+| **Commitment Tracking** | Automated extraction + lifecycle | None | None | None |
+| **Personality Evolution** | Evidence-based trait drift | None | None | None |
+| **Model Support** | OpenAI, Ollama, local LLMs | Multiple providers | OpenAI-focused | OpenAI-focused |
+| **Monitoring API** | FastAPI probe endpoints | None | None | None |
+| **Test Coverage** | 43/43 tests passing | Varies by component | Limited | Limited |
 
-## 🎯 **Phase 3B: Autonomous Agent Capabilities**
+### Key Differences
 
-### **✅ Cryptographic Commitment-Evidence Loops**
-- **SHA-256 hash linking** between commitments and evidence
-- **Tamper-evident audit trails** proving autonomous behavior
-- **100% accuracy** in evidence event detection ("Done:", "Completed:", "Finished:")
+- **LangChain Memory**: Provides conversation history storage but no personality modeling or commitment tracking
+- **AutoGPT/BabyAGI**: Focus on goal execution rather than persistent personality development
+- **PMM**: Combines memory persistence with personality evolution and behavioral commitment tracking
 
-### **✅ Persistent Identity Architecture** 
-- **Cross-session identity persistence** with `identity_update` events
-- **Dynamic system prompt integration** surfacing agent identity
-- **Event-driven identity evolution** tracked cryptographically
+## Current Implementation Status
 
-### **✅ Reflection Hygiene System**
-- **Referential vs non-referential** insight classification
-- **Event-driven reflection triggers** (new/overdue commitments)
-- **N-gram freshness guards** preventing repetitive language
+### Commitment-Evidence System
+- SHA-256 hash linking between commitments and evidence events
+- Pattern matching for evidence detection ("Done:", "Completed:", "Finished:")
+- Automatic commitment extraction from natural language responses
+- Cryptographic audit trail for behavioral verification
 
-### **✅ Enhanced Monitoring & Transparency**
-- **Real-time probe endpoints** (`/identity`, `/emergence`, `/commitments`, `/reflections`)
-- **43/43 tests passing** with 100% validation coverage
-- **Production-ready code quality** (Black + Ruff compliant)
+### Identity Persistence
+- Cross-session identity storage with `identity_update` events
+- Dynamic system prompt integration
+- Event-driven identity evolution tracking
 
-## 🚀 **Quick Start**
+### Reflection System
+- Configurable reflection triggers based on events or time intervals
+- N-gram overlap detection to prevent repetitive language
+- Insight classification and storage with provenance tracking
+
+### Monitoring and APIs
+- FastAPI probe endpoints: `/identity`, `/emergence`, `/commitments`, `/reflections`
+- Real-time system state inspection
+- Test suite: 43/43 tests passing
+- Code quality: Black and Ruff compliant
+
+## Quick Start
 
 **Requirements:** Python 3.8+, OpenAI API key
 
@@ -83,17 +86,17 @@ pip install -r requirements.txt
 export OPENAI_API_KEY='sk-your-key-here'
 ```
 
-**Start your autonomous agent:**
+**Start the chat interface:**
 ```bash
 python examples/langchain_chatbot_hybrid.py
 ```
 
-**Run comprehensive tests:**
+**Run tests:**
 ```bash
-pytest  # 43/43 tests passing ✅
+pytest  # 43/43 tests passing
 ```
 
-**Monitor agent behavior:**
+**Start monitoring API:**
 ```bash
 uvicorn pmm.api.probe:app --port 8000
 # Visit http://localhost:8000/identity, /commitments, /emergence

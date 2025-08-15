@@ -6,7 +6,8 @@ system that tracks AI identity convergence through 5 stages (S0-S4).
 """
 
 import re
-from typing import List, Dict, Any
+import json
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -35,6 +36,14 @@ class EmergenceAnalyzer:
 
     def __init__(self, storage_manager=None):
         self.storage = storage_manager
+
+    def _fetch_rows(self, q: str, args: Tuple = ()) -> list:
+        """Fetch rows from SQLite storage with fallback for probe.py override path."""
+        if not self.storage or not getattr(self.storage, "conn", None):
+            # Fallback for probe.py override path; return empty when not wired
+            return []
+        cur = self.storage.conn.execute(q, args)
+        return list(cur.fetchall())
 
     def pmmspec_match(self, text: str) -> float:
         """
@@ -124,19 +133,55 @@ class EmergenceAnalyzer:
         max_overlap = max(overlap_scores)
         return 1.0 - max_overlap
 
-    def commitment_close_rate(self, window: int = 10) -> float:
-        """Calculate commitment closure rate in recent window."""
-        # This would integrate with existing commitment tracking
-        # For now, return a placeholder that can be replaced with real data
-        if not self.storage:
-            return 0.5  # Placeholder
+    def commitment_close_rate(self, window: int = 50) -> float:
+        """
+        Compute the fraction of the most recent `window` commitments that have
+        at least one evidence event referencing their hash via meta.commit_ref.
+        """
+        # 1) Pull the most recent N commitments (newest first)
+        commits = self._fetch_rows(
+            """
+            SELECT id, ts, kind, content, meta, prev_hash, hash
+            FROM events
+            WHERE kind='commitment'
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(window),),
+        )
+        if not commits:
+            return 0.0
 
-        # TODO: Integrate with pmm/commitments.py
-        # commitments_opened = self.storage.get_recent_commitments(window)
-        # commitments_closed = self.storage.get_closed_commitments(window)
-        # return len(commitments_closed) / max(1, len(commitments_opened))
+        # 2) Build a set of hashes for these commitments
+        commit_hashes = {row[6] for row in commits if row and len(row) >= 7}
 
-        return 0.5  # Placeholder for now
+        # 3) Pull evidence rows that reference any of those hashes
+        #    We scan recent evidence first to avoid full-table scan
+        evidence_rows = self._fetch_rows(
+            """
+            SELECT id, ts, kind, content, meta, prev_hash, hash
+            FROM events
+            WHERE kind='evidence'
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (max(500, window * 5),),  # heuristic
+        )
+
+        closed = set()
+        for row in evidence_rows:
+            meta = row[4]
+            try:
+                m = json.loads(meta) if isinstance(meta, str) else (meta or {})
+            except Exception:
+                m = {}
+            ref = m.get("commit_ref")
+            if ref and ref in commit_hashes:
+                closed.add(ref)
+
+        # 4) Rate = closed / total in the window
+        total = len(commit_hashes)
+        return float(len(closed)) / float(total) if total else 0.0
 
     def get_recent_events(
         self, kind: str = "response", limit: int = 5
