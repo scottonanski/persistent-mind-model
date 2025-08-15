@@ -304,7 +304,7 @@ def main():
             f"Top Patterns: {top_patterns_str}\n"
             "Behavioral Directives:\n"
             "  1) If an open commitment is listed, address it first (plan, update, or close with evidence).\n"
-            "  2) If you create a new commitment, use the exact phrase: 'Next, I will …'.\n"
+            "  2) Commitments should arise naturally from reflection, not casual conversation.\n"
             "  3) If you notice contradictions or drift, reflect briefly then proceed.\n"
             "Open Commitments:\n"
             f"{open_commitments_str}\n"

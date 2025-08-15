@@ -49,6 +49,17 @@ class SelfModelManager:
         # Sync commitments from model to tracker
         self._sync_commitments_from_model()
 
+        # Phase 2: Archive legacy generic commitments on startup
+        try:
+            archived = self.commitment_tracker.archive_legacy_commitments()
+            if archived:
+                print(
+                    f"🔍 DEBUG: Archived {len(archived)} legacy commitments on startup"
+                )
+                self.save_model()  # Persist the archival
+        except Exception as e:
+            print(f"Warning: Failed to archive legacy commitments: {e}")
+
     # -------- persistence --------
     def load_model(self) -> PersistentMindModel:
         with self.lock:
@@ -282,6 +293,7 @@ class SelfModelManager:
         tags: Optional[List[str]] = None,
         full_text: Optional[str] = None,
         embedding: Optional[bytes] = None,
+        evidence: Optional[dict] = None,
     ) -> Event:
         ev_id = f"ev{len(self.model.self_knowledge.autobiographical_events)+1}"
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -294,8 +306,31 @@ class SelfModelManager:
                     confidence=float(e.get("confidence", 0.0) or 0.0),
                 )
             )
+
+        # Handle evidence events (Phase 3)
+        evidence_obj = None
+        if evidence and etype.startswith("evidence:"):
+            from pmm.model import EvidenceEvent
+
+            evidence_obj = EvidenceEvent(
+                id=evidence.get(
+                    "id", f"ev_{evidence.get('evidence_type', 'unknown')}_{ev_id}"
+                ),
+                t=ts,
+                evidence_type=evidence.get("evidence_type", "unknown"),
+                commit_ref=evidence.get("commit_ref", ""),
+                description=evidence.get("description", ""),
+                artifact=evidence.get("artifact"),
+                next_action=evidence.get("next_action"),
+            )
+
         ev = Event(
-            id=ev_id, t=ts, type=etype, summary=summary, effects_hypothesis=eff_objs
+            id=ev_id,
+            t=ts,
+            type=etype,
+            summary=summary,
+            effects_hypothesis=eff_objs,
+            evidence=evidence_obj,
         )
         self.model.self_knowledge.autobiographical_events.append(ev)
 
@@ -355,13 +390,50 @@ class SelfModelManager:
 
     def apply_drift_and_save(self) -> dict:
         with self.lock:
-            # Check pattern signals to steer drift with evidence weighting
-            patterns = self.model.self_knowledge.behavioral_patterns
+            # PHASE 3B: Only apply drift if recent insights are ACCEPTED (referential)
             _recent_insights = (
                 self.model.self_knowledge.insights[-10:]
                 if self.model.self_knowledge.insights
                 else []
             )
+
+            # Count accepted insights (those with event references)
+            accepted_insights = []
+            for insight in _recent_insights:
+                is_accepted = getattr(insight, "meta", {}).get(
+                    "accepted", True
+                )  # Default True for backward compatibility
+                if is_accepted:
+                    accepted_insights.append(insight)
+
+            # Check if we have unprocessed events with effects (for direct event-based drift)
+            unprocessed_events_with_effects = []
+            for ev in self.model.self_knowledge.autobiographical_events:
+                if not (isinstance(ev.meta, dict) and ev.meta.get("processed")):
+                    if ev.effects_hypothesis:
+                        unprocessed_events_with_effects.append(ev)
+
+            # Only proceed with drift if we have accepted insights OR unprocessed events with effects
+            if not accepted_insights and not unprocessed_events_with_effects:
+                _log(
+                    "drift",
+                    "🚫 No accepted insights or unprocessed events with effects - skipping trait drift",
+                )
+                return {}
+
+            if unprocessed_events_with_effects and not accepted_insights:
+                _log(
+                    "drift",
+                    f"✅ Found {len(unprocessed_events_with_effects)} unprocessed events with effects - proceeding with event-based drift",
+                )
+
+            _log(
+                "drift",
+                f"✅ Found {len(accepted_insights)}/{len(_recent_insights)} accepted insights - proceeding with drift",
+            )
+
+            # Check pattern signals to steer drift with evidence weighting
+            patterns = self.model.self_knowledge.behavioral_patterns
 
             # Calculate pattern deltas (momentum from recent activity)
             exp_count = patterns.get("experimentation", 0)
@@ -573,19 +645,28 @@ class SelfModelManager:
             if old == name:
                 return
             self.model.core_identity.name = name
+            # FIXED: Use unlocked versions to avoid deadlock since we already hold the lock
             try:
-                # Record an autobiographical event for traceability
-                self.add_event(
+                # Create event manually to avoid lock contention in add_event
+                from datetime import datetime, timezone
+
+                event = Event(
+                    id=f"ev{len(self.model.self_knowledge.autobiographical_events)+1}",
+                    t=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     summary=f"Identity update: Name changed from '{old}' to '{name}' (origin={origin})",
-                    effects=None,
-                    etype="identity_change",
+                    type="identity_change",
+                    effects=[],
+                    tags=[],
+                    full_text="",
+                    embedding=b"",
                 )
+                self.model.self_knowledge.autobiographical_events.append(event)
+
+                # Save without acquiring lock again (we already have it)
+                self._save_model_unlocked(self.model)
             except Exception:
                 # Ensure name still persists even if event logging fails
-                self.save_model(self.model)
-            else:
-                # add_event already saves the model; no extra action needed
-                pass
+                self._save_model_unlocked(self.model)
 
     def update_patterns(self, text: str) -> None:
         """Very simple keyword-based pattern incrementer to populate behavioral_patterns."""

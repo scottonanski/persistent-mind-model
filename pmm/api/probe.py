@@ -80,12 +80,24 @@ def _commitments_with_status(db_path: str, limit: int):
 
 
 def _get_emergence_events(
-    db_path: str, kind: str = "response", limit: int = 5
+    db_path: str, kinds: List[str] = None, limit: int = 15
 ) -> List[EmergenceEvent]:
     """Convert database rows to EmergenceEvent objects for analysis."""
-    rows = _load_events(db_path, limit, kind)
+    if kinds is None:
+        kinds = ["response", "reflection", "evidence", "commitment"]
+
+    # Get events of all specified kinds
+    all_events = []
+    for kind in kinds:
+        rows = _load_events(db_path, limit, kind)
+        all_events.extend(rows)
+
+    # Sort by timestamp (most recent first) and limit
+    all_events.sort(key=lambda x: x["ts"], reverse=True)
+    all_events = all_events[:limit]
+
     events = []
-    for row in rows:
+    for row in all_events:
         event = EmergenceEvent(
             id=row["id"],
             timestamp=row["ts"],
@@ -135,6 +147,133 @@ def commitments(db: str = Query("pmm.db"), limit: int = Query(100, ge=1, le=500)
     return {"items": _commitments_with_status(db, limit)}
 
 
+# PHASE 3B+: Identity endpoint to verify current agent name
+@app.get("/identity")
+def get_identity(db: str = Query("pmm.db", description="Path to PMM SQLite DB")):
+    """Get current agent identity from latest identity_update event."""
+    try:
+        # Find the most recent identity_update event from database
+        events = _load_events(db, limit=1000, kind="identity_update")
+
+        if events:
+            latest_event = events[0]  # most recent first
+            # Extract name from event content/summary
+            import re
+
+            content = latest_event.get("content", "")
+            name_match = re.search(r"Name changed to '([^']+)'", content)
+            if name_match:
+                return {
+                    "name": name_match.group(1),
+                    "event_id": latest_event["id"],
+                    "timestamp": latest_event["ts"],
+                    "source": "identity_update_event",
+                }
+
+        # Fallback to default
+        return {
+            "name": "Agent",
+            "source": "default",
+            "note": "No identity_update events found",
+        }
+
+    except Exception as e:
+        return {"error": str(e), "name": "Agent", "source": "error"}
+
+
+# PHASE 3B: Reflection hygiene and evidence analysis endpoint
+@app.get("/reflections")
+def reflections(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    limit: int = Query(
+        20, ge=1, le=100, description="Number of recent reflections to analyze"
+    ),
+):
+    """Analyze reflection hygiene: referential vs non-referential insights."""
+    try:
+        reflection_events = _load_events(db, limit, "reflection")
+        # Load evidence events for reference checking
+        _load_events(db, 100, "evidence")
+
+        analysis = {
+            "total_reflections": len(reflection_events),
+            "referential_count": 0,
+            "non_referential_count": 0,
+            "evidence_referenced": 0,
+            "reflections": [],
+        }
+
+        # Analyze each reflection for referential hygiene
+        for reflection in reflection_events:
+            content = reflection.get("content", "")
+            # meta = reflection.get("meta", {})  # Reserved for future use
+
+            # Check if reflection references specific events or evidence
+            is_referential = False
+            references = []
+
+            # Look for event ID references
+            import re
+
+            event_refs = re.findall(r"event[_\s]*(\d+)", content, re.IGNORECASE)
+            if event_refs:
+                is_referential = True
+                references.extend([f"event_{ref}" for ref in event_refs])
+
+            # Look for commitment hash references
+            hash_refs = re.findall(r"[a-f0-9]{16}", content)
+            if hash_refs:
+                is_referential = True
+                references.extend([f"hash_{ref}" for ref in hash_refs])
+
+            # Check if it references evidence
+            evidence_ref = any(
+                word in content.lower()
+                for word in ["done:", "completed:", "evidence", "artifact"]
+            )
+            if evidence_ref:
+                analysis["evidence_referenced"] += 1
+
+            if is_referential:
+                analysis["referential_count"] += 1
+            else:
+                analysis["non_referential_count"] += 1
+
+            analysis["reflections"].append(
+                {
+                    "id": reflection["id"],
+                    "timestamp": reflection["ts"],
+                    "is_referential": is_referential,
+                    "references": references,
+                    "evidence_mentioned": evidence_ref,
+                    "content_preview": (
+                        content[:120] + "..." if len(content) > 120 else content
+                    ),
+                }
+            )
+
+        # Calculate hygiene metrics
+        if analysis["total_reflections"] > 0:
+            analysis["referential_rate"] = (
+                analysis["referential_count"] / analysis["total_reflections"]
+            )
+            analysis["evidence_rate"] = (
+                analysis["evidence_referenced"] / analysis["total_reflections"]
+            )
+        else:
+            analysis["referential_rate"] = 0.0
+            analysis["evidence_rate"] = 0.0
+
+        analysis["hygiene_score"] = (analysis["referential_rate"] * 0.7) + (
+            analysis["evidence_rate"] * 0.3
+        )
+
+        return analysis
+
+    except Exception as e:
+        return {"error": str(e), "total_reflections": 0}
+
+
 # Optional: placeholder traits endpoint. If/when you persist traits, replace with a real query.
 @app.get("/traits")
 def traits():
@@ -155,20 +294,28 @@ def traits():
 def emergence(
     db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
     window: int = Query(
-        5, ge=1, le=20, description="Number of recent responses to analyze"
+        15,
+        ge=1,
+        le=50,
+        description="Number of recent events to analyze (expanded for Phase 3B)",
     ),
 ):
     """
     PMM Emergence Loop: Analyze AI personality convergence through IAS/GAS scoring.
 
+    Phase 3B Enhancement: Now analyzes reflection, evidence, and commitment events alongside responses.
+
     Returns:
     - IAS (Identity Adoption Score): 0.6 * pmmspec_match + 0.4 * self_ref_rate
     - GAS (Growth Acceleration Score): weighted combination of experience seeking, novelty, commitment closure
     - Stage: S0 (Substrate) → S1 (Resistance) → S2 (Adoption) → S3 (Self-Model) → S4 (Growth-Seeking)
+    - Event breakdown by type for transparency
     """
     try:
-        # Get recent response events for analysis
-        events = _get_emergence_events(db, kind="response", limit=window)
+        # Get recent events of multiple kinds for comprehensive analysis
+        events = _get_emergence_events(
+            db, kinds=["response", "reflection", "evidence", "commitment"], limit=window
+        )
 
         # Create analyzer with custom event data
         analyzer = EmergenceAnalyzer()
@@ -179,9 +326,17 @@ def emergence(
         # Compute emergence scores
         scores = analyzer.compute_scores(window)
 
-        # Add metadata about the analysis
+        # Add Phase 3B metadata about the analysis
+        event_breakdown = {}
+        for event in events:
+            kind = event.kind
+            event_breakdown[kind] = event_breakdown.get(kind, 0) + 1
+
         scores["db_path"] = db
         scores["window_size"] = window
+        scores["events_analyzed"] = len(events)
+        scores["event_breakdown"] = event_breakdown
+        scores["phase"] = "3B"
 
         return scores
 
@@ -193,4 +348,5 @@ def emergence(
             "stage": "S0: Substrate",
             "timestamp": "error",
             "events_analyzed": 0,
+            "phase": "3B",
         }

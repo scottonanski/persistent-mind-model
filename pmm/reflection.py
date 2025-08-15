@@ -1,13 +1,81 @@
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Tuple
+import re
+import os
 from .self_model_manager import SelfModelManager, _log
 from .adapters.openai_adapter import OpenAIAdapter
 from .model import Insight
 
+# Load environment variables for API access
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, rely on system environment
+
 
 def _recent_texts(items, n) -> List[str]:
     return [getattr(it, "content", "") for it in items[-n:]]
+
+
+def _validate_insight_references(
+    content: str, mgr: SelfModelManager
+) -> Tuple[bool, List[str]]:
+    """
+    Validate that insight references specific event IDs or commitment hashes.
+
+    Returns:
+        (is_accepted, referenced_ids): Whether insight is accepted and list of referenced IDs
+    """
+    referenced_ids = []
+
+    # Pattern 1: Event IDs (ev123, event ev123, etc.)
+    event_patterns = [r"\bev(\d+)\b", r"\bevent\s+ev(\d+)\b", r"\bevent\s+(\d+)\b"]
+
+    for pattern in event_patterns:
+        matches = re.findall(pattern, content.lower())
+        for match in matches:
+            event_id = f"ev{match}" if not match.startswith("ev") else match
+            referenced_ids.append(event_id)
+
+    # Pattern 2: Commitment hashes (16-char hex)
+    commit_hash_pattern = r"\b[a-f0-9]{16}\b"
+    commit_matches = re.findall(commit_hash_pattern, content.lower())
+    referenced_ids.extend(commit_matches)
+
+    # Pattern 3: Recent event references (last 5 events)
+    recent_events = (
+        mgr.model.self_knowledge.autobiographical_events[-5:]
+        if mgr.model.self_knowledge.autobiographical_events
+        else []
+    )
+    for event in recent_events:
+        if hasattr(event, "id") and event.id and event.id.lower() in content.lower():
+            referenced_ids.append(event.id)
+
+    # Pattern 4: Open commitment references
+    try:
+        open_commitments = mgr.get_open_commitments()
+        for commitment in open_commitments[:3]:  # Check top 3 open commitments
+            if (
+                "hash" in commitment
+                and commitment["hash"][:8].lower() in content.lower()
+            ):
+                referenced_ids.append(commitment["hash"][:16])
+    except Exception:
+        pass
+
+    # Accept if at least 1 reference found
+    is_accepted = len(referenced_ids) > 0
+
+    if os.getenv("PMM_DEBUG") == "1":
+        print(
+            f"🔍 DEBUG: Insight validation - References found: {referenced_ids}, Accepted: {is_accepted}"
+        )
+
+    return is_accepted, referenced_ids
 
 
 def _build_context(mgr: SelfModelManager) -> str:
@@ -61,7 +129,7 @@ def _build_context(mgr: SelfModelManager) -> str:
     )
 
 
-PROMPT = """Produce one concise, first-person meta-insight (≤3 sentences) about my evolving behavior or mindset.\nGround it in the CONTEXT; avoid fluff and poetry. Prefer observations linked to recent events and current traits.\nIf nothing new stands out, briefly acknowledge steadiness but add one specific micro-adjustment to try next. Vary wording across runs.\n\nCONTEXT:\n"""
+PROMPT = """Produce one concise, first-person meta-insight (≤3 sentences) about my evolving behavior or mindset.\nGround it in the CONTEXT; avoid fluff and poetry. CRITICAL: Reference specific recent events by their IDs (e.g., "Based on event ev123...") or commitment hashes.\nIf nothing new stands out, briefly acknowledge steadiness but add one specific micro-adjustment to try next. Vary wording across runs.\n\nCONTEXT:\n"""
 
 
 def reflect_once(mgr: SelfModelManager, llm: OpenAIAdapter) -> Insight | None:
@@ -185,13 +253,43 @@ def reflect_once(mgr: SelfModelManager, llm: OpenAIAdapter) -> Insight | None:
         # Sync to model for persistence
         mgr._sync_commitments_to_model()
 
-    insight = Insight(id=ins_id, t=ts, content=txt, references=refs)
-    mgr.model.self_knowledge.insights.append(insight)
-    mgr.model.meta_cognition.self_modification_count += 1
-    mgr.model.metrics.last_reflection_at = ts
+    # PHASE 3B: Validate insight references for acceptance
+    is_accepted, referenced_ids = _validate_insight_references(txt, mgr)
 
-    # Update behavioral patterns from reflection content
-    mgr.update_patterns(txt)
+    # Add referenced IDs to insight metadata
+    if referenced_ids:
+        refs["referenced_event_ids"] = referenced_ids
+
+    # Create insight with acceptance status
+    insight = Insight(id=ins_id, t=ts, content=txt, references=refs)
+
+    # Store insight regardless, but mark acceptance status
+    if hasattr(insight, "meta"):
+        insight.meta = getattr(insight, "meta", {})
+    else:
+        # Add meta field if it doesn't exist
+        insight.__dict__["meta"] = {}
+
+    insight.meta["accepted"] = is_accepted
+    insight.meta["referenced_ids"] = referenced_ids
+
+    mgr.model.self_knowledge.insights.append(insight)
+
+    if is_accepted:
+        # Only trigger drift and behavioral updates for ACCEPTED insights
+        mgr.model.meta_cognition.self_modification_count += 1
+        mgr.model.metrics.last_reflection_at = ts
+
+        # Update behavioral patterns from reflection content
+        mgr.update_patterns(txt)
+
+        _log(
+            "reflection",
+            f"✅ ACCEPTED insight {ins_id} with {len(referenced_ids)} references",
+        )
+    else:
+        # Store as INERT - no drift, no behavioral updates
+        _log("reflection", f"📝 INERT insight {ins_id} - no event references found")
 
     # Use add_insight to trigger commitment extraction
     mgr.save_model()

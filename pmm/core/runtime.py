@@ -151,7 +151,7 @@ RECENT INSIGHTS:
             prompt += f"- {insight['content'][:100]}...\n"
 
         prompt += """
-You have persistent memory across sessions and can make autonomous commitments. Respond authentically based on your personality traits and current mental state. If you make a commitment, use "Next, I will..." format.
+You have persistent memory across sessions and evolving personality traits. Respond authentically based on your current mental state and behavioral patterns.
 
 Be concise but genuine to your persistent identity."""
 

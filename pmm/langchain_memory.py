@@ -248,7 +248,16 @@ class PersistentMindMemory(BaseChatMemory):
                 if match:
                     agent_name = match.group(1).title()
                     self.pmm.set_name(agent_name, origin="chat_detect")
+
+                    # PHASE 3B+: Emit explicit identity_update event for traceability
+                    self.pmm.add_event(
+                        summary=f"IDENTITY UPDATE: Agent name officially adopted as '{agent_name}' via user affirmation",
+                        effects=[],
+                        etype="identity_update",
+                    )
+
                     print(f" Persisted agent name change to: {agent_name}")
+                    print(" Emitted identity_update event for traceability")
                     break
 
             # Extract preferences and other key info
@@ -291,6 +300,58 @@ class PersistentMindMemory(BaseChatMemory):
         except Exception:
             self.commitment_context = ""
 
+    def _is_non_behavioral_input(self, text: str) -> bool:
+        """
+        Determine if input should be treated as non-behavioral (debug/log/paste).
+
+        Non-behavioral inputs are stored for provenance but don't trigger
+        reflections, commitment extraction, or behavioral patterns.
+        """
+        if not text or not text.strip():
+            return False
+
+        lines = text.strip().split("\n")
+
+        # Single line checks
+        if len(lines) == 1:
+            line = lines[0].strip()
+            # Debug/log prefixes
+            if line.startswith(
+                ("DEBUG:", "🔍 DEBUG:", "[API]", "[LOG]", "ERROR:", "WARNING:")
+            ):
+                return True
+            # JSON-like structures
+            if (line.startswith(("{", "[")) and line.endswith(("}", "]"))) and len(
+                line
+            ) > 20:
+                return True
+            return False
+
+        # Multi-line paste detection
+        if len(lines) > 10:  # Threshold for "paste cascade"
+            return True
+
+        # Check if majority of lines are debug/log
+        debug_lines = 0
+        for line in lines:
+            line = line.strip()
+            if line.startswith(
+                (
+                    "DEBUG:",
+                    "🔍 DEBUG:",
+                    "[API]",
+                    "[LOG]",
+                    "ERROR:",
+                    "WARNING:",
+                    "  at ",
+                    "Traceback",
+                )
+            ):
+                debug_lines += 1
+
+        # If >50% are debug lines, treat as non-behavioral
+        return debug_lines > len(lines) * 0.5
+
     def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
         """
         Save conversation context to PMM system.
@@ -321,20 +382,91 @@ class PersistentMindMemory(BaseChatMemory):
             if not ai_output and outputs:
                 ai_output = list(outputs.values())[0] if outputs.values() else ""
 
+        # ---- 0.5) Input Hygiene: Check if input is non-behavioral ----
+        is_non_behavioral = self._is_non_behavioral_input(human_input)
+        if is_non_behavioral:
+            print(
+                "🔍 DEBUG: Non-behavioral input detected, skipping behavioral triggers"
+            )
+
+        # Store non-behavioral inputs for provenance but with special marking
+        behavioral_input = human_input if not is_non_behavioral else ""
+
         # ---- 1) Log human event + auto‑extract key info ----
         if human_input:
             try:
+                # Always log for provenance, but mark non-behavioral inputs
+                event_type = "non_behavioral" if is_non_behavioral else "conversation"
                 self.pmm.add_event(
                     summary=f"User said: {human_input[:200]}{'...' if len(human_input) > 200 else ''}",
                     effects=[],
-                    etype="conversation",
+                    etype=event_type,
                 )
-                self._auto_extract_key_info(human_input)
-                # NEW: auto‑close commitments from human message
-                try:
-                    self.pmm.auto_close_commitments_from_event(human_input)
-                except Exception:
-                    pass
+
+                # Only extract key info and auto-close from behavioral inputs
+                if behavioral_input:
+                    self._auto_extract_key_info(behavioral_input)
+
+                    # Check for agent name adoption patterns
+                    if self.pmm and any(
+                        pattern in behavioral_input.lower()
+                        for pattern in [
+                            "call me",
+                            "my name is",
+                            "i am",
+                            "i'm",
+                            "adopt the name",
+                            "officially adopt",
+                        ]
+                    ):
+                        print(
+                            f"🔍 DEBUG: Identity pattern detected in: {behavioral_input[:100]}..."
+                        )
+                        # Extract potential name from the conversation
+                        import re
+
+                        name_patterns = [
+                            r"call me (\w+)",
+                            r"my name is (\w+)",
+                            r"i am (\w+)",
+                            r"i'm (\w+)",
+                            r"adopt(?:ing)? the name (\w+)",
+                            r"officially adopt (?:the name )?(\w+)",
+                        ]
+
+                        for pattern in name_patterns:
+                            match = re.search(pattern, behavioral_input.lower())
+                            if match:
+                                potential_name = match.group(1).capitalize()
+                                if potential_name and len(potential_name) > 1:
+                                    print(
+                                        f"🔍 DEBUG: Attempting to set name to: {potential_name}"
+                                    )
+                                    try:
+                                        self.pmm.set_name(
+                                            potential_name, origin="conversation"
+                                        )
+                                        # Emit identity_update event for traceability
+                                        self.pmm.add_event(
+                                            summary=f"Identity update: Name changed to '{potential_name}' (origin=conversation)",
+                                            effects=[],
+                                            etype="identity_update",
+                                        )
+                                        print(
+                                            f"🔍 DEBUG: Successfully set name to: {potential_name}"
+                                        )
+                                    except Exception as e:
+                                        print(f"🔍 DEBUG: Failed to set name: {e}")
+                                    break
+                        else:
+                            print("🔍 DEBUG: No name extracted from identity patterns")
+
+                    # NEW: Phase 3 - Detect and process evidence events from human input
+                    try:
+                        self._process_evidence_events(behavioral_input)
+                    except Exception as e:
+                        print(f"🔍 DEBUG: Evidence processing failed: {e}")
+                        pass
             except Exception:
                 pass  # never crash chat on memory write
 
@@ -350,52 +482,97 @@ class PersistentMindMemory(BaseChatMemory):
             except Exception:
                 pass
 
-            # ---- 3) Commitments: extract + add; auto‑close from assistant output ----
+            # ---- 3) Commitments: extract + add from USER INPUT and AI RESPONSE ----
+            # Skip commitment extraction and behavioral processing for non-behavioral inputs
             new_commitment_text = None
-            try:
-                tracker = CommitmentTracker()
-                new_commitment_text, _ = tracker.extract_commitment(ai_output)
-                if new_commitment_text:
-                    self.pmm.add_commitment(
-                        text=new_commitment_text,
-                        source_insight_id="langchain_interaction",
-                    )
-            except Exception:
-                pass
+            if not is_non_behavioral:
+                try:
+                    tracker = CommitmentTracker()
+                    # Check user input first
+                    new_commitment_text, _ = tracker.extract_commitment(human_input)
+                    if new_commitment_text:
+                        print(
+                            f"🔍 DEBUG: Found commitment in user input: {new_commitment_text}"
+                        )
+                        self.pmm.add_commitment(
+                            text=new_commitment_text,
+                            source_insight_id="langchain_interaction",
+                        )
+                    else:
+                        # Check AI response for commitments
+                        ai_commitment_text, _ = tracker.extract_commitment(ai_output)
+                        if ai_commitment_text:
+                            print(
+                                f"🔍 DEBUG: Found commitment in AI response: {ai_commitment_text}"
+                            )
+                            self.pmm.add_commitment(
+                                text=ai_commitment_text,
+                                source_insight_id="langchain_interaction",
+                            )
+                            new_commitment_text = (
+                                ai_commitment_text  # Set for reflection trigger
+                            )
+                        else:
+                            print(
+                                f"🔍 DEBUG: No commitment found in: {human_input[:100]}..."
+                            )
+                except Exception as e:
+                    print(f"🔍 DEBUG: Commitment extraction error: {e}")
+                    pass
 
-            try:
-                self.pmm.auto_close_commitments_from_event(ai_output)
-            except Exception:
-                pass
+                try:
+                    evidence_events = self._process_evidence_events(human_input)
+                    if evidence_events:
+                        print(f"🔍 DEBUG: Found {len(evidence_events)} evidence events")
+                    else:
+                        print(f"🔍 DEBUG: No evidence found in: {human_input[:100]}...")
+                except Exception as e:
+                    print(f"🔍 DEBUG: Evidence processing failed: {e}")
+                    pass
 
-            # ---- 4) Patterns update ----
-            try:
-                self.pmm.update_patterns(ai_output)
-            except Exception:
-                pass
+                try:
+                    self.pmm.auto_close_commitments_from_event(ai_output)
+                except Exception:
+                    pass
+
+                # ---- 4) Patterns update ----
+                try:
+                    self.pmm.update_patterns(ai_output)
+                except Exception:
+                    pass
 
             # ---- 5) Reflection triggers ----
+            # Skip reflection triggers for non-behavioral inputs
             # (a) cadence: every 4 events (~2 back‑and‑forths)
             # (b) immediate after creating a new commitment (planning reflection)
             should_reflect = False
-            try:
-                event_count = len(self.pmm.model.self_knowledge.autobiographical_events)
-                print(
-                    f"🔍 DEBUG: Event count: {event_count}, new_commitment: {bool(new_commitment_text)}"
-                )
-                if event_count > 0 and event_count % 4 == 0:
+            if not is_non_behavioral:
+                try:
+                    # Only count behavioral events for cadence trigger
+                    behavioral_events = [
+                        e
+                        for e in self.pmm.model.self_knowledge.autobiographical_events
+                        if e.type != "non_behavioral"
+                    ]
+                    event_count = len(behavioral_events)
                     print(
-                        f"🔍 DEBUG: Cadence trigger - event count {event_count} divisible by 4"
+                        f"🔍 DEBUG: Behavioral event count: {event_count}, new_commitment: {bool(new_commitment_text)}"
                     )
-                    should_reflect = True
-                if new_commitment_text:
-                    print(
-                        f"🔍 DEBUG: Commitment trigger - new commitment: {new_commitment_text}"
-                    )
-                    should_reflect = True
-                print(f"🔍 DEBUG: Should reflect: {should_reflect}")
-            except Exception as e:
-                print(f"🔍 DEBUG: Reflection trigger check failed: {e}")
+                    if event_count > 0 and event_count % 4 == 0:
+                        print(
+                            f"🔍 DEBUG: Cadence trigger - behavioral event count {event_count} divisible by 4"
+                        )
+                        should_reflect = True
+                    if new_commitment_text:
+                        print(
+                            f"🔍 DEBUG: Commitment trigger - new commitment: {new_commitment_text}"
+                        )
+                        should_reflect = True
+                    print(f"🔍 DEBUG: Should reflect: {should_reflect}")
+                except Exception as e:
+                    print(f"🔍 DEBUG: Reflection trigger check failed: {e}")
+            else:
+                print("🔍 DEBUG: Skipping reflection triggers for non-behavioral input")
 
             if should_reflect:
                 print("🔍 DEBUG: Reflection triggered, starting...")
@@ -432,14 +609,45 @@ class PersistentMindMemory(BaseChatMemory):
         self.pmm.save_model()
 
         # ---- 8) Keep LangChain compatibility ----
-        super().save_context(inputs, outputs)
+        # FIXED: Commented out to prevent hanging - PMM handles all persistence internally
+        # super().save_context(inputs, outputs)
+
+    def _process_evidence_events(self, text: str) -> None:
+        """Process evidence events from text and emit them to PMM system."""
+        try:
+            evidence_events = self.pmm.commitment_tracker.detect_evidence_events(text)
+            for evidence_type, commit_ref, description, artifact in evidence_events:
+                # Create evidence event data
+                evidence_data = {
+                    "evidence_type": evidence_type,
+                    "commit_ref": commit_ref,
+                    "description": description,
+                    "artifact": artifact,
+                }
+
+                # Add evidence event to PMM
+                self.pmm.add_event(
+                    summary=f"Evidence: {description}",
+                    etype=f"evidence:{evidence_type}",
+                    evidence=evidence_data,
+                )
+
+                # If it's a 'done' evidence, close the commitment
+                if evidence_type == "done":
+                    self.pmm.commitment_tracker.close_commitment_with_evidence(
+                        commit_ref, description, artifact
+                    )
+
+        except Exception as e:
+            print(f"🔍 DEBUG: Evidence event processing error: {e}")
 
     def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, str]:
         """
-        Load memory variables for LLM prompts.
+                Load memory variables for LLM prompts.
 
-        Returns personality context, commitments, and conversation history
-        formatted for optimal LLM performance.
+        {{ ... }}
+                Returns personality context, commitments, and conversation history
+                formatted for optimal LLM performance.
         """
         # Get base memory variables from LangChain
         base_variables = super().load_memory_variables(inputs)
@@ -499,14 +707,17 @@ class PersistentMindMemory(BaseChatMemory):
 
                             elif "I responded:" in display_text:
                                 ai_msg = display_text.replace("I responded: ", "")
-                                conversation_history.append(f"Assistant: {ai_msg}")
+                                if not self._is_non_behavioral_input(ai_msg):
+                                    conversation_history.append(f"Assistant: {ai_msg}")
 
-                                # Extract commitments and identity info
-                                if (
-                                    "next, i will" in ai_msg.lower()
-                                    or "scott" in ai_msg.lower()
-                                ):
-                                    key_facts.append(f"COMMITMENT/IDENTITY: {ai_msg}")
+                                    # Extract commitments and identity info
+                                    if (
+                                        "next, i will" in ai_msg.lower()
+                                        or "scott" in ai_msg.lower()
+                                    ):
+                                        key_facts.append(
+                                            f"COMMITMENT/IDENTITY: {ai_msg}"
+                                        )
 
                             elif kind == "event":
                                 conversation_history.append(f"Context: {display_text}")
@@ -526,19 +737,18 @@ class PersistentMindMemory(BaseChatMemory):
                             except Exception:
                                 pass
 
-                    if conversation_history:
-                        # Add key facts at the top for emphasis
-                        if key_facts:
-                            pmm_context_parts.append(
-                                "Key Information to Remember:\n"
-                                + "\n".join(key_facts[-5:])
-                            )
-
-                        # Add recent conversation history
+                if conversation_history:
+                    # Add key facts at the top for emphasis
+                    if key_facts:
                         pmm_context_parts.append(
-                            "Recent conversation history:\n"
-                            + "\n".join(conversation_history[-15:])
-                        )  # Last 15 exchanges
+                            "Key Information to Remember:\n" + "\n".join(key_facts[-5:])
+                        )
+
+                    # Add recent conversation history
+                    pmm_context_parts.append(
+                        "Recent conversation history:\n"
+                        + "\n".join(conversation_history[-15:])
+                    )  # Last 15 exchanges
         except Exception as e:
             print(f"Warning: Failed to load conversation history from SQLite: {e}")
 

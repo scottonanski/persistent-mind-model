@@ -4,8 +4,10 @@ Commitment lifecycle management for Persistent Mind Model.
 Tracks agent commitments from creation to completion.
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Tuple
+import re
+import hashlib
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 
@@ -30,18 +32,227 @@ class CommitmentTracker:
     def __init__(self):
         self.commitments: Dict[str, Commitment] = {}
 
+    def _is_valid_commitment(self, text: str) -> bool:
+        """
+        Validate commitment against 5 criteria:
+        1. Actionable: concrete verb + object
+        2. Context-bound: references current topic/artifact/goal
+        3. Time/trigger: includes when or clear trigger
+        4. Non-duplicate: not semantically near open commitments
+        5. Owned: first-person agent ownership
+        """
+        if not text or len(text.strip()) < 10:
+            return False
+
+        text_lower = text.lower().strip()
+
+        # 1. Actionable: Must contain concrete verb + object
+        action_verbs = [
+            "draft",
+            "create",
+            "write",
+            "build",
+            "implement",
+            "design",
+            "develop",
+            "review",
+            "analyze",
+            "test",
+            "validate",
+            "document",
+            "outline",
+            "label",
+            "categorize",
+            "organize",
+            "schedule",
+            "plan",
+            "research",
+            "investigate",
+            "compile",
+            "generate",
+            "produce",
+            "deliver",
+            "complete",
+            "finish",
+        ]
+
+        has_action_verb = any(verb in text_lower for verb in action_verbs)
+
+        # Reject vague verbs
+        vague_verbs = [
+            "improve",
+            "enhance",
+            "clarify",
+            "confirm",
+            "consider",
+            "think about",
+            "look into",
+        ]
+        has_vague_verb = any(verb in text_lower for verb in vague_verbs)
+
+        if not has_action_verb or has_vague_verb:
+            return False
+
+        # 2. Context-bound: Must reference specific topic/artifact
+        context_indicators = [
+            "pmm",
+            "onboarding",
+            "v0.",
+            "dataset",
+            "samples",
+            "document",
+            "outline",
+            "template",
+            "guide",
+            "tutorial",
+            "demo",
+            "test",
+            "validation",
+            "api",
+            "probe",
+            "commitment",
+            "reflection",
+            "insight",
+            "trait",
+            "personality",
+            "hash",
+            "evidence",
+            "phase",
+            "closure",
+        ]
+
+        has_context = any(indicator in text_lower for indicator in context_indicators)
+
+        # Reject generic contexts
+        generic_contexts = [
+            "objectives",
+            "tasks",
+            "goals",
+            "decision-making",
+            "performance",
+        ]
+        has_generic = any(generic in text_lower for generic in generic_contexts)
+
+        if not has_context or has_generic:
+            return False
+
+        # 3. Time/trigger: Must include when or trigger
+        time_triggers = [
+            "tonight",
+            "today",
+            "tomorrow",
+            "this week",
+            "next week",
+            "by",
+            "before",
+            "after",
+            "once",
+            "when",
+            "during",
+            "within",
+            "in the next",
+            "over the",
+            "following",
+            "subsequent",
+            "upon",
+            "after reviewing",
+            "after completing",
+            "right now",
+            "now",
+            "immediately",
+            "asap",
+            "soon",
+            "shortly",
+            "quickly",
+        ]
+
+        has_time_trigger = any(trigger in text_lower for trigger in time_triggers)
+
+        if not has_time_trigger:
+            return False
+
+        # 4. Non-duplicate: Check against open commitments (simplified for now)
+        # This will be enhanced when we have access to existing commitments
+
+        # 5. Owned: Must be first-person
+        ownership_indicators = ["i will", "i plan to", "i commit to", "next, i will"]
+        has_ownership = any(
+            indicator in text_lower for indicator in ownership_indicators
+        )
+
+        # Reject external ownership
+        external_indicators = [
+            "someone should",
+            "we should",
+            "they should",
+            "it would be good",
+        ]
+        has_external = any(external in text_lower for external in external_indicators)
+
+        if not has_ownership or has_external:
+            return False
+
+        return True
+
     def extract_commitment(self, text: str) -> Tuple[Optional[str], List[str]]:
-        """Extract commitment from text and return normalized sentence + 3-grams."""
+        """Extract and validate commitment from text using 5-point criteria."""
+        # First, try to extract commitment from the whole text
+        if any(
+            starter in text.lower()
+            for starter in [
+                "i will",
+                "next, i will",
+                "next:",
+                "i plan to",
+                "i commit to",
+            ]
+        ):
+            # Clean up the commitment text - handle both "Next:" and "Next, I will" patterns
+            commitment = text.strip()
+            for prefix in ["Next:", "next:", "Next, I will", "next, i will"]:
+                commitment = commitment.replace(prefix, "").strip()
+
+            # If we removed "Next, I will", we need to add "I will" back
+            if "next, i will" in text.lower() and not commitment.lower().startswith(
+                "i will"
+            ):
+                commitment = "I will " + commitment
+
+            if commitment and self._is_valid_commitment(commitment):
+                # Generate 3-grams for matching
+                words = commitment.lower().split()
+                ngrams = []
+                for i in range(len(words) - 2):
+                    if all(len(w) > 2 for w in words[i : i + 3]):  # Skip short words
+                        ngrams.append(" ".join(words[i : i + 3]))
+                return commitment, ngrams
+
+        # Fallback: split by sentences and try each one
         lines = text.split(".")
         for line in lines:
             line = line.strip()
             if any(
                 starter in line.lower()
-                for starter in ["i will", "next:", "i plan to", "i commit to"]
+                for starter in [
+                    "i will",
+                    "next, i will",
+                    "next:",
+                    "i plan to",
+                    "i commit to",
+                ]
             ):
-                # Clean up the commitment text
-                commitment = line.replace("Next:", "").replace("next:", "").strip()
-                if commitment:
+                # Clean up the commitment text - handle both "Next:" and "Next, I will" patterns
+                commitment = line
+                for prefix in ["Next:", "next:", "Next, I will", "next, i will"]:
+                    commitment = commitment.replace(prefix, "").strip()
+
+                # If we removed "Next, I will", we need to add "I will" back
+                if "next, i will" in line.lower() and not commitment.lower().startswith(
+                    "i will"
+                ):
+                    commitment = "I will " + commitment
+
+                if commitment and self._is_valid_commitment(commitment):
                     # Generate 3-grams for matching
                     words = commitment.lower().split()
                     ngrams = []
@@ -53,12 +264,84 @@ class CommitmentTracker:
                     return commitment, ngrams
         return None, []
 
+    def _is_duplicate_commitment(self, text: str) -> bool:
+        """Check if commitment is semantically similar to recent open commitments."""
+        if not text:
+            return False
+
+        # Normalize text for comparison
+        normalized = text.lower().strip()
+        normalized = re.sub(r"\s+", " ", normalized)  # Normalize whitespace
+
+        # Get n-grams for similarity comparison
+        def get_ngrams(text: str, n: int = 3) -> set:
+            words = text.split()
+            return set(" ".join(words[i : i + n]) for i in range(len(words) - n + 1))
+
+        # Also get 2-grams for better semantic matching
+        def get_bigrams(text: str) -> set:
+            words = text.split()
+            return set(" ".join(words[i : i + 2]) for i in range(len(words) - 1))
+
+        current_ngrams = get_ngrams(normalized)
+        current_bigrams = get_bigrams(normalized)
+
+        if not current_ngrams and not current_bigrams:
+            return False
+
+        # Check against last 20 open commitments
+        open_commitments = [c for c in self.commitments.values() if c.status == "open"]
+        recent_commitments = sorted(
+            open_commitments, key=lambda x: x.created_at, reverse=True
+        )[:20]
+
+        for existing in recent_commitments:
+            existing_normalized = existing.text.lower().strip()
+            existing_normalized = re.sub(r"\s+", " ", existing_normalized)
+            existing_ngrams = get_ngrams(existing_normalized)
+            existing_bigrams = get_bigrams(existing_normalized)
+
+            if not existing_ngrams and not existing_bigrams:
+                continue
+
+            # Calculate similarity using both trigrams and bigrams
+            trigram_similarity = 0
+            if current_ngrams and existing_ngrams:
+                intersection = len(current_ngrams & existing_ngrams)
+                union = len(current_ngrams | existing_ngrams)
+                trigram_similarity = intersection / union if union > 0 else 0
+
+            bigram_similarity = 0
+            if current_bigrams and existing_bigrams:
+                intersection = len(current_bigrams & existing_bigrams)
+                union = len(current_bigrams | existing_bigrams)
+                bigram_similarity = intersection / union if union > 0 else 0
+
+            # Use the higher similarity score, lower threshold for better detection
+            max_similarity = max(trigram_similarity, bigram_similarity)
+
+            # Consider duplicate if >45% similar (more sensitive)
+            if max_similarity > 0.45:
+                print(
+                    f"🔍 DEBUG: Duplicate detected ({max_similarity:.1%} similar): '{text[:50]}...' vs '{existing.text[:50]}...'"
+                )
+                return True
+
+        return False
+
     def add_commitment(
         self, text: str, source_insight_id: str, due: Optional[str] = None
     ) -> str:
         """Add a new commitment and return its ID."""
         commitment_text, ngrams = self.extract_commitment(text)
         if not commitment_text:
+            return ""
+
+        # Check for duplicates
+        if self._is_duplicate_commitment(commitment_text):
+            print(
+                f"🔍 DEBUG: Commitment rejected as duplicate: {commitment_text[:50]}..."
+            )
             return ""
 
         cid = f"c{len(self.commitments) + 1}"
@@ -74,6 +357,7 @@ class CommitmentTracker:
         )
 
         self.commitments[cid] = commitment
+        print(f"🔍 DEBUG: Valid commitment added: {commitment_text}")
         return cid
 
     def mark_commitment(
@@ -219,6 +503,225 @@ class CommitmentTracker:
             "close_rate": closed_count / total if total > 0 else 0,
             "median_time_to_close_hours": median_time_to_close,
         }
+
+    def archive_legacy_commitments(self) -> List[str]:
+        """Archive generic legacy commitments that don't meet 5-point criteria."""
+        archived_cids = []
+
+        # Generic patterns to identify legacy commitments
+        legacy_patterns = [
+            "clarify and confirm",
+            "clarify objectives",
+            "confirm objectives",
+            "assist with moving forward",
+            "there was no prior commitment",
+            "review a document",
+            "assess if it has been completed",
+        ]
+
+        for cid, commitment in self.commitments.items():
+            if commitment.status in ["archived_legacy", "expired"]:
+                continue
+
+            commitment_lower = commitment.text.lower()
+
+            # Check if it matches legacy patterns
+            is_legacy = any(pattern in commitment_lower for pattern in legacy_patterns)
+
+            # Also check if it fails the 5-point validation
+            is_invalid = not self._is_valid_commitment(commitment.text)
+
+            if is_legacy or is_invalid:
+                # Archive with hygiene metadata
+                commitment.status = "archived_legacy"
+                commitment.closed_at = datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+                commitment.close_note = "Archived: generic template commitment"
+                archived_cids.append(cid)
+                print(
+                    f"🔍 DEBUG: Archived legacy commitment {cid}: {commitment.text[:50]}..."
+                )
+
+        return archived_cids
+
+    def get_commitment_hash(self, commitment: Commitment) -> str:
+        """Generate a hash for a commitment for evidence linking."""
+        # Create a stable hash from commitment content
+        content = f"{commitment.cid}:{commitment.text}:{commitment.created_at}"
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+    def detect_evidence_events(
+        self, text: str
+    ) -> List[Tuple[str, str, str, Optional[str]]]:
+        """
+        Detect evidence events in text and return list of (evidence_type, commit_ref, description, artifact).
+
+        Evidence patterns:
+        - "Done: [description with artifact]" -> evidence:done
+        - "Completed: [description]" -> evidence:done
+        - "Blocked: [reason] -> [next_action]" -> evidence:blocked
+        - "Delegated to [who]: [description]" -> evidence:delegated
+        """
+        evidence_events = []
+        # Keep original text for artifact extraction, normalize for pattern matching
+        normalized = text.strip()
+
+        # Pattern 1: Done/Completed statements - case-insensitive matching
+        done_patterns = [
+            r"^done[:\-\s](.+)",  # Done: , Done- , Done <space>
+            r"^completed[:\-\s](.+)",
+            r"^finished[:\-\s](.+)",
+            r"^delivered[:\-\s](.+)",
+        ]
+
+        for pattern in done_patterns:
+            matches = re.finditer(pattern, normalized, re.IGNORECASE)
+            for match in matches:
+                description = match.group(1).strip()
+
+                # Extract artifact if present (file names, URLs, IDs)
+                artifact = self._extract_artifact(description)
+
+                # For now, we'll need to match this to open commitments
+                # This is a simplified version - in practice we'd need better matching
+                for cid, commitment in self.commitments.items():
+                    if commitment.status == "open":
+                        commit_hash = self.get_commitment_hash(commitment)
+                        # Simple keyword matching - could be enhanced
+                        if any(
+                            word in description
+                            for word in commitment.text.lower().split()[:3]
+                        ):
+                            evidence_events.append(
+                                ("done", commit_hash, description, artifact)
+                            )
+                            break
+
+        # Pattern 2: Blocked statements
+        blocked_patterns = [
+            r"blocked:\s*(.+?)(?:\s*->\s*(.+))?$",
+            r"cannot proceed:\s*(.+?)(?:\s*->\s*(.+))?$",
+            r"stuck on:\s*(.+?)(?:\s*->\s*(.+))?$",
+            r"blocked:\s*(.+?)(?:\s*next:\s*(.+))?$",
+        ]
+
+        for pattern in blocked_patterns:
+            matches = re.finditer(pattern, normalized, re.IGNORECASE)
+            for match in matches:
+                reason = match.group(1).strip()
+                next_action = match.group(2).strip() if match.group(2) else None
+
+                # Match to open commitments
+                for cid, commitment in self.commitments.items():
+                    if commitment.status == "open":
+                        commit_hash = self.get_commitment_hash(commitment)
+                        if any(
+                            word in reason
+                            for word in commitment.text.lower().split()[:3]
+                        ):
+                            evidence_events.append(
+                                ("blocked", commit_hash, reason, next_action)
+                            )
+                            break
+
+        # Pattern 3: Delegated statements
+        delegated_patterns = [
+            r"delegated to\s+([^:]+):\s*(.+)",
+            r"handed off to\s+([^:]+):\s*(.+)",
+            r"assigned to\s+([^:]+):\s*(.+)",
+        ]
+
+        for pattern in delegated_patterns:
+            matches = re.finditer(pattern, normalized, re.IGNORECASE)
+            for match in matches:
+                assignee = match.group(1).strip()
+                description = match.group(2).strip()
+
+                # Match to open commitments
+                for cid, commitment in self.commitments.items():
+                    if commitment.status == "open":
+                        commit_hash = self.get_commitment_hash(commitment)
+                        if any(
+                            word in description
+                            for word in commitment.text.lower().split()[:3]
+                        ):
+                            evidence_events.append(
+                                (
+                                    "delegated",
+                                    commit_hash,
+                                    f"Delegated to {assignee}: {description}",
+                                    assignee,
+                                )
+                            )
+                            break
+
+        return evidence_events
+
+    def _extract_artifact(self, description: str) -> Optional[str]:
+        """Extract artifact references from evidence description."""
+        # Look for file names, URLs, IDs, timestamps
+        artifact_patterns = [
+            r"`([^`]+\.[a-zA-Z0-9]+)`",  # `filename.ext`
+            r"([a-zA-Z0-9_-]+\.[a-zA-Z0-9]+)",  # filename.ext
+            r"(https?://[^\s]+)",  # URLs
+            r"(#\d+)",  # Issue/PR numbers
+            r"(\d{4}-\d{2}-\d{2})",  # Dates
+            r"([A-Z]{2,}-\d+)",  # Ticket IDs like PROJ-123
+        ]
+
+        for pattern in artifact_patterns:
+            match = re.search(pattern, description)
+            if match:
+                return match.group(1)
+
+        return None
+
+    def close_commitment_with_evidence(
+        self,
+        commit_hash: str,
+        evidence_type: str,
+        description: str,
+        artifact: Optional[str] = None,
+    ) -> bool:
+        """Close a commitment based on evidence. Only 'done' evidence closes commitments."""
+        if evidence_type != "done":
+            print(
+                f"🔍 DEBUG: Evidence type '{evidence_type}' does not close commitments"
+            )
+            return False
+
+        # Find commitment by hash
+        target_commitment = None
+        target_cid = None
+
+        for cid, commitment in self.commitments.items():
+            if self.get_commitment_hash(commitment) == commit_hash:
+                target_commitment = commitment
+                target_cid = cid
+                break
+
+        if not target_commitment:
+            print(f"🔍 DEBUG: No commitment found for hash {commit_hash}")
+            return False
+
+        if target_commitment.status != "open":
+            print(
+                f"🔍 DEBUG: Commitment {target_cid} is not open (status: {target_commitment.status})"
+            )
+            return False
+
+        # Close the commitment
+        target_commitment.status = "closed"
+        target_commitment.closed_at = datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        target_commitment.close_note = f"Evidence: {description}"
+        if artifact:
+            target_commitment.close_note += f" (Artifact: {artifact})"
+
+        print(f"🔍 DEBUG: Closed commitment {target_cid} with evidence: {description}")
+        return True
 
     def expire_old_commitments(self, days_old: int = 30) -> List[str]:
         """Mark old commitments as expired."""

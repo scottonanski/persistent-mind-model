@@ -194,6 +194,19 @@ class EventMeta:
 
 
 @dataclass
+class EvidenceEvent:
+    """Evidence event linking to a specific commitment by hash."""
+
+    id: str
+    t: str
+    evidence_type: str  # "done", "blocked", "delegated"
+    commit_ref: str  # Hash of the commitment this evidence relates to
+    description: str  # 1-2 sentences with concrete details
+    artifact: Optional[str] = None  # File name, PR/issue ID, timestamp, etc.
+    next_action: Optional[str] = None  # For blocked/delegated evidence
+
+
+@dataclass
 class Event:
     id: str
     t: str
@@ -205,6 +218,8 @@ class Event:
     tags: List[str] = field(default_factory=list)
     effects_hypothesis: List[EffectHypothesis] = field(default_factory=list)
     meta: Dict[str, Any] = field(default_factory=lambda: {"processed": False})
+    # Evidence data for evidence events
+    evidence: Optional[EvidenceEvent] = None
 
 
 @dataclass
