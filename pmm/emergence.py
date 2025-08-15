@@ -7,7 +7,7 @@ system that tracks AI identity convergence through 5 stages (S0-S4).
 
 import re
 import json
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 

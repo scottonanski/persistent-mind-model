@@ -29,6 +29,7 @@ Usage:
 
 from typing import Any, Dict, List, Optional
 from threading import Thread
+from datetime import UTC
 from langchain.memory.chat_memory import BaseChatMemory
 from pydantic import Field
 
@@ -547,83 +548,112 @@ class PersistentMindMemory(BaseChatMemory):
             if not is_non_behavioral:
                 try:
                     from datetime import datetime
-                    from pmm.adaptive_triggers import AdaptiveTrigger, TriggerConfig, TriggerState
-                    
+                    from pmm.adaptive_triggers import (
+                        AdaptiveTrigger,
+                        TriggerConfig,
+                        TriggerState,
+                    )
+
                     # Build state from PMM
-                    events_total = len(self.pmm.model.self_knowledge.autobiographical_events)
-                    last_ref_ts = getattr(self.pmm.model.self_knowledge, "last_reflection_ts", None)
+                    events_total = len(
+                        self.pmm.model.self_knowledge.autobiographical_events
+                    )
+                    last_ref_ts = getattr(
+                        self.pmm.model.self_knowledge, "last_reflection_ts", None
+                    )
                     last_dt = None
                     if isinstance(last_ref_ts, str):
                         try:
                             last_dt = datetime.fromisoformat(last_ref_ts)
-                        except:
+                        except (ValueError, TypeError):
                             last_dt = None
-                    elif hasattr(last_ref_ts, 'isoformat'):
+                    elif hasattr(last_ref_ts, "isoformat"):
                         last_dt = last_ref_ts
 
                     # Calculate emergence scores in real-time for adaptive triggers
                     try:
                         from pmm.emergence import EmergenceAnalyzer, EmergenceEvent
                         from pmm.storage.sqlite_store import SQLiteStore
-                        
+
                         # Use same database access pattern as probe API
                         db_path = "pmm.db"  # Standard PMM database path
                         store = SQLiteStore(db_path)
-                        
+
                         # Get recent events with comprehensive filtering like probe API
                         conn = store.conn
-                        cursor = conn.execute("""
+                        cursor = conn.execute(
+                            """
                             SELECT id, ts, kind, content, meta 
                             FROM events 
                             WHERE kind IN ('response', 'event', 'reflection', 'evidence', 'commitment')
                             ORDER BY ts DESC 
                             LIMIT 15
-                        """)
+                        """
+                        )
                         rows = cursor.fetchall()
-                        
+
                         # Convert to EmergenceEvent objects
                         events = []
                         for row in rows:
                             import json
+
                             meta = {}
                             try:
                                 meta = json.loads(row[4]) if row[4] else {}
-                            except:
+                            except (json.JSONDecodeError, TypeError):
                                 pass
-                            events.append(EmergenceEvent(
-                                id=row[0], timestamp=row[1], kind=row[2], 
-                                content=row[3], meta=meta
-                            ))
-                        
+                            events.append(
+                                EmergenceEvent(
+                                    id=row[0],
+                                    timestamp=row[1],
+                                    kind=row[2],
+                                    content=row[3],
+                                    meta=meta,
+                                )
+                            )
+
                         # Create analyzer and override get_recent_events like probe API
                         analyzer = EmergenceAnalyzer(storage_manager=store)
-                        analyzer.get_recent_events = lambda kind="response", limit=15: events
-                        
-                        scores = analyzer.compute_scores(window=15)  # Use Phase 3C window size
+                        analyzer.get_recent_events = (
+                            lambda kind="response", limit=15: events
+                        )
+
+                        scores = analyzer.compute_scores(
+                            window=15
+                        )  # Use Phase 3C window size
                         ias = scores.get("IAS", 0.0)
                         gas = scores.get("GAS", 0.0)
-                        print(f"🔍 DEBUG: Real-time emergence scores - IAS: {ias}, GAS: {gas}")
-                        print(f"🔍 DEBUG: Events analyzed: {scores.get('events_analyzed', 0)}, Stage: {scores.get('stage', 'Unknown')}")
+                        print(
+                            f"🔍 DEBUG: Real-time emergence scores - IAS: {ias}, GAS: {gas}"
+                        )
+                        print(
+                            f"🔍 DEBUG: Events analyzed: {scores.get('events_analyzed', 0)}, Stage: {scores.get('stage', 'Unknown')}"
+                        )
                     except Exception as e:
                         print(f"🔍 DEBUG: Failed to calculate emergence scores: {e}")
                         import traceback
+
                         print(f"🔍 DEBUG: Traceback: {traceback.format_exc()}")
                         ias = None
                         gas = None
 
                     # Determine events since last reflection
-                    events_since_reflection = getattr(self.pmm.model.self_knowledge, "events_since_reflection", None)
+                    events_since_reflection = getattr(
+                        self.pmm.model.self_knowledge, "events_since_reflection", None
+                    )
                     if events_since_reflection is None:
                         # fallback heuristic: use total events modulo
                         events_since_reflection = events_total % 6
 
                     # Respect config reflection_cadence_days if present
-                    cadence_days = getattr(self.pmm.model.metrics, "reflection_cadence_days", 7.0)
+                    cadence_days = getattr(
+                        self.pmm.model.metrics, "reflection_cadence_days", 7.0
+                    )
 
                     trigger = AdaptiveTrigger(
                         TriggerConfig(
                             cadence_days=cadence_days,
-                            events_min_gap=4,     # tune in Phase 3C tests
+                            events_min_gap=4,  # tune in Phase 3C tests
                         ),
                         TriggerState(
                             last_reflection_at=last_dt,
@@ -635,22 +665,33 @@ class PersistentMindMemory(BaseChatMemory):
                     if new_commitment_text:
                         should_reflect = True
                         reason = "new-commitment"
-                        print(f"🔍 DEBUG: Commitment trigger - new commitment: {new_commitment_text}")
+                        print(
+                            f"🔍 DEBUG: Commitment trigger - new commitment: {new_commitment_text}"
+                        )
                     else:
-                        should_reflect, reason = trigger.decide(datetime.utcnow(), ias, gas, events_since_reflection)
+                        should_reflect, reason = trigger.decide(
+                            datetime.now(UTC), ias, gas, events_since_reflection
+                        )
 
-                    print(f"🔍 DEBUG: Adaptive trigger decision: {should_reflect} ({reason})")
-                    print(f"🔍 DEBUG: Events since reflection: {events_since_reflection}, IAS: {ias}, GAS: {gas}")
-                    
+                    print(
+                        f"🔍 DEBUG: Adaptive trigger decision: {should_reflect} ({reason})"
+                    )
+                    print(
+                        f"🔍 DEBUG: Events since reflection: {events_since_reflection}, IAS: {ias}, GAS: {gas}"
+                    )
+
                 except Exception as e:
                     print(f"🔍 DEBUG: Adaptive reflection trigger check failed: {e}")
                     # Fallback to simple event count trigger
                     behavioral_events = [
-                        e for e in self.pmm.model.self_knowledge.autobiographical_events
+                        e
+                        for e in self.pmm.model.self_knowledge.autobiographical_events
                         if e.type != "non_behavioral"
                     ]
                     event_count = len(behavioral_events)
-                    should_reflect = (event_count > 0 and event_count % 4 == 0) or bool(new_commitment_text)
+                    should_reflect = (event_count > 0 and event_count % 4 == 0) or bool(
+                        new_commitment_text
+                    )
             else:
                 print("🔍 DEBUG: Skipping reflection triggers for non-behavioral input")
 
@@ -680,20 +721,34 @@ class PersistentMindMemory(BaseChatMemory):
                         print("🔍 DEBUG: Trait drift completed")
                     except Exception as e:
                         print(f"🔍 DEBUG: Trait drift failed: {e}")
-                    
+
                     # Phase 3C: Persist reflection bookkeeping for adaptive triggers
                     try:
                         from datetime import datetime
-                        self.pmm.model.self_knowledge.last_reflection_ts = datetime.utcnow().isoformat()
+
+                        self.pmm.model.self_knowledge.last_reflection_ts = datetime.now(
+                            UTC
+                        ).isoformat()
                         self.pmm.model.self_knowledge.events_since_reflection = 0
-                        print("🔍 DEBUG: Updated reflection bookkeeping for adaptive triggers")
+                        print(
+                            "🔍 DEBUG: Updated reflection bookkeeping for adaptive triggers"
+                        )
                     except Exception as e:
                         print(f"🔍 DEBUG: Failed to update reflection bookkeeping: {e}")
                 else:
                     # Increment events_since_reflection counter even if reflection failed
                     try:
-                        cur = getattr(self.pmm.model.self_knowledge, "events_since_reflection", 0) or 0
-                        self.pmm.model.self_knowledge.events_since_reflection = int(cur) + 1
+                        cur = (
+                            getattr(
+                                self.pmm.model.self_knowledge,
+                                "events_since_reflection",
+                                0,
+                            )
+                            or 0
+                        )
+                        self.pmm.model.self_knowledge.events_since_reflection = (
+                            int(cur) + 1
+                        )
                     except Exception:
                         pass
 

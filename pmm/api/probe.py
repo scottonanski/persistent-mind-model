@@ -1,6 +1,5 @@
 from __future__ import annotations
 import json
-import os
 from typing import List, Optional
 from fastapi import FastAPI, Query
 from dotenv import load_dotenv
@@ -362,15 +361,18 @@ def emergence(
 
 # ---- Phase 3C Enhanced Probe Endpoints ----
 
+
 @app.get("/reflection/quality")
 def reflection_quality(
     db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
-    limit: int = Query(20, ge=1, le=100, description="Number of recent reflections to analyze"),
-    window_days: int = Query(7, ge=1, le=30, description="Analysis window in days")
+    limit: int = Query(
+        20, ge=1, le=100, description="Number of recent reflections to analyze"
+    ),
+    window_days: int = Query(7, ge=1, le=30, description="Analysis window in days"),
 ):
     """
     Phase 3C: Analyze reflection quality with semantic novelty and salience scoring.
-    
+
     Returns:
     - Semantic novelty scores and duplicate detection
     - Reflection quality metrics (specificity, self-reference, planning)
@@ -380,7 +382,7 @@ def reflection_quality(
     try:
         # Load recent reflection events
         reflection_events = _load_events(db, limit, "reflection")
-        
+
         if not reflection_events:
             return {
                 "total_reflections": 0,
@@ -388,53 +390,61 @@ def reflection_quality(
                 "avg_novelty": 0.0,
                 "duplicate_rate": 0.0,
                 "patterns": [],
-                "recommendations": []
+                "recommendations": [],
             }
-        
+
         # Convert to format expected by meta-reflection analyzer
         reflections = []
         for event in reflection_events:
-            reflections.append({
-                "content": event.get("content", ""),
-                "timestamp": event.get("ts", ""),
-                "meta": event.get("meta", {})
-            })
-        
+            reflections.append(
+                {
+                    "content": event.get("content", ""),
+                    "timestamp": event.get("ts", ""),
+                    "meta": event.get("meta", {}),
+                }
+            )
+
         # Analyze patterns using meta-reflection analyzer
         meta_analyzer = get_meta_reflection_analyzer()
         analysis = meta_analyzer.analyze_reflection_patterns(reflections, window_days)
-        
+
         # Add semantic analysis details
         semantic_analyzer = get_semantic_analyzer()
         reflection_texts = [r["content"] for r in reflections]
-        
+
         # Calculate novelty scores for each reflection
         novelty_details = []
         for i, text in enumerate(reflection_texts):
             previous_texts = reflection_texts[:i] if i > 0 else []
             novelty = semantic_analyzer.semantic_novelty_score(text, previous_texts)
-            is_duplicate = semantic_analyzer.is_semantic_duplicate(text, previous_texts, threshold=0.8)
-            novelty_details.append({
-                "reflection_index": i,
-                "novelty_score": novelty,
-                "is_duplicate": is_duplicate,
-                "content_preview": text[:100] + "..." if len(text) > 100 else text
-            })
-        
+            is_duplicate = semantic_analyzer.is_semantic_duplicate(
+                text, previous_texts, threshold=0.8
+            )
+            novelty_details.append(
+                {
+                    "reflection_index": i,
+                    "novelty_score": novelty,
+                    "is_duplicate": is_duplicate,
+                    "content_preview": text[:100] + "..." if len(text) > 100 else text,
+                }
+            )
+
         return {
             **analysis,
             "novelty_details": novelty_details,
-            "semantic_clusters": len(semantic_analyzer.cluster_similar_texts(reflection_texts, 0.7)),
+            "semantic_clusters": len(
+                semantic_analyzer.cluster_similar_texts(reflection_texts, 0.7)
+            ),
             "db_path": db,
-            "analysis_window_days": window_days
+            "analysis_window_days": window_days,
         }
-        
+
     except Exception as e:
         return {
             "error": str(e),
             "total_reflections": 0,
             "avg_quality": 0.0,
-            "avg_novelty": 0.0
+            "avg_novelty": 0.0,
         }
 
 
@@ -442,11 +452,13 @@ def reflection_quality(
 def emergence_trends(
     db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
     days: int = Query(30, ge=1, le=90, description="Number of days to analyze"),
-    window_size: int = Query(15, ge=5, le=50, description="Window size for each measurement")
+    window_size: int = Query(
+        15, ge=5, le=50, description="Window size for each measurement"
+    ),
 ):
     """
     Phase 3C: Historical emergence pattern analysis showing IAS/GAS trends over time.
-    
+
     Returns:
     - Time-series data of emergence scores
     - Stage progression analysis
@@ -455,14 +467,15 @@ def emergence_trends(
     """
     try:
         store = SQLiteStore(db)
-        
+
         # Get events from the specified time period
         from datetime import datetime, timedelta
+
         cutoff = datetime.utcnow() - timedelta(days=days)
-        
+
         # Load all events in time period
         all_events = store.recent_events(limit=days * 50)  # Heuristic limit
-        
+
         # Filter events by time period and group by day
         daily_groups = {}
         for event in all_events:
@@ -473,41 +486,51 @@ def emergence_trends(
                     if day_key not in daily_groups:
                         daily_groups[day_key] = []
                     daily_groups[day_key].append(event)
-            except:
+            except Exception:
                 continue
-        
+
         # Calculate emergence scores for each day
         analyzer = EmergenceAnalyzer(storage_manager=store)
         trend_data = []
-        
+
         for day_key in sorted(daily_groups.keys()):
             day_events = daily_groups[day_key]
-            
+
             # Convert to EmergenceEvent format
             emergence_events = []
             for event in day_events[-window_size:]:  # Use recent events for that day
-                emergence_events.append(EmergenceEvent(
-                    id=event[0],
-                    timestamp=event[1],
-                    kind=event[2],
-                    content=event[3],
-                    meta=json.loads(event[4]) if isinstance(event[4], str) else (event[4] or {})
-                ))
-            
+                emergence_events.append(
+                    EmergenceEvent(
+                        id=event[0],
+                        timestamp=event[1],
+                        kind=event[2],
+                        content=event[3],
+                        meta=(
+                            json.loads(event[4])
+                            if isinstance(event[4], str)
+                            else (event[4] or {})
+                        ),
+                    )
+                )
+
             if emergence_events:
                 # Override get_recent_events for this calculation
-                analyzer.get_recent_events = lambda kind="response", limit=window_size: emergence_events
+                analyzer.get_recent_events = (
+                    lambda kind="response", limit=window_size: emergence_events
+                )
                 scores = analyzer.compute_scores(window_size)
-                
-                trend_data.append({
-                    "date": day_key,
-                    "IAS": scores.get("IAS", 0.0),
-                    "GAS": scores.get("GAS", 0.0),
-                    "stage": scores.get("stage", "S0: Substrate"),
-                    "commit_close_rate": scores.get("commit_close_rate", 0.0),
-                    "events_count": len(emergence_events)
-                })
-        
+
+                trend_data.append(
+                    {
+                        "date": day_key,
+                        "IAS": scores.get("IAS", 0.0),
+                        "GAS": scores.get("GAS", 0.0),
+                        "stage": scores.get("stage", "S0: Substrate"),
+                        "commit_close_rate": scores.get("commit_close_rate", 0.0),
+                        "events_count": len(emergence_events),
+                    }
+                )
+
         # Calculate trends
         if len(trend_data) >= 2:
             ias_trend = trend_data[-1]["IAS"] - trend_data[0]["IAS"]
@@ -515,36 +538,44 @@ def emergence_trends(
         else:
             ias_trend = 0.0
             gas_trend = 0.0
-        
+
         return {
             "trend_data": trend_data,
             "summary": {
                 "days_analyzed": len(trend_data),
                 "ias_trend": ias_trend,
                 "gas_trend": gas_trend,
-                "current_stage": trend_data[-1]["stage"] if trend_data else "S0: Substrate",
-                "avg_close_rate": sum(d["commit_close_rate"] for d in trend_data) / len(trend_data) if trend_data else 0.0
+                "current_stage": (
+                    trend_data[-1]["stage"] if trend_data else "S0: Substrate"
+                ),
+                "avg_close_rate": (
+                    sum(d["commit_close_rate"] for d in trend_data) / len(trend_data)
+                    if trend_data
+                    else 0.0
+                ),
             },
             "db_path": db,
-            "window_size": window_size
+            "window_size": window_size,
         }
-        
+
     except Exception as e:
         return {
             "error": str(e),
             "trend_data": [],
-            "summary": {"days_analyzed": 0, "ias_trend": 0.0, "gas_trend": 0.0}
+            "summary": {"days_analyzed": 0, "ias_trend": 0.0, "gas_trend": 0.0},
         }
 
 
 @app.get("/personality/adaptation")
 def personality_adaptation(
     db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
-    limit: int = Query(50, ge=10, le=200, description="Number of recent events to analyze")
+    limit: int = Query(
+        50, ge=10, le=200, description="Number of recent events to analyze"
+    ),
 ):
     """
     Phase 3C: Real-time personality evolution tracking showing trait drift patterns.
-    
+
     Returns:
     - Recent trait changes and their triggers
     - Adaptation patterns based on emergence signals
@@ -553,59 +584,59 @@ def personality_adaptation(
     try:
         # Load recent events that could trigger personality changes
         events = _load_events(db, limit, None)  # All event types
-        
+
         # Filter for events that typically trigger trait drift
         adaptation_events = []
         for event in events:
             kind = event.get("kind", "")
             if kind in ["reflection", "evidence", "commitment", "insight"]:
                 adaptation_events.append(event)
-        
+
         # Analyze adaptation patterns
         patterns = {
             "recent_adaptations": len(adaptation_events),
             "adaptation_triggers": {},
             "evidence_based_changes": 0,
-            "reflection_driven_changes": 0
+            "reflection_driven_changes": 0,
         }
-        
+
         # Count triggers by type
         for event in adaptation_events:
             kind = event.get("kind", "unknown")
-            patterns["adaptation_triggers"][kind] = patterns["adaptation_triggers"].get(kind, 0) + 1
-            
+            patterns["adaptation_triggers"][kind] = (
+                patterns["adaptation_triggers"].get(kind, 0) + 1
+            )
+
             if kind == "evidence":
                 patterns["evidence_based_changes"] += 1
             elif kind == "reflection":
                 patterns["reflection_driven_changes"] += 1
-        
+
         # Calculate adaptation rate (adaptations per day, roughly)
         adaptation_rate = len(adaptation_events) / max(1, limit / 10)  # Rough estimate
-        
+
         return {
             "adaptation_patterns": patterns,
             "adaptation_rate": adaptation_rate,
             "recent_events": adaptation_events[-10:],  # Last 10 adaptation events
             "db_path": db,
-            "events_analyzed": len(adaptation_events)
+            "events_analyzed": len(adaptation_events),
         }
-        
+
     except Exception as e:
-        return {
-            "error": str(e),
-            "adaptation_patterns": {},
-            "adaptation_rate": 0.0
-        }
+        return {"error": str(e), "adaptation_patterns": {}, "adaptation_rate": 0.0}
 
 
 @app.get("/meta-cognition")
 def meta_cognition(
     db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
-    limit: int = Query(30, ge=10, le=100, description="Number of recent reflections to analyze")
+    limit: int = Query(
+        30, ge=10, le=100, description="Number of recent reflections to analyze"
+    ),
 ):
     """
     Phase 3C: Meta-cognitive analysis showing AI awareness of its own reflection patterns.
-    
+
     Returns:
     - Self-awareness metrics about reflection quality
     - Pattern recognition in own behavior
@@ -614,30 +645,34 @@ def meta_cognition(
     try:
         # Load recent reflection events
         reflection_events = _load_events(db, limit, "reflection")
-        
+
         if not reflection_events:
             return {
                 "meta_insight": None,
                 "self_awareness_score": 0.0,
-                "cognitive_patterns": []
+                "cognitive_patterns": [],
             }
-        
+
         # Convert to format for meta-reflection analysis
         reflections = []
         for event in reflection_events:
-            reflections.append({
-                "content": event.get("content", ""),
-                "timestamp": event.get("ts", ""),
-                "meta": event.get("meta", {})
-            })
-        
+            reflections.append(
+                {
+                    "content": event.get("content", ""),
+                    "timestamp": event.get("ts", ""),
+                    "meta": event.get("meta", {}),
+                }
+            )
+
         # Generate meta-cognitive analysis
         meta_analyzer = get_meta_reflection_analyzer()
-        pattern_analysis = meta_analyzer.analyze_reflection_patterns(reflections, window_days=14)
-        
+        pattern_analysis = meta_analyzer.analyze_reflection_patterns(
+            reflections, window_days=14
+        )
+
         # Generate meta-insight
         meta_insight = meta_analyzer.generate_meta_insight(pattern_analysis)
-        
+
         # Calculate self-awareness score based on meta-cognitive indicators
         self_awareness_score = 0.0
         if pattern_analysis["avg_quality"] > 0:
@@ -648,7 +683,7 @@ def meta_cognition(
             self_awareness_score += 0.2  # Ability to generate self-recommendations
         if meta_insight:
             self_awareness_score += 0.2  # Ability to generate meta-insights
-        
+
         return {
             "meta_insight": meta_insight,
             "self_awareness_score": min(1.0, self_awareness_score),
@@ -658,17 +693,13 @@ def meta_cognition(
                 "total_reflections": pattern_analysis["total_reflections"],
                 "avg_quality": pattern_analysis["avg_quality"],
                 "novelty_trend": pattern_analysis["novelty_trend"],
-                "duplicate_rate": pattern_analysis.get("duplicate_rate", 0.0)
+                "duplicate_rate": pattern_analysis.get("duplicate_rate", 0.0),
             },
-            "db_path": db
+            "db_path": db,
         }
-        
+
     except Exception as e:
-        return {
-            "error": str(e),
-            "meta_insight": None,
-            "self_awareness_score": 0.0
-        }
+        return {"error": str(e), "meta_insight": None, "self_awareness_score": 0.0}
 
 
 def create_probe_app(db_path: str = "pmm.db") -> FastAPI:
@@ -679,26 +710,21 @@ def create_probe_app(db_path: str = "pmm.db") -> FastAPI:
 if __name__ == "__main__":
     import uvicorn
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="PMM Probe API Server")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
-    
+
     args = parser.parse_args()
-    
+
     print(f"🚀 Starting PMM Probe API on http://{args.host}:{args.port}")
     print("📊 Available endpoints:")
     print("  - /health - Health check")
-    print("  - /emergence - Emergence analysis") 
+    print("  - /emergence - Emergence analysis")
     print("  - /reflection/quality - Phase 3C reflection quality analysis")
     print("  - /meta-cognition - Phase 3C meta-cognitive insights")
     print("  - /emergence/trends - Phase 3C emergence trends")
     print("  - /personality/adaptation - Phase 3C personality adaptation")
-    
-    uvicorn.run(
-        "pmm.api.probe:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload
-    )
+
+    uvicorn.run("pmm.api.probe:app", host=args.host, port=args.port, reload=args.reload)

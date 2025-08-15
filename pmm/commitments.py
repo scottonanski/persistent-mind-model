@@ -80,9 +80,22 @@ class CommitmentTracker:
 
         # Add more action verbs that were missing
         additional_verbs = [
-            "strive", "recognize", "acknowledge", "incorporate", "prioritize",
-            "practice", "foster", "utilize", "convey", "outline", "focus",
-            "enhance", "improve", "develop", "strengthen", "refine"
+            "strive",
+            "recognize",
+            "acknowledge",
+            "incorporate",
+            "prioritize",
+            "practice",
+            "foster",
+            "utilize",
+            "convey",
+            "outline",
+            "focus",
+            "enhance",
+            "improve",
+            "develop",
+            "strengthen",
+            "refine",
         ]
         action_verbs.extend(additional_verbs)
         has_action_verb = any(verb in text_lower for verb in action_verbs)
@@ -90,7 +103,7 @@ class CommitmentTracker:
         # Only reject truly vague verbs when used alone
         vague_verbs = [
             "consider",
-            "think about", 
+            "think about",
             "look into",
         ]
         has_vague_verb = any(verb in text_lower for verb in vague_verbs)
@@ -100,24 +113,64 @@ class CommitmentTracker:
 
         # 2. Context-bound: Must reference specific topic/artifact
         context_indicators = [
-            "pmm", "onboarding", "v0.", "dataset", "samples", "document", "outline", 
-            "template", "guide", "tutorial", "demo", "test", "validation", "api", 
-            "probe", "commitment", "reflection", "insight", "trait", "personality", 
-            "hash", "evidence", "phase", "closure",
+            "pmm",
+            "onboarding",
+            "v0.",
+            "dataset",
+            "samples",
+            "document",
+            "outline",
+            "template",
+            "guide",
+            "tutorial",
+            "demo",
+            "test",
+            "validation",
+            "api",
+            "probe",
+            "commitment",
+            "reflection",
+            "insight",
+            "trait",
+            "personality",
+            "hash",
+            "evidence",
+            "phase",
+            "closure",
             # Add conversational AI contexts
-            "conversation", "interaction", "response", "engagement", "dialogue",
-            "emotional", "intelligence", "empathy", "listening", "feedback",
-            "creativity", "storytelling", "awareness", "understanding", "connection",
-            "communication", "skill", "ability", "approach", "technique", "method",
-            "process", "system", "experience", "quality", "specific", "concrete"
+            "conversation",
+            "interaction",
+            "response",
+            "engagement",
+            "dialogue",
+            "emotional",
+            "intelligence",
+            "empathy",
+            "listening",
+            "feedback",
+            "creativity",
+            "storytelling",
+            "awareness",
+            "understanding",
+            "connection",
+            "communication",
+            "skill",
+            "ability",
+            "approach",
+            "technique",
+            "method",
+            "process",
+            "system",
+            "experience",
+            "quality",
+            "specific",
+            "concrete",
         ]
 
         has_context = any(indicator in text_lower for indicator in context_indicators)
 
         # Reject only truly generic contexts
-        generic_contexts = [
-            "stuff", "things", "whatever", "anything", "everything"
-        ]
+        generic_contexts = ["stuff", "things", "whatever", "anything", "everything"]
         has_generic = any(generic in text_lower for generic in generic_contexts)
 
         if not has_context or has_generic:
@@ -125,14 +178,50 @@ class CommitmentTracker:
 
         # 3. Time/trigger: Must include when or trigger (relaxed for conversational AI)
         time_triggers = [
-            "tonight", "today", "tomorrow", "this week", "next week", "by", "before", 
-            "after", "once", "when", "during", "within", "in the next", "over the",
-            "following", "subsequent", "upon", "after reviewing", "after completing",
-            "right now", "now", "immediately", "asap", "soon", "shortly", "quickly",
+            "tonight",
+            "today",
+            "tomorrow",
+            "this week",
+            "next week",
+            "by",
+            "before",
+            "after",
+            "once",
+            "when",
+            "during",
+            "within",
+            "in the next",
+            "over the",
+            "following",
+            "subsequent",
+            "upon",
+            "after reviewing",
+            "after completing",
+            "right now",
+            "now",
+            "immediately",
+            "asap",
+            "soon",
+            "shortly",
+            "quickly",
             # Add conversational triggers
-            "going forward", "moving forward", "from now on", "in future", "next time",
-            "in our", "during our", "each", "every", "ongoing", "continuously", 
-            "regularly", "consistently", "always", "will", "shall", "aim to"
+            "going forward",
+            "moving forward",
+            "from now on",
+            "in future",
+            "next time",
+            "in our",
+            "during our",
+            "each",
+            "every",
+            "ongoing",
+            "continuously",
+            "regularly",
+            "consistently",
+            "always",
+            "will",
+            "shall",
+            "aim to",
         ]
 
         has_time_trigger = any(trigger in text_lower for trigger in time_triggers)
@@ -145,9 +234,16 @@ class CommitmentTracker:
 
         # 5. Owned: Must be first-person
         ownership_indicators = [
-            "i will", "i plan to", "i commit to", "next, i will", "i aim to",
-            "i intend to", "i shall", "my goal is to", "going forward, i will",
-            "moving forward, i will"
+            "i will",
+            "i plan to",
+            "i commit to",
+            "next, i will",
+            "i aim to",
+            "i intend to",
+            "i shall",
+            "my goal is to",
+            "going forward, i will",
+            "moving forward, i will",
         ]
         has_ownership = any(
             indicator in text_lower for indicator in ownership_indicators
@@ -171,11 +267,11 @@ class CommitmentTracker:
         """Extract and validate commitment from text using 5-point criteria."""
         # Strip markdown formatting first
         clean_text = self._strip_markdown(text)
-        
+
         # Expanded commitment patterns
         commitment_patterns = [
             "i will",
-            "next, i will", 
+            "next, i will",
             "next:",
             "i plan to",
             "i commit to",
@@ -185,9 +281,9 @@ class CommitmentTracker:
             "i intend to",
             "i shall",
             "going forward, i will",
-            "moving forward, i will"
+            "moving forward, i will",
         ]
-        
+
         # First, try to extract commitment from the whole text
         if any(starter in clean_text.lower() for starter in commitment_patterns):
             commitment = self._clean_commitment_text(clean_text, commitment_patterns)
@@ -196,98 +292,109 @@ class CommitmentTracker:
 
         # Fallback: split by markdown bullets and numbered lists, then sentences
         candidates = self._split_into_commitment_candidates(clean_text)
-        
+
         for candidate in candidates:
             candidate = candidate.strip()
             if any(starter in candidate.lower() for starter in commitment_patterns):
                 commitment = self._clean_commitment_text(candidate, commitment_patterns)
                 if commitment and self._is_valid_commitment(commitment):
                     return commitment, self._generate_ngrams(commitment)
-                    
+
         return None, []
 
     def _strip_markdown(self, text: str) -> str:
         """Remove markdown formatting from text."""
         # Remove bold/italic
-        text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
-        text = re.sub(r'\*([^*]+)\*', r'\1', text)
-        
+        text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+        text = re.sub(r"\*([^*]+)\*", r"\1", text)
+
         # Remove numbered list markers
-        text = re.sub(r'^\d+\.\s*', '', text, flags=re.MULTILINE)
-        
+        text = re.sub(r"^\d+\.\s*", "", text, flags=re.MULTILINE)
+
         # Remove bullet points
-        text = re.sub(r'^[-*+]\s*', '', text, flags=re.MULTILINE)
-        
+        text = re.sub(r"^[-*+]\s*", "", text, flags=re.MULTILINE)
+
         # Remove section headers
-        text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
-        
+        text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+
         return text.strip()
 
     def _split_into_commitment_candidates(self, text: str) -> List[str]:
         """Split text into potential commitment candidates."""
         candidates = []
-        
+
         # Split by numbered lists first
-        numbered_items = re.split(r'\n\d+\.\s*', text)
+        numbered_items = re.split(r"\n\d+\.\s*", text)
         for item in numbered_items:
             if item.strip():
                 candidates.append(item.strip())
-        
+
         # Split by bullet points
-        bullet_items = re.split(r'\n[-*+]\s*', text)
+        bullet_items = re.split(r"\n[-*+]\s*", text)
         for item in bullet_items:
             if item.strip():
                 candidates.append(item.strip())
-        
+
         # Split by double newlines (paragraphs)
-        paragraphs = text.split('\n\n')
+        paragraphs = text.split("\n\n")
         for para in paragraphs:
             if para.strip():
                 candidates.append(para.strip())
-        
+
         # Finally, split by sentences (but more carefully)
-        sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+        sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", text)
         for sentence in sentences:
             if sentence.strip():
                 candidates.append(sentence.strip())
-        
+
         return candidates
 
     def _clean_commitment_text(self, text: str, patterns: List[str]) -> str:
         """Clean and normalize commitment text."""
         commitment = text.strip()
-        
+
         # Handle "By committing to these practices, I aim to..." pattern
         if commitment.lower().startswith("by committing to"):
             # Extract the actual commitment after "I aim to" or similar
-            aim_match = re.search(r'i (aim to|intend to|will|plan to|commit to)\s+(.+)', commitment.lower())
+            aim_match = re.search(
+                r"i (aim to|intend to|will|plan to|commit to)\s+(.+)",
+                commitment.lower(),
+            )
             if aim_match:
                 verb_phrase = aim_match.group(1)
                 action = aim_match.group(2)
                 commitment = f"I {verb_phrase} {action}"
             else:
                 # Fallback: just remove "By committing to" and add "I will"
-                commitment = commitment[len("By committing to"):].strip()
+                commitment = commitment[len("By committing to") :].strip()
                 if not commitment.lower().startswith("i "):
                     commitment = "I will " + commitment
-        
+
         # Remove other common prefixes
         prefixes_to_remove = [
-            "Next:", "next:", "Next, I will", "next, i will",
-            "To enhance", "to enhance"
+            "Next:",
+            "next:",
+            "Next, I will",
+            "next, i will",
+            "To enhance",
+            "to enhance",
         ]
-        
+
         for prefix in prefixes_to_remove:
             if commitment.lower().startswith(prefix.lower()):
-                commitment = commitment[len(prefix):].strip()
-                
+                commitment = commitment[len(prefix) :].strip()
+
                 # If we removed "Next, I will", add "I will" back
-                if prefix.lower() in ["next, i will"] and not commitment.lower().startswith("i will"):
+                if prefix.lower() in [
+                    "next, i will"
+                ] and not commitment.lower().startswith("i will"):
                     commitment = "I will " + commitment
-                elif prefix.lower() in ["to enhance"] and not commitment.lower().startswith("i "):
+                elif prefix.lower() in [
+                    "to enhance"
+                ] and not commitment.lower().startswith("i "):
                     commitment = "I will " + commitment
                 break
-        
+
         return commitment
 
     def _generate_ngrams(self, commitment: str) -> List[str]:
