@@ -7,7 +7,6 @@ Main entry point for chatting with your autonomous AI personality.
 import os
 import sys
 import argparse
-import threading
 
 # Add current directory to path for PMM imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -189,12 +188,15 @@ def main():
     print("=====================================\n")
 
     # Feature toggles
-    SUMMARY_ENABLED = (
-        os.getenv("PMM_ENABLE_SUMMARY", "false").strip().lower() in ("1", "true", "yes", "on")
+    SUMMARY_ENABLED = os.getenv("PMM_ENABLE_SUMMARY", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
     )
-    EMBEDDINGS_ENABLED = (
-        os.getenv("PMM_ENABLE_EMBEDDINGS", "false").strip().lower() in ("1", "true", "yes", "on")
-    )
+    EMBEDDINGS_ENABLED = os.getenv(
+        "PMM_ENABLE_EMBEDDINGS", "false"
+    ).strip().lower() in ("1", "true", "yes", "on")
 
     # Model selection
     if args.model:
@@ -277,14 +279,20 @@ def main():
         # Extract top signals from PMM for a compact policy header
         patterns = personality.get("behavioral_patterns", {}) or {}
         top_patterns = sorted(patterns.items(), key=lambda kv: kv[1], reverse=True)[:3]
-        top_patterns_str = ", ".join([f"{k}({v})" for k, v in top_patterns]) if top_patterns else "none"
+        top_patterns_str = (
+            ", ".join([f"{k}({v})" for k, v in top_patterns])
+            if top_patterns
+            else "none"
+        )
 
         # Pull up to three open commitments to actually steer behavior
         try:
             opens = pmm_memory.pmm.get_open_commitments()[:3]
         except Exception:
             opens = []
-        open_commitments_str = "\n".join([f"- {c['text']}" for c in opens]) if opens else "none"
+        open_commitments_str = (
+            "\n".join([f"- {c['text']}" for c in opens]) if opens else "none"
+        )
 
         # Mind Policy: short, deterministic, and placed BEFORE the memory blob
         mind_policy = (
@@ -492,13 +500,19 @@ def main():
                     )
                 db_path = "pmm.db"
                 try:
-                    size_bytes = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+                    size_bytes = (
+                        os.path.getsize(db_path) if os.path.exists(db_path) else 0
+                    )
                 except Exception:
                     size_bytes = 0
                 size_kb = size_bytes / 1024.0
                 print("\n📊 PMM Status:")
-                print(f"   • Thought Summarization: {'ON' if SUMMARY_ENABLED else 'OFF'}")
-                print(f"   • Semantic Embeddings: {'ON' if EMBEDDINGS_ENABLED else 'OFF'}")
+                print(
+                    f"   • Thought Summarization: {'ON' if SUMMARY_ENABLED else 'OFF'}"
+                )
+                print(
+                    f"   • Semantic Embeddings: {'ON' if EMBEDDINGS_ENABLED else 'OFF'}"
+                )
                 print(f"   • Database file: {db_path} ({size_kb:.1f} KB)")
                 print(f"   • Total events: {total_events}")
                 print(f"   • Events with summaries: {events_with_summaries}")
@@ -535,7 +549,9 @@ def main():
 
             # Save to PMM memory system synchronously to ensure next turn sees LTM
             try:
-                pmm_memory.save_context({"input": user_input}, {"response": response_text})
+                pmm_memory.save_context(
+                    {"input": user_input}, {"response": response_text}
+                )
             except Exception as _e:
                 print(f"[warn] save_context failed: {_e}")
 

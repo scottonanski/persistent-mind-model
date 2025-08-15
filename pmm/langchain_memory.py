@@ -168,6 +168,7 @@ class PersistentMindMemory(BaseChatMemory):
 
             # Extract names (more conservative to avoid false positives like "I'm just...")
             import re
+
             stopwords = {
                 "just",
                 "good",
@@ -211,17 +212,23 @@ class PersistentMindMemory(BaseChatMemory):
 
             # Pattern order: strongest first, using original casing for capitalization heuristics
             # 1) "My name is X"
-            m = re.search(r"\bMy name is ([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b", raw)
+            m = re.search(
+                r"\bMy name is ([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b", raw
+            )
             if m:
                 _remember_user_name(m.group(1))
             else:
                 # 2) "Call me X"
-                m = re.search(r"\bCall me ([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b", raw)
+                m = re.search(
+                    r"\bCall me ([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b", raw
+                )
                 if m:
                     _remember_user_name(m.group(1))
                 else:
                     # 3) "I am X" or "I'm X" only if the next token isn't a stopword and is Capitalized
-                    m = re.search(r"\bI\s*(?:am|'m)\s+([A-Z][a-zA-Z]+)(?:\b|\s*$|[\.,!?:;])", raw)
+                    m = re.search(
+                        r"\bI\s*(?:am|'m)\s+([A-Z][a-zA-Z]+)(?:\b|\s*$|[\.,!?:;])", raw
+                    )
                     if m:
                         candidate = m.group(1)
                         if candidate.lower() not in stopwords:
@@ -319,7 +326,8 @@ class PersistentMindMemory(BaseChatMemory):
             try:
                 self.pmm.add_event(
                     summary=f"User said: {human_input[:200]}{'...' if len(human_input) > 200 else ''}",
-                    effects=[], etype="conversation",
+                    effects=[],
+                    etype="conversation",
                 )
                 self._auto_extract_key_info(human_input)
                 # NEW: auto‑close commitments from human message
@@ -336,7 +344,8 @@ class PersistentMindMemory(BaseChatMemory):
                 self.pmm.add_thought(ai_output, trigger="langchain_conversation")
                 self.pmm.add_event(
                     summary=f"I responded: {ai_output[:200]}{'...' if len(ai_output) > 200 else ''}",
-                    effects=[], etype="self_expression",
+                    effects=[],
+                    etype="self_expression",
                 )
             except Exception:
                 pass
@@ -348,7 +357,8 @@ class PersistentMindMemory(BaseChatMemory):
                 new_commitment_text, _ = tracker.extract_commitment(ai_output)
                 if new_commitment_text:
                     self.pmm.add_commitment(
-                        text=new_commitment_text, source_insight_id="langchain_interaction"
+                        text=new_commitment_text,
+                        source_insight_id="langchain_interaction",
                     )
             except Exception:
                 pass
@@ -370,12 +380,18 @@ class PersistentMindMemory(BaseChatMemory):
             should_reflect = False
             try:
                 event_count = len(self.pmm.model.self_knowledge.autobiographical_events)
-                print(f"🔍 DEBUG: Event count: {event_count}, new_commitment: {bool(new_commitment_text)}")
+                print(
+                    f"🔍 DEBUG: Event count: {event_count}, new_commitment: {bool(new_commitment_text)}"
+                )
                 if event_count > 0 and event_count % 4 == 0:
-                    print(f"🔍 DEBUG: Cadence trigger - event count {event_count} divisible by 4")
+                    print(
+                        f"🔍 DEBUG: Cadence trigger - event count {event_count} divisible by 4"
+                    )
                     should_reflect = True
                 if new_commitment_text:
-                    print(f"🔍 DEBUG: Commitment trigger - new commitment: {new_commitment_text}")
+                    print(
+                        f"🔍 DEBUG: Commitment trigger - new commitment: {new_commitment_text}"
+                    )
                     should_reflect = True
                 print(f"🔍 DEBUG: Should reflect: {should_reflect}")
             except Exception as e:
@@ -391,7 +407,9 @@ class PersistentMindMemory(BaseChatMemory):
                     insight = None
 
                 if insight:
-                    print(f"\n🧠 Insight: {insight[:160]}{'...' if len(insight) > 160 else ''}")
+                    print(
+                        f"\n🧠 Insight: {insight[:160]}{'...' if len(insight) > 160 else ''}"
+                    )
                     # (c) auto‑close from reflection + apply drift immediately
                     try:
                         print("🔍 DEBUG: Auto-closing commitments from reflection...")
@@ -448,7 +466,9 @@ class PersistentMindMemory(BaseChatMemory):
 
                     for event in reversed(recent_events):  # chronological order
                         # Support both legacy 7-column and new 10-column schemas
-                        event_id, ts, kind, content, meta, prev_hash, hash_val = event[:7]
+                        event_id, ts, kind, content, meta, prev_hash, hash_val = event[
+                            :7
+                        ]
                         summary = None
                         keywords = None
                         try:
@@ -495,11 +515,13 @@ class PersistentMindMemory(BaseChatMemory):
                             try:
                                 if keywords:
                                     import json as _json
+
                                     kw_list = _json.loads(keywords)
                                     if isinstance(kw_list, list) and kw_list:
                                         # Add a compact keywords line
                                         key_facts.append(
-                                            "KEYWORDS: " + ", ".join(map(str, kw_list[:6]))
+                                            "KEYWORDS: "
+                                            + ", ".join(map(str, kw_list[:6]))
                                         )
                             except Exception:
                                 pass
@@ -569,7 +591,9 @@ class PersistentMindMemory(BaseChatMemory):
             try:
                 print("🔍 DEBUG: Worker thread starting reflect_once...")
                 insight_obj = reflect_once(self.pmm, OpenAIAdapter())
-                print(f"🔍 DEBUG: reflect_once returned: {type(insight_obj)} - {bool(insight_obj)}")
+                print(
+                    f"🔍 DEBUG: reflect_once returned: {type(insight_obj)} - {bool(insight_obj)}"
+                )
                 result["insight"] = insight_obj
             except Exception as e:
                 print(f"🔍 DEBUG: Worker thread exception: {e}")
@@ -581,7 +605,7 @@ class PersistentMindMemory(BaseChatMemory):
             t = Thread(target=_worker, daemon=True)
             t.start()
             t.join(timeout=15.0)  # Increased timeout for gpt-4o-mini
-            
+
             if t.is_alive():
                 print("🔍 DEBUG: Reflection timed out after 15 seconds")
                 return None
@@ -589,7 +613,7 @@ class PersistentMindMemory(BaseChatMemory):
             print(f"🔍 DEBUG: Worker completed. Error: {result.get('error')}")
             insight = result.get("insight")
             print(f"🔍 DEBUG: Insight object: {type(insight)} - {bool(insight)}")
-            
+
             if insight:
                 print(f"🔍 DEBUG: Insight content length: {len(insight.content)}")
                 self._update_personality_context()

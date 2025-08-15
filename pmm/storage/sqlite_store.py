@@ -30,7 +30,9 @@ class SQLiteStore:
         except Exception:
             pass
         try:
-            self.conn.execute("ALTER TABLE events ADD COLUMN keywords TEXT")  # JSON-encoded list[str]
+            self.conn.execute(
+                "ALTER TABLE events ADD COLUMN keywords TEXT"
+            )  # JSON-encoded list[str]
         except Exception:
             pass
         try:

@@ -46,6 +46,6 @@ class OpenAIAdapter(ModelAdapter):
         """Chat interface for reflection system - converts to messages format."""
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": user}
+            {"role": "user", "content": user},
         ]
         return self.generate(messages, max_tokens)
