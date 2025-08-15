@@ -88,8 +88,10 @@ def test_adaptive_reflection_triggers():
 
         analyzer = EmergenceAnalyzer(storage_manager=pmm.pmm.sqlite_store)
 
-        ias, gas = analyzer.compute_scores()
-        close_rate = analyzer.commitment_close_rate()
+        scores = analyzer.compute_scores()
+        ias = scores["IAS"]
+        gas = scores["GAS"]
+        close_rate = scores["commit_close_rate"]
 
         print(
             f"✅ Emergence metrics: IAS={ias:.3f}, GAS={gas:.3f}, Close Rate={close_rate:.3f}"
