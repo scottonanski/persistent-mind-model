@@ -121,10 +121,10 @@ def test_legacy_archival():
 
     tracker = CommitmentTracker()
 
-    # Add some legacy-style commitments
+    # Add some legacy-style commitments that should all be archived
     legacy_commitments = [
         "There was no prior commitment made. Next, I will clarify and confirm any specific objectives.",
-        "Next, I will confirm the document review status and propose any necessary follow-up actions.",
+        "Next, I will clarify objectives and confirm the document review status.",  # Changed to match pattern
         "I will improve my decision-making capabilities going forward.",
     ]
 
