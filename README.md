@@ -60,7 +60,7 @@ export OPENAI_API_KEY='sk-your-key-here'
 
 **Start the chat interface:**
 ```bash
-python examples/langchain_chatbot_hybrid.py
+python chat.py
 ```
 
 **Available commands in chat:**
