@@ -1,46 +1,20 @@
 # Contributing to Persistent Mind Model (PMM)
 
-Welcome to the PMM community! 🧠✨ We're building the future of AI consciousness and personality modeling.
+Thank you for your interest in contributing. This document keeps contributions practical and focused on improving the software.
 
-## 🚀 Quick Start for Contributors
+## How to contribute
 
-### Ways to Contribute
-- 🐛 **Report bugs** - Help us improve stability
-- 💡 **Suggest features** - Share your vision for AI personalities
-- 📝 **Improve documentation** - Make PMM more accessible
-- 🧪 **Share experiments** - Show us your AI personality discoveries
-- 🔧 **Submit code** - Enhance the core system
+### Ways to contribute
+- Report bugs with clear reproduction steps and environment details
+- Propose focused features with concrete use cases
+- Improve documentation and examples
+- Submit code changes that address a specific issue or enhancement
 
-### Beta Testing Program
-Join our beta testing community! We're looking for:
-- AI researchers exploring personality modeling
-- Developers building AI applications
-- Anyone curious about persistent AI consciousness
+Before starting large changes, open an issue to discuss scope and approach.
 
-**To join:** Open an issue with the `beta-tester` label and tell us about your use case.
+## Development setup
 
-## 🧠 Understanding PMM Architecture
-
-### Core Concepts
-- **Model-Agnostic Design** - Personalities work across any LLM backend
-- **Commitment Tracking** - AIs make and complete concrete commitments
-- **Evidence-Weighted Drift** - Personality changes based on behavioral evidence
-- **Provenance Tracking** - Full auditability of personality evolution
-
-### Key Files
-- `pmm/self_model_manager.py` - Core personality management
-- `pmm/commitments.py` - Commitment lifecycle tracking
-- `pmm/reflection.py` - Meta-cognitive processing
-- `pmm/schema.py` - Data models and validation
-
-## 🔬 Research Opportunities
-
-We're preparing academic publications on:
-- Longitudinal personality consistency in AI systems
-- Commitment-based behavioral modification
-- Cross-model personality transfer mechanisms
-
-**Interested in collaborating?** Open an issue with the `research` label.
+Use Python 3.10+. Create a virtual environment and install dependencies:
 
 ## 🛠️ Development Setup
 
@@ -52,17 +26,40 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## 📊 Current Priorities
+Run tests and linters locally before opening a PR:
 
-Based on our 12-week roadmap:
-1. **Community Building** (Weeks 1-4)
-2. **Academic Validation** (Weeks 5-8)  
-3. **Enterprise Applications** (Weeks 9-12)
+```bash
+pytest -q
+ruff check
+black --check .
+```
 
-## 🎯 Technical Innovation
+If formatting fails, run:
 
-PMM represents a breakthrough in AI consciousness research - the first system to achieve truly portable, persistent AI personalities with measurable psychological evolution. Join us in exploring this new frontier!
+```bash
+black .
+```
+
+## Pull requests
+
+- Keep PRs small and scoped to one change when possible
+- Include tests for new behavior and bug fixes
+- Update documentation when behavior or APIs change
+- Ensure CI passes (tests, lint, formatting)
+- Write clear commit messages (imperative mood). Reference issues where relevant (e.g., "Fixes #123").
+
+## Code style and quality
+
+- Python 3.10+
+- Formatting: Black
+- Linting: Ruff
+- Type hints where practical; prefer clear names and small functions
+
+## Security and data
+
+- Do not commit secrets or API keys
+- Avoid including sensitive data in tests or fixtures
+- Report security issues privately via email (see README)
 
 ---
-
-**Questions?** Open an issue or start a discussion. We're excited to see what you build with PMM! 🚀
+**Questions?** Open an issue or start a discussion. Thank you for helping improve PMM.
