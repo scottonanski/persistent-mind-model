@@ -70,6 +70,19 @@ print(response)
 - **Influences trait drift** based on evidence
 - **Provides rich context** for personality-aware responses
 
+## API surface
+
+- Class: `PersistentMindMemory`
+- Constructor: `PersistentMindMemory(agent_path: str, personality_config: Dict | None = None, **kwargs)`
+- Methods:
+  - `save_context(inputs, outputs)` — store a conversation turn
+  - `load_memory_variables(inputs) -> Dict` — provide memory variables to the prompt
+  - `clear()` — clear conversation history (personality persists)
+  - `get_personality_summary() -> Dict`
+  - `trigger_reflection() -> Optional[str]`
+
+See implementation: [pmm/langchain_memory.py](pmm/langchain_memory.py)
+
 ## Advanced Usage
 
 ### Custom Personality Configuration
