@@ -127,16 +127,3 @@ For commercial use, contact: **s.onanski@gmail.com**
 **Questions?** Contact s.onanski@gmail.com for licensing clarification.
 
 **Copyright © 2025 Scott Onanski. All rights reserved.**
-
-## Development
-
-**Run tests:**
-```bash
-pytest  # 51/51 tests should pass
-```
-
-**Code quality:**
-```bash
-black .     # Format code
-ruff check  # Lint code
-```
