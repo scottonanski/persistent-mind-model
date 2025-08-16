@@ -4,7 +4,16 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://github.com/scottonanski/persistent-mind-model)
 [![License](https://img.shields.io/badge/license-dual-orange)](https://github.com/scottonanski/persistent-mind-model)
 
-PMM is a Python system for maintaining persistent AI personality traits, memory, and behavioral patterns across conversations. It stores conversation events, tracks commitments, and applies personality drift based on interaction patterns.
+PMM is a Python system for maintaining persistent AI personality traits, memory, and behavioral patterns across conversations and models. Meaning, it stores conversation events, tracks commitments, and applies personality drift based on interaction patterns.
+
+## Why this matters
+
+- Consistency across tools: PMM preserves identity and behavior across providers (OpenAI, Claude, Grok, Ollama) and across calls/sessions, reducing drift when switching models or scaling.
+- Operational memory: Conversation events and extracted commitments survive restarts and redeploys, enabling reliable follow-ups, reminders, and long-horizon workflows.
+- Accountability: Commitments are tracked with open/closed status and linked to events via a SHA-256 hash chain, providing an auditable trail.
+- Personality control: Evidence-based Big Five drift lets you tune adaptation over time without losing intended voice or norms.
+- Observability: Reflection and probe endpoints expose internal state (traits, commitments, emergence signals) for monitoring and debugging.
+- Drop-in integration: The LangChain memory adapter adds persistence to existing chat systems without major changes.
 
 ## Core Features
 
