@@ -29,7 +29,13 @@ Usage:
 
 from typing import Any, Dict, List, Optional
 from threading import Thread
-from datetime import UTC
+
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+
+    UTC = timezone.utc
 from langchain.memory.chat_memory import BaseChatMemory
 from pydantic import Field
 

@@ -469,7 +469,14 @@ def emergence_trends(
         store = SQLiteStore(db)
 
         # Get events from the specified time period
-        from datetime import datetime, timedelta, UTC
+        from datetime import datetime, timedelta
+
+        try:
+            from datetime import UTC
+        except ImportError:
+            from datetime import timezone
+
+            UTC = timezone.utc
 
         cutoff = datetime.now(UTC) - timedelta(days=days)
 

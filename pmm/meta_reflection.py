@@ -5,7 +5,14 @@ Enables AI awareness of its own reflection patterns and quality.
 """
 
 from typing import List, Dict, Optional, Any
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta
+
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone
+
+    UTC = timezone.utc
 from pmm.semantic_analysis import get_semantic_analyzer
 
 
