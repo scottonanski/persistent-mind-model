@@ -6,7 +6,7 @@
 
 PMM is a Python system for maintaining persistent AI personality traits, memory, and behavioral patterns across conversations and models. Meaning, it stores conversation events, tracks commitments, and applies personality drift based on interaction patterns.
 
-Think of PMM as a "personal persistent AI assistant" that can maintain a consistent identity and behavior across different operational contexts.
+Think of PMM as a personal persistent AI assistant that maintains a consistent identity and behavior, extended and adapted through time, across diverse operational contexts. Users may employ external API endpoints or local LLMs that serve as substrate engines feeding persistence, while PMM develops a customized persona free from vendor lock-in.
 
 For a deeper architectural overview and roadmap-style notes, see:
 - [Persistent Mind Model (PMM) Project Considerations — Moving Forward](Persistent%20Mind%20Model%20(PMM)%20Project%20Considerations%20-%20Moving%20Forward.md)
