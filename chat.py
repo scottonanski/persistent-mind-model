@@ -271,7 +271,42 @@ def main():
     # Create enhanced system prompt with PMM context
     def get_pmm_system_prompt():
         # Always pull fresh memory right before each call
-        pmm_context = pmm_memory.load_memory_variables({}).get("history", "")
+        raw_context = pmm_memory.load_memory_variables({}).get("history", "")
+
+        # Compact context: dedupe lines, cap each block
+        def _compact(text: str, max_lines: int = 120) -> str:
+            seen = set()
+            out = []
+            for line in text.splitlines():
+                key = line.strip().lower()
+                if key and key not in seen:
+                    out.append(line)
+                    seen.add(key)
+                if len(out) >= max_lines:
+                    break
+            return "\n".join(out)
+
+        pmm_context = _compact(raw_context)
+
+        # Lightweight loop-avoidance hint for the assistant
+        loop_hint = ""
+        try:
+            # peek at last few user messages from PMM events
+            recent = pmm_memory.pmm.sqlite_store.recent_events(limit=20)
+            user_msgs = []
+            for event_tuple in recent:
+                # Handle variable tuple length safely
+                if len(event_tuple) >= 4:
+                    kind = event_tuple[2]  # event kind
+                    content = event_tuple[3]  # event content
+                    if kind == "conversation":
+                        user_msgs.append(content)
+            last_texts = " ".join(user_msgs[:6]).lower()
+            if last_texts.count("slop code") >= 2:
+                loop_hint = "\nAVOID TOPIC LOOPING: The user already clarified the 'slop code' story; do not rehash it unless explicitly asked."
+        except Exception:
+            pass
+
         personality = pmm_memory.get_personality_summary()
         traits = personality["personality_traits"]
         agent_name = pmm_memory.pmm.model.core_identity.name
@@ -321,7 +356,7 @@ def main():
 
         return (
             f"You are a Persistent Mind Model (PMM) with genuine memory and evolving personality.\n"
-            f"{mind_policy}\n\n"
+            f"{mind_policy}{loop_hint}\n\n"
             f"{persona}\n\n"
             "CROSS‑SESSION MEMORY (condensed):\n"
             f"{pmm_context[:1800]}"

@@ -655,10 +655,7 @@ class SelfModelManager:
                     t=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     summary=f"Identity update: Name changed from '{old}' to '{name}' (origin={origin})",
                     type="identity_change",
-                    effects=[],
-                    tags=[],
-                    full_text="",
-                    embedding=b"",
+                    tags=["identity", "name_change"],
                 )
                 self.model.self_knowledge.autobiographical_events.append(event)
 

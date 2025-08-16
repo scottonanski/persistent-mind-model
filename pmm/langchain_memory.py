@@ -232,22 +232,40 @@ class PersistentMindMemory(BaseChatMemory):
                     )
                     if m:
                         candidate = m.group(1)
-                        if candidate.lower() not in stopwords:
+                        if (
+                            candidate.lower() not in stopwords
+                            and candidate.lower() not in {"doing", "going", "working"}
+                        ):
                             _remember_user_name(candidate)
 
             # Detect agent name assignments and persist them
+            # Only accept explicit *agent* rename directives.
+            # DO NOT infer from casual phrasing like "you're ...".
             agent_name_patterns = [
-                r"your name is (\w+)",
-                r"we will call you (\w+)",
-                r"let's call you (\w+)",
-                r"i'll call you (\w+)",
-                r"you're (\w+)",
+                r"\byour name is (\w+)\b",
+                r"\bwe will call you (\w+)\b",
+                r"\blet['']s call you (\w+)\b",
+                r"\bi['']ll call you (\w+)\b",
             ]
 
+            # Prevent silly names like "doing", "working", "fine", etc.
+            forbidden_names = {
+                "doing",
+                "working",
+                "fine",
+                "ok",
+                "okay",
+                "good",
+                "thanks",
+                "cool",
+            }
             for pattern in agent_name_patterns:
                 match = re.search(pattern, user_lower)
                 if match:
-                    agent_name = match.group(1).title()
+                    candidate = match.group(1).strip().lower()
+                    if candidate in forbidden_names:
+                        continue
+                    agent_name = candidate.title()
                     self.pmm.set_name(agent_name, origin="chat_detect")
 
                     # PHASE 3B+: Emit explicit identity_update event for traceability
@@ -696,10 +714,32 @@ class PersistentMindMemory(BaseChatMemory):
                 print("🔍 DEBUG: Skipping reflection triggers for non-behavioral input")
 
             if should_reflect:
-                print("🔍 DEBUG: Reflection triggered, starting...")
+                print("🔍 DEBUG: Reflection triggered, checking for topic loops...")
+                # Skip reflection if the last few events look like a topical loop
                 try:
-                    insight = self.trigger_reflection()
-                    print(f"🔍 DEBUG: Reflection completed, insight: {bool(insight)}")
+                    recent = self.pmm.sqlite_store.recent_events(limit=10)
+                    window = []
+                    for event_tuple in recent:
+                        # Handle variable tuple length safely
+                        if len(event_tuple) >= 4:
+                            kind = event_tuple[2]  # event kind
+                            content = event_tuple[3]  # event content
+                            if kind in ("conversation", "self_expression"):
+                                window.append(content)
+                    joined = " ".join(window).lower()
+                    if joined.count("slop code") >= 3:
+                        print(
+                            "🔍 DEBUG: Suppressing reflection due to topic loop (slop code)"
+                        )
+                        insight = None  # suppress looped reflections
+                    else:
+                        print(
+                            "🔍 DEBUG: No topic loop detected, proceeding with reflection..."
+                        )
+                        insight = self.trigger_reflection()
+                        print(
+                            f"🔍 DEBUG: Reflection completed, insight: {bool(insight)}"
+                        )
                 except Exception as e:
                     print(f"🔍 DEBUG: Reflection failed: {e}")
                     insight = None
@@ -940,6 +980,26 @@ class PersistentMindMemory(BaseChatMemory):
             "open_commitments": len(self.pmm.model.self_knowledge.commitments),
         }
 
+    def _is_similar_to_recent_insights(
+        self, text: str, max_check: int = 6, thresh: float = 0.8
+    ) -> bool:
+        """Shallow similarity check vs. recent insights to avoid duplicates."""
+        try:
+            import re
+
+            toks = set(re.findall(r"[a-zA-Z]{3,}", text.lower()))
+            recent = self.pmm.model.self_knowledge.insights[-max_check:]
+            for ins in recent:
+                itoks = set(re.findall(r"[a-zA-Z]{3,}", ins.content.lower()))
+                if not itoks:
+                    continue
+                overlap = len(toks & itoks) / max(1, len(toks | itoks))
+                if overlap >= thresh:
+                    return True
+        except Exception:
+            pass
+        return False
+
     def trigger_reflection(self) -> Optional[str]:
         """
         Manually trigger PMM reflection process with a short timeout to avoid UI stalls.
@@ -963,25 +1023,46 @@ class PersistentMindMemory(BaseChatMemory):
 
         try:
             print("🔍 DEBUG: Starting reflection worker thread...")
-            t = Thread(target=_worker, daemon=True)
-            t.start()
-            t.join(timeout=15.0)  # Increased timeout for gpt-4o-mini
+            # Try up to 3 attempts to avoid near-duplicate insights
+            attempts = 0
+            while attempts < 3:
+                result["insight"] = None
+                result["error"] = None
+                t = Thread(target=_worker, daemon=True)
+                t.start()
+                t.join(timeout=15.0)  # Increased timeout for gpt-4o-mini
 
-            if t.is_alive():
-                print("🔍 DEBUG: Reflection timed out after 15 seconds")
-                return None
+                if t.is_alive():
+                    print("🔍 DEBUG: Reflection timed out after 15 seconds")
+                    return None
 
-            print(f"🔍 DEBUG: Worker completed. Error: {result.get('error')}")
-            insight = result.get("insight")
-            print(f"🔍 DEBUG: Insight object: {type(insight)} - {bool(insight)}")
+                print(f"🔍 DEBUG: Worker completed. Error: {result.get('error')}")
+                insight = result.get("insight")
+                print(f"🔍 DEBUG: Insight object: {type(insight)} - {bool(insight)}")
 
-            if insight:
-                print(f"🔍 DEBUG: Insight content length: {len(insight.content)}")
-                self._update_personality_context()
-                self._update_commitment_context()
-                return insight.content
-            else:
-                print("🔍 DEBUG: No insight generated")
+                if not insight:
+                    break
+
+                content = insight.content.strip()
+                if not self._is_similar_to_recent_insights(content):
+                    # Accept, persist, update contexts
+                    print(
+                        f"🔍 DEBUG: Insight content length: {len(content)} - ACCEPTED (novel)"
+                    )
+                    self._update_personality_context()
+                    self._update_commitment_context()
+                    return content
+                else:
+                    print(
+                        f"🔍 DEBUG: Insight too similar to recent ones, retrying... (attempt {attempts + 1}/3)"
+                    )
+                    attempts += 1
+
+            # If all attempts were too similar, skip persisting a duplicate
+            print(
+                "🔍 DEBUG: All reflection attempts were too similar - skipping duplicate"
+            )
+            return None
         except Exception as e:
             print(f"🔍 DEBUG: trigger_reflection exception: {e}")
         return None

@@ -194,9 +194,9 @@ def test_integration_with_pmm():
 
         final_commitments = len(memory.pmm.model.self_knowledge.commitments)
 
-        # Should have added exactly 1 valid commitment
+        # Should have added at least 1 valid commitment (reflection system may add more)
         added_commitments = final_commitments - initial_commitments
-        print(f"Added {added_commitments} commitments (expected: 1)")
+        print(f"Added {added_commitments} commitments (expected: ≥1)")
 
         # The valid commitment should be present in the commitment tracker
         commitment_texts = [
@@ -211,6 +211,9 @@ def test_integration_with_pmm():
 
         print(f"Commitment texts found: {commitment_texts}")
 
+        assert (
+            added_commitments >= 1
+        ), f"Should add at least 1 commitment, got {added_commitments}"
         assert valid_found, "Valid commitment should be extracted"
         assert not invalid_found, "Invalid commitment should be rejected"
 

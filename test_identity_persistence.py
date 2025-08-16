@@ -108,7 +108,7 @@ def test_identity_persistence():
         else:
             print("\n⚠️  Some identity tests failed")
 
-        return success
+        assert success, "Identity persistence tests failed"
 
     finally:
         # Cleanup

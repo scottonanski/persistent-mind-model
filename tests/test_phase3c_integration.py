@@ -186,13 +186,13 @@ def test_semantic_novelty_in_reflections():
             ), f"Novel reflection should have higher novelty: {novelty2} vs {novelty1}"
 
             print("✅ Semantic novelty detection working correctly")
-            return True
+            assert True  # Test passed
 
         except Exception as e:
             print(
                 f"⚠️  Semantic analysis test skipped (requires embedding provider): {e}"
             )
-            return True  # Don't fail the test for missing dependencies
+            assert True  # Don't fail the test for missing dependencies
 
     finally:
         os.unlink(db_path)

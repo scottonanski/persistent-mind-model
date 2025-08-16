@@ -469,9 +469,9 @@ def emergence_trends(
         store = SQLiteStore(db)
 
         # Get events from the specified time period
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, UTC
 
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
 
         # Load all events in time period
         all_events = store.recent_events(limit=days * 50)  # Heuristic limit
