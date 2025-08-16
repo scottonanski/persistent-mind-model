@@ -11,6 +11,9 @@ Think of PMM as a "personal persistent AI assistant" that can maintain a consist
 For a deeper architectural overview and roadmap-style notes, see:
 [Persistent Mind Model (PMM) Project Considerations — Moving Forward](Persistent%20Mind%20Model%20(PMM)%20Project%20Considerations%20-%20Moving%20Forward.md)
 
+Plain-English overview of key concepts:
+[🧠 PMM Glossary (Plain English)](PMM_Glossary.md)
+
 
 ## Why this matters
 
