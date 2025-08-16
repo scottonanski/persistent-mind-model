@@ -5,6 +5,7 @@
 - **Plain English:** Think of it as the AI keeping a diary that survives restarts.
 
 ## Personality Traits (Big Five)
+- **Cursory Overrview:** [Big Five personality traits -WikiPedia](https://en.wikipedia.org/wiki/Big_Five_personality_traits)
 - **What it means:** The AI has scores for openness, conscientiousness, extraversion, agreeableness, and neuroticism. These scores drift over time based on behavior.
 - **Plain English:** The AI has a “personality” that slowly changes as it experiences things.
 
