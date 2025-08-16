@@ -1,6 +1,6 @@
-# 🔗 LangChain Integration Guide
+# LangChain Integration Guide
 
-## Add Persistent Personality to Any LangChain App
+## Add Persistent Personality to any LangChain app
 
 PMM's LangChain wrapper provides a drop-in replacement for standard memory systems, adding persistent personality traits, commitment tracking, and behavioral evolution to any LangChain application.
 
@@ -50,22 +50,22 @@ print(response)
 
 ## Key Features
 
-### 🧠 **Persistent Personality Traits**
+### Persistent personality traits
 - **Big Five personality model** (Openness, Conscientiousness, Extraversion, Agreeableness, Neuroticism)
 - **Traits evolve over time** based on conversations and experiences
 - **Consistent behavior** across all interactions
 
-### 📝 **Automatic Commitment Tracking**
+### Automatic commitment tracking
 - **Extracts commitments** from AI responses ("I will...", "Next:", etc.)
 - **Tracks completion** of commitments over time
 - **Influences personality development** based on follow-through
 
-### 🔄 **Model-Agnostic Architecture**
+### Model-agnostic architecture
 - **Works with any LLM** (OpenAI, Ollama, HuggingFace)
 - **Same personality** can inhabit different models
 - **Seamless backend switching** without identity loss
 
-### 📊 **Behavioral Pattern Evolution**
+### Behavioral pattern evolution
 - **Tracks behavioral patterns** (growth, experimentation, stability)
 - **Influences trait drift** based on evidence
 - **Provides rich context** for personality-aware responses
@@ -284,6 +284,6 @@ memory = PersistentMindMemory(
 
 ---
 
-**🎯 PMM + LangChain = Persistent AI Personalities for Everyone**
+---
 
-Transform any LangChain application from stateless interactions to persistent, evolving AI consciousness with just a few lines of code.
+For questions or issues with integration, please open a GitHub issue with reproduction steps and environment details.
