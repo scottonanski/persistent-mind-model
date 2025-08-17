@@ -43,6 +43,8 @@ from .self_model_manager import SelfModelManager
 from .reflection import reflect_once
 from .adapters.openai_adapter import OpenAIAdapter
 from .commitments import CommitmentTracker
+from .semantic_analysis import get_semantic_analyzer
+from .introspection import IntrospectionEngine, IntrospectionConfig
 
 
 class PersistentMindMemory(BaseChatMemory):
@@ -55,6 +57,7 @@ class PersistentMindMemory(BaseChatMemory):
     """
 
     pmm: SelfModelManager = Field(default=None, exclude=True)
+    introspection: IntrospectionEngine = Field(default=None, exclude=True)
     personality_context: str = Field(default="")
     commitment_context: str = Field(default="")
     memory_key: str = Field(default="history")
@@ -83,6 +86,11 @@ class PersistentMindMemory(BaseChatMemory):
         self.pmm = SelfModelManager(agent_path)
         self.enable_summary = bool(enable_summary)
         self.enable_embeddings = bool(enable_embeddings)
+
+        # Initialize introspection engine
+        self.introspection = IntrospectionEngine(
+            storage_manager=self.pmm.sqlite_store, config=IntrospectionConfig()
+        )
 
         # Initialize personality if provided
         if personality_config:
@@ -417,74 +425,128 @@ class PersistentMindMemory(BaseChatMemory):
         # Store non-behavioral inputs for provenance but with special marking
         behavioral_input = human_input if not is_non_behavioral else ""
 
+        # ---- 0.75) Handle Introspection Commands ----
+        introspection_result = None
+        if human_input:
+            command_type = self.introspection.parse_user_command(human_input)
+            if command_type:
+                print(
+                    f"🔍 DEBUG: Processing introspection command: {command_type.value}"
+                )
+
+                if human_input.lower().strip() == "@introspect help":
+                    # Special case: show available commands
+                    commands = self.introspection.get_available_commands()
+                    help_text = "🔍 **Available Introspection Commands:**\n\n"
+                    for cmd, desc in commands.items():
+                        help_text += f"• `{cmd}` - {desc}\n"
+                    help_text += "\n💡 **Automatic Introspection:**\n"
+                    help_text += (
+                        "• PMM also performs automatic introspection when it detects:\n"
+                    )
+                    help_text += "  - Failed commitments\n"
+                    help_text += "  - Significant trait drift\n"
+                    help_text += "  - Reflection quality issues\n"
+                    help_text += "  - Emergence score plateaus\n"
+                    help_text += (
+                        "\n🔔 You'll be notified when automatic analysis occurs.\n"
+                    )
+
+                    # Return help immediately without further processing
+                    return help_text
+                else:
+                    # Process the introspection command
+                    introspection_result = self.introspection.user_introspect(
+                        command_type
+                    )
+                    formatted_result = self.introspection.format_result_for_user(
+                        introspection_result
+                    )
+
+                    # Log the introspection as a special event
+                    self.pmm.add_event(
+                        summary=f"User requested {command_type.value} introspection",
+                        etype="introspection_command",
+                        tags=["introspection", "user_command", command_type.value],
+                        effects=[],
+                        evidence="",
+                        full_text=human_input,
+                    )
+
+                    # Return the introspection result immediately
+                    return formatted_result
+
         # ---- 1) Log human event + auto‑extract key info ----
         if human_input:
             try:
                 # Always log for provenance, but mark non-behavioral inputs
                 event_type = "non_behavioral" if is_non_behavioral else "conversation"
+
+                # Generate embedding for semantic search if enabled
+                embedding = None
+                if self.enable_embeddings and human_input.strip():
+                    try:
+                        semantic_analyzer = get_semantic_analyzer()
+                        import numpy as np
+
+                        embedding_list = semantic_analyzer._get_embedding(human_input)
+                        embedding = np.array(embedding_list, dtype=np.float32).tobytes()
+                    except Exception as e:
+                        print(
+                            f"Warning: Failed to generate embedding for user input: {e}"
+                        )
+
                 self.pmm.add_event(
                     summary=f"User said: {human_input[:200]}{'...' if len(human_input) > 200 else ''}",
                     effects=[],
                     etype=event_type,
+                    embedding=embedding,
                 )
 
                 # Only extract key info and auto-close from behavioral inputs
                 if behavioral_input:
                     self._auto_extract_key_info(behavioral_input)
 
-                    # Check for agent name adoption patterns
-                    if self.pmm and any(
-                        pattern in behavioral_input.lower()
-                        for pattern in [
-                            "call me",
-                            "my name is",
-                            "i am",
-                            "i'm",
-                            "adopt the name",
-                            "officially adopt",
-                        ]
-                    ):
-                        print(
-                            f"🔍 DEBUG: Identity pattern detected in: {behavioral_input[:100]}..."
+                    # Check for agent name adoption patterns using strict detector
+                    if self.pmm:
+                        from .name_detect import (
+                            extract_agent_name_command,
+                            _too_soon_since_last_name_change,
+                            _utcnow_str,
                         )
-                        # Extract potential name from the conversation
-                        import re
 
-                        name_patterns = [
-                            r"call me (\w+)",
-                            r"my name is (\w+)",
-                            r"i am (\w+)",
-                            r"i'm (\w+)",
-                            r"adopt(?:ing)? the name (\w+)",
-                            r"officially adopt (?:the name )?(\w+)",
-                        ]
-
-                        for pattern in name_patterns:
-                            match = re.search(pattern, behavioral_input.lower())
-                            if match:
-                                potential_name = match.group(1).capitalize()
-                                if potential_name and len(potential_name) > 1:
-                                    print(
-                                        f"🔍 DEBUG: Attempting to set name to: {potential_name}"
+                        cand = extract_agent_name_command(behavioral_input, "user")
+                        if cand:
+                            # Check cooldown
+                            last_change = getattr(
+                                self.pmm.model.metrics, "last_name_change_at", None
+                            )
+                            if not _too_soon_since_last_name_change(
+                                last_change, days=1
+                            ):
+                                print(
+                                    f"🔍 DEBUG: Explicit agent naming detected → '{cand}'"
+                                )
+                                try:
+                                    self.pmm.set_name(cand, origin="user_command")
+                                    # Record cooldown marker
+                                    self.pmm.model.metrics.last_name_change_at = (
+                                        _utcnow_str()
                                     )
-                                    try:
-                                        self.pmm.set_name(
-                                            potential_name, origin="conversation"
-                                        )
-                                        # Emit identity_update event for traceability
-                                        self.pmm.add_event(
-                                            summary=f"Identity update: Name changed to '{potential_name}' (origin=conversation)",
-                                            effects=[],
-                                            etype="identity_update",
-                                        )
-                                        print(
-                                            f"🔍 DEBUG: Successfully set name to: {potential_name}"
-                                        )
-                                    except Exception as e:
-                                        print(f"🔍 DEBUG: Failed to set name: {e}")
-                                    break
+                                    self.pmm.save_model()
+                                    # Emit identity_update event for traceability
+                                    self.pmm.add_event(
+                                        summary=f"Identity update: Name changed to '{cand}' (origin=user_command)",
+                                        effects=[],
+                                        etype="identity_update",
+                                    )
+                                    print(f"🔍 DEBUG: Successfully set name to: {cand}")
+                                except Exception as e:
+                                    print(f"🔍 DEBUG: Failed to set name: {e}")
+                            else:
+                                print("🔍 DEBUG: Name change blocked by cooldown")
                         else:
-                            print("🔍 DEBUG: No name extracted from identity patterns")
+                            print("🔍 DEBUG: No explicit agent naming found; skipping")
 
                     # NEW: Phase 3 - Detect and process evidence events from human input
                     try:
@@ -504,6 +566,43 @@ class PersistentMindMemory(BaseChatMemory):
                     effects=[],
                     etype="self_expression",
                 )
+
+                # Check for assistant self-declarations
+                if self.pmm:
+                    from .name_detect import (
+                        extract_agent_name_command,
+                        _too_soon_since_last_name_change,
+                        _utcnow_str,
+                    )
+
+                    cand = extract_agent_name_command(ai_output, "assistant")
+                    if cand:
+                        # Check cooldown
+                        last_change = getattr(
+                            self.pmm.model.metrics, "last_name_change_at", None
+                        )
+                        if not _too_soon_since_last_name_change(last_change, days=1):
+                            print(
+                                f"🔍 DEBUG: Assistant self-declaration detected → '{cand}'"
+                            )
+                            try:
+                                self.pmm.set_name(cand, origin="assistant_self")
+                                # Record cooldown marker
+                                self.pmm.model.metrics.last_name_change_at = (
+                                    _utcnow_str()
+                                )
+                                self.pmm.save_model()
+                                # Emit identity_update event for traceability
+                                self.pmm.add_event(
+                                    summary=f"Identity update: Name changed to '{cand}' (origin=assistant_self)",
+                                    effects=[],
+                                    etype="identity_update",
+                                )
+                                print(f"🔍 DEBUG: Successfully set name to: {cand}")
+                            except Exception as e:
+                                print(f"🔍 DEBUG: Failed to set name: {e}")
+                        else:
+                            print("🔍 DEBUG: Name change blocked by cooldown")
             except Exception:
                 pass
 
@@ -725,11 +824,15 @@ class PersistentMindMemory(BaseChatMemory):
                 try:
                     recent = self.pmm.sqlite_store.recent_events(limit=10)
                     window = []
-                    for event_tuple in recent:
-                        # Handle variable tuple length safely
-                        if len(event_tuple) >= 4:
-                            kind = event_tuple[2]  # event kind
-                            content = event_tuple[3]  # event content
+                    for event_dict in recent:
+                        # Handle dictionary format from recent_events()
+                        if (
+                            isinstance(event_dict, dict)
+                            and "kind" in event_dict
+                            and "content" in event_dict
+                        ):
+                            kind = event_dict["kind"]  # event kind
+                            content = event_dict["content"]  # event content
                             if kind in ("conversation", "self_expression"):
                                 window.append(content)
                     joined = " ".join(window).lower()
@@ -754,6 +857,44 @@ class PersistentMindMemory(BaseChatMemory):
                     print(
                         f"\n🧠 Insight: {insight[:160]}{'...' if len(insight) > 160 else ''}"
                     )
+
+                    # ---- Automatic Introspection Triggers ----
+                    try:
+                        automatic_results = (
+                            self.introspection.check_automatic_triggers()
+                        )
+                        for auto_result in automatic_results:
+                            if (
+                                auto_result.user_visible
+                                and auto_result.confidence
+                                >= self.introspection.config.notify_threshold
+                            ):
+                                formatted_auto = (
+                                    self.introspection.format_result_for_user(
+                                        auto_result
+                                    )
+                                )
+                                print(
+                                    f"\n🤖 Automatic Introspection Triggered:\n{formatted_auto}"
+                                )
+
+                                # Log automatic introspection as event
+                                self.pmm.add_event(
+                                    summary=f"Automatic {auto_result.type.value} introspection triggered",
+                                    etype="introspection_automatic",
+                                    tags=[
+                                        "introspection",
+                                        "automatic",
+                                        auto_result.type.value,
+                                        auto_result.trigger_reason.value,
+                                    ],
+                                    effects=[],
+                                    evidence="",
+                                    full_text=formatted_auto,
+                                )
+                    except Exception as e:
+                        print(f"🔍 DEBUG: Automatic introspection check failed: {e}")
+
                     # (c) auto‑close from reflection + apply drift immediately
                     try:
                         print("🔍 DEBUG: Auto-closing commitments from reflection...")
@@ -860,31 +1001,33 @@ class PersistentMindMemory(BaseChatMemory):
         if self.commitment_context:
             pmm_context_parts.append(self.commitment_context)
 
-        # Load recent conversation history from SQLite database
+        # Load conversation history using hybrid approach: semantic + chronological
         try:
             if hasattr(self.pmm, "sqlite_store"):
-                # Load more events to capture key information like names
-                recent_events = self.pmm.sqlite_store.recent_events(limit=50)
-                if recent_events:
-                    conversation_history = []
-                    key_facts = []  # Extract key facts like names
+                conversation_history = []
+                key_facts = []  # Extract key facts like names
 
+                # Get current input for semantic search
+                current_input = inputs.get(self.input_key, "")
+
+                # 1. Semantic search for relevant context (if we have input)
+                if current_input and self.enable_embeddings:
+                    semantic_memories = self._get_semantic_context(
+                        current_input, max_results=6
+                    )
+                    if semantic_memories:
+                        conversation_history.extend(semantic_memories)
+                        conversation_history.append("---")  # Separator
+
+                # 2. Recent chronological events for immediate context
+                recent_events = self.pmm.sqlite_store.recent_events(limit=30)
+                if recent_events:
                     for event in reversed(recent_events):  # chronological order
-                        # Support both legacy 7-column and new 10-column schemas
-                        event_id, ts, kind, content, meta, prev_hash, hash_val = event[
-                            :7
-                        ]
-                        summary = None
-                        keywords = None
-                        try:
-                            summary = event[7]
-                        except Exception:
-                            summary = None
-                        try:
-                            keywords = event[8]
-                        except Exception:
-                            keywords = None
-                        # embedding at event[9] if present (unused here)
+                        # Extract fields from dictionary (recent_events returns dicts via _row_to_dict)
+                        kind = event.get("kind", "")
+                        content = event.get("content", "")
+                        summary = event.get("summary", "")
+                        keywords = event.get("keywords", [])
 
                         # Prefer summary when available
                         display_text = summary or content or ""
@@ -919,18 +1062,13 @@ class PersistentMindMemory(BaseChatMemory):
                             elif kind == "event":
                                 conversation_history.append(f"Context: {display_text}")
 
-                            # Include keywords when available (JSON string)
+                            # Include keywords when available (already parsed as list)
                             try:
-                                if keywords:
-                                    import json as _json
-
-                                    kw_list = _json.loads(keywords)
-                                    if isinstance(kw_list, list) and kw_list:
-                                        # Add a compact keywords line
-                                        key_facts.append(
-                                            "KEYWORDS: "
-                                            + ", ".join(map(str, kw_list[:6]))
-                                        )
+                                if keywords and isinstance(keywords, list) and keywords:
+                                    # Add a compact keywords line
+                                    key_facts.append(
+                                        "KEYWORDS: " + ", ".join(map(str, keywords[:6]))
+                                    )
                             except Exception:
                                 pass
 
@@ -978,13 +1116,118 @@ class PersistentMindMemory(BaseChatMemory):
                     "neuroticism",
                 ]
             },
-            "behavioral_patterns": dict(
-                self.pmm.model.self_knowledge.behavioral_patterns
-            ),
+            "behavioral_patterns": self.pmm.model.self_knowledge.behavioral_patterns,
             "total_events": len(self.pmm.model.self_knowledge.autobiographical_events),
             "total_insights": len(self.pmm.model.self_knowledge.insights),
             "open_commitments": len(self.pmm.model.self_knowledge.commitments),
         }
+
+    def handle_introspection_command(self, user_input: str) -> Optional[str]:
+        """
+        Handle user introspection commands and return formatted results.
+
+        Args:
+            user_input: User input that may contain introspection commands
+
+        Returns:
+            Formatted introspection result if command was processed, None otherwise
+        """
+        if not hasattr(self, "introspection") or not self.introspection:
+            return None
+
+        command_type = self.introspection.parse_user_command(user_input)
+        if not command_type:
+            return None
+
+        print(f"🔍 DEBUG: Processing introspection command: {command_type.value}")
+
+        if user_input.lower().strip() == "@introspect help":
+            # Special case: show available commands
+            commands = self.introspection.get_available_commands()
+            help_text = "🔍 **Available Introspection Commands:**\n\n"
+            for cmd, desc in commands.items():
+                help_text += f"• `{cmd}` - {desc}\n"
+            help_text += "\n💡 **Automatic Introspection:**\n"
+            help_text += (
+                "• PMM also performs automatic introspection when it detects:\n"
+            )
+            help_text += "  - Failed commitments\n"
+            help_text += "  - Significant trait drift\n"
+            help_text += "  - Reflection quality issues\n"
+            help_text += "  - Emergence score plateaus\n"
+            help_text += "\n🔔 You'll be notified when automatic analysis occurs.\n"
+
+            return help_text
+        else:
+            # Process the introspection command
+            introspection_result = self.introspection.user_introspect(command_type)
+            formatted_result = self.introspection.format_result_for_user(
+                introspection_result
+            )
+
+            # Log the introspection as a special event
+            self.pmm.add_event(
+                summary=f"User requested {command_type.value} introspection",
+                etype="introspection_command",
+                tags=["introspection", "user_command", command_type.value],
+                effects=[],
+                evidence="",
+                full_text=user_input,
+            )
+
+            return formatted_result
+
+    def _get_semantic_context(
+        self, current_input: str, max_results: int = 8
+    ) -> List[str]:
+        """Retrieve semantically relevant memories based on current input."""
+        try:
+            if not current_input.strip() or not hasattr(self.pmm, "sqlite_store"):
+                return []
+
+            # Get semantic analyzer
+            semantic_analyzer = get_semantic_analyzer()
+
+            # Generate embedding for current input
+            import numpy as np
+
+            embedding_list = semantic_analyzer._get_embedding(current_input)
+            query_embedding = np.array(embedding_list, dtype=np.float32).tobytes()
+
+            # Search for semantically similar events
+            similar_events = self.pmm.sqlite_store.semantic_search(
+                query_embedding,
+                limit=max_results,
+                kind_filter=None,  # Search all event types
+            )
+
+            # Format relevant memories for context
+            relevant_memories = []
+            for event in similar_events:
+                content = event.get("summary") or event.get("content", "")
+                kind = event.get("kind", "")
+                event.get("ts", "")
+
+                # Format based on event type
+                if kind in ["prompt", "response"]:
+                    if "User said:" in content:
+                        user_msg = content.replace("User said: ", "")
+                        relevant_memories.append(f"[Relevant] Human: {user_msg}")
+                    elif "I responded:" in content:
+                        ai_msg = content.replace("I responded: ", "")
+                        relevant_memories.append(f"[Relevant] Assistant: {ai_msg}")
+                elif kind == "event":
+                    relevant_memories.append(f"[Context] {content}")
+                elif kind == "commitment":
+                    relevant_memories.append(f"[Commitment] {content}")
+                elif kind == "reflection":
+                    relevant_memories.append(f"[Insight] {content}")
+
+            return relevant_memories
+
+        except Exception as e:
+            print(f"Warning: Semantic context retrieval failed: {e}")
+            return []
 
     def _is_similar_to_recent_insights(
         self, text: str, max_check: int = 6, thresh: float = 0.8

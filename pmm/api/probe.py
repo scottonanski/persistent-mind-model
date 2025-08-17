@@ -282,18 +282,486 @@ def reflections(
 
 # Optional: placeholder traits endpoint. If/when you persist traits, replace with a real query.
 @app.get("/traits")
-def traits():
-    # surface a stable shape even if traits aren't persisted yet
-    return {
-        "big_five": {
-            "openness": None,
-            "conscientiousness": None,
-            "extraversion": None,
-            "agreeableness": None,
-            "neuroticism": None,
-        },
-        "note": "Populate once traits are stored in SQLite.",
-    }
+def traits(db: str = Query("pmm.db", description="Path to PMM SQLite DB")):
+    """
+    Live personality traits endpoint showing real-time Big Five scores with drift tracking.
+
+    Returns:
+    - Current Big Five trait scores
+    - HEXACO trait scores
+    - Trait drift history and velocity
+    - Last update timestamps and origins
+    - Personality evolution metrics
+    """
+    try:
+        from pmm.self_model_manager import SelfModelManager
+        from datetime import datetime, timezone
+        import os
+
+        # Check if persistent model file exists
+        model_file = "persistent_self_model.json"
+        if not os.path.exists(model_file):
+            return {
+                "error": f"PMM model file '{model_file}' not found. Initialize PMM first.",
+                "big_five": {
+                    "openness": None,
+                    "conscientiousness": None,
+                    "extraversion": None,
+                    "agreeableness": None,
+                    "neuroticism": None,
+                },
+                "note": "PMM model not initialized. Run a conversation first to create the model.",
+            }
+
+        # Load PMM model to get live personality data
+        manager = SelfModelManager(model_file)
+
+        # Extract Big Five traits
+        big5_traits = {}
+        for trait_name in [
+            "openness",
+            "conscientiousness",
+            "extraversion",
+            "agreeableness",
+            "neuroticism",
+        ]:
+            trait_obj = getattr(manager.model.personality.traits.big5, trait_name)
+            big5_traits[trait_name] = {
+                "score": round(trait_obj.score, 3),
+                "confidence": round(trait_obj.conf, 3),
+                "last_update": trait_obj.last_update,
+                "origin": trait_obj.origin,
+            }
+
+        # Extract HEXACO traits
+        hexaco_traits = {}
+        for trait_name in [
+            "honesty_humility",
+            "emotionality",
+            "extraversion",
+            "agreeableness",
+            "conscientiousness",
+            "openness",
+        ]:
+            trait_obj = getattr(manager.model.personality.traits.hexaco, trait_name)
+            hexaco_traits[trait_name] = {
+                "score": round(trait_obj.score, 3),
+                "confidence": round(trait_obj.conf, 3),
+                "last_update": trait_obj.last_update,
+                "origin": trait_obj.origin,
+            }
+
+        # Get trait drift history from events
+        store = SQLiteStore(db)
+        recent_events = store.recent_events(limit=100)
+
+        # Calculate trait drift velocity (changes over time)
+        trait_changes = []
+        for event in recent_events:
+            if event.get("kind") == "reflection" and event.get("meta", {}).get(
+                "trait_effects"
+            ):
+                trait_changes.append(
+                    {
+                        "timestamp": event.get("ts"),
+                        "effects": event.get("meta", {}).get("trait_effects", []),
+                    }
+                )
+
+        # Calculate personality stability metrics
+        stability_score = 1.0  # Default high stability
+        if len(trait_changes) > 1:
+            # Simple stability metric based on frequency of changes
+            days_span = 30  # Look at last 30 days
+            change_frequency = len(trait_changes) / max(1, days_span)
+            stability_score = max(0.0, 1.0 - (change_frequency * 0.1))
+
+        # Get behavioral patterns that influence traits
+        behavioral_patterns = dict(manager.model.self_knowledge.behavioral_patterns)
+
+        # Calculate trait-pattern correlations
+        trait_influences = {
+            "openness": ["experimentation", "growth", "reflection"],
+            "conscientiousness": ["stability", "user_goal_alignment"],
+            "extraversion": ["identity", "source_citation"],
+            "agreeableness": ["user_goal_alignment", "stability"],
+            "neuroticism": ["calibration", "error_correction"],
+        }
+
+        pattern_influences = {}
+        for trait, patterns in trait_influences.items():
+            influence_score = sum(behavioral_patterns.get(p, 0) for p in patterns)
+            pattern_influences[trait] = influence_score
+
+        return {
+            "big_five": big5_traits,
+            "hexaco": hexaco_traits,
+            "personality_metrics": {
+                "stability_score": round(stability_score, 3),
+                "total_trait_changes": len(trait_changes),
+                "last_drift_event": (
+                    trait_changes[0]["timestamp"] if trait_changes else None
+                ),
+                "behavioral_pattern_count": len(behavioral_patterns),
+                "total_pattern_signals": sum(behavioral_patterns.values()),
+            },
+            "behavioral_patterns": behavioral_patterns,
+            "trait_pattern_influences": pattern_influences,
+            "mbti": {
+                "label": manager.model.personality.mbti.label,
+                "confidence": manager.model.personality.mbti.conf,
+                "last_update": manager.model.personality.mbti.last_update,
+                "origin": manager.model.personality.mbti.origin,
+            },
+            "drift_config": {
+                "max_delta": manager.model.drift_config.max_delta_per_reflection,
+                "maturity_factor": manager.model.drift_config.maturity_principle,
+                "cooldown_days": manager.model.drift_config.cooldown_days,
+                "locked_traits": manager.model.drift_config.locks,
+            },
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "db_path": db,
+        }
+
+    except Exception as e:
+        return {
+            "error": str(e),
+            "big_five": {
+                "openness": None,
+                "conscientiousness": None,
+                "extraversion": None,
+                "agreeableness": None,
+                "neuroticism": None,
+            },
+            "note": "Failed to load live personality data. Using fallback structure.",
+        }
+
+
+@app.get("/traits/drift")
+def trait_drift_history(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    days: int = Query(30, ge=1, le=90, description="Number of days to analyze"),
+    trait: Optional[str] = Query(
+        None,
+        description="Specific trait to analyze (openness, conscientiousness, etc.)",
+    ),
+):
+    """
+    Trait drift history endpoint showing personality evolution over time.
+
+    Returns:
+    - Historical trait score changes
+    - Drift velocity and acceleration
+    - Trigger events that caused changes
+    - Stability analysis and trend detection
+    """
+    try:
+        from pmm.self_model_manager import SelfModelManager
+        from datetime import datetime, timezone, timedelta
+
+        # Load PMM model
+        manager = SelfModelManager("persistent_self_model.json")
+
+        # Get current trait scores as baseline
+        current_traits = {}
+        for trait_name in [
+            "openness",
+            "conscientiousness",
+            "extraversion",
+            "agreeableness",
+            "neuroticism",
+        ]:
+            trait_obj = getattr(manager.model.personality.traits.big5, trait_name)
+            current_traits[trait_name] = {
+                "score": trait_obj.score,
+                "last_update": trait_obj.last_update,
+                "origin": trait_obj.origin,
+            }
+
+        # Get historical events that might have caused trait changes
+        store = SQLiteStore(db)
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+
+        # Get all events since cutoff
+        all_events = store.all_events()
+        recent_events = [e for e in all_events if e.get("ts", "") >= cutoff_date]
+
+        # Extract trait-affecting events
+        trait_events = []
+        for event in recent_events:
+            if event.get("kind") in ["reflection", "event"] and event.get(
+                "meta", {}
+            ).get("trait_effects"):
+                trait_events.append(
+                    {
+                        "timestamp": event.get("ts"),
+                        "kind": event.get("kind"),
+                        "content": event.get("content", "")[:100],
+                        "trait_effects": event.get("meta", {}).get("trait_effects", []),
+                        "event_id": event.get("id"),
+                    }
+                )
+
+        # Calculate trait drift metrics
+        drift_analysis = {}
+
+        if trait:
+            # Analyze specific trait
+            trait_history = []
+            cumulative_change = 0.0
+
+            for event in trait_events:
+                for effect in event.get("trait_effects", []):
+                    if effect.get("trait") == trait:
+                        delta = effect.get("magnitude", 0.0)
+                        direction = effect.get("direction", "neutral")
+                        if direction == "decrease":
+                            delta = -delta
+
+                        cumulative_change += delta
+                        trait_history.append(
+                            {
+                                "timestamp": event["timestamp"],
+                                "delta": delta,
+                                "cumulative_change": round(cumulative_change, 4),
+                                "trigger_event": event["content"],
+                                "confidence": effect.get("confidence", 0.0),
+                            }
+                        )
+
+            drift_analysis[trait] = {
+                "total_change": round(cumulative_change, 4),
+                "change_events": len(trait_history),
+                "avg_change_per_event": round(
+                    cumulative_change / max(1, len(trait_history)), 4
+                ),
+                "history": trait_history[-20:],  # Last 20 changes
+                "current_score": current_traits.get(trait, {}).get("score", 0.5),
+            }
+        else:
+            # Analyze all traits
+            for trait_name in current_traits.keys():
+                trait_history = []
+                cumulative_change = 0.0
+
+                for event in trait_events:
+                    for effect in event.get("trait_effects", []):
+                        if effect.get("trait") == trait_name:
+                            delta = effect.get("magnitude", 0.0)
+                            direction = effect.get("direction", "neutral")
+                            if direction == "decrease":
+                                delta = -delta
+
+                            cumulative_change += delta
+                            trait_history.append(
+                                {
+                                    "timestamp": event["timestamp"],
+                                    "delta": delta,
+                                    "cumulative_change": round(cumulative_change, 4),
+                                }
+                            )
+
+                drift_analysis[trait_name] = {
+                    "total_change": round(cumulative_change, 4),
+                    "change_events": len(trait_history),
+                    "avg_change_per_event": round(
+                        cumulative_change / max(1, len(trait_history)), 4
+                    ),
+                    "recent_changes": trait_history[-5:],  # Last 5 changes
+                    "current_score": current_traits.get(trait_name, {}).get(
+                        "score", 0.5
+                    ),
+                }
+
+        # Calculate overall personality stability
+        total_changes = sum(
+            analysis["change_events"] for analysis in drift_analysis.values()
+        )
+        avg_change_magnitude = sum(
+            abs(analysis["total_change"]) for analysis in drift_analysis.values()
+        ) / max(1, len(drift_analysis))
+
+        stability_metrics = {
+            "total_trait_changes": total_changes,
+            "avg_change_magnitude": round(avg_change_magnitude, 4),
+            "stability_score": round(max(0.0, 1.0 - (avg_change_magnitude * 2)), 3),
+            "most_volatile_trait": (
+                max(
+                    drift_analysis.keys(),
+                    key=lambda t: abs(drift_analysis[t]["total_change"]),
+                )
+                if drift_analysis
+                else None
+            ),
+            "most_stable_trait": (
+                min(
+                    drift_analysis.keys(),
+                    key=lambda t: abs(drift_analysis[t]["total_change"]),
+                )
+                if drift_analysis
+                else None
+            ),
+        }
+
+        return {
+            "trait_drift_analysis": drift_analysis,
+            "stability_metrics": stability_metrics,
+            "analysis_period": {
+                "days": days,
+                "start_date": cutoff_date,
+                "end_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "events_analyzed": len(trait_events),
+            },
+            "current_traits": current_traits,
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "db_path": db,
+        }
+
+    except Exception as e:
+        return {
+            "error": str(e),
+            "trait_drift_analysis": {},
+            "note": "Failed to analyze trait drift history.",
+        }
+
+
+@app.get("/introspection")
+def introspection_status(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    days: int = Query(7, ge=1, le=30, description="Number of days to analyze"),
+):
+    """
+    Introspection system status and recent analysis results.
+
+    Returns:
+    - Recent introspection events (user-prompted and automatic)
+    - Available introspection commands
+    - Automatic trigger configuration
+    - Analysis history and patterns
+    """
+    try:
+        from pmm.introspection import IntrospectionEngine, IntrospectionConfig
+        from pmm.storage.sqlite_store import SQLiteStore
+        from datetime import datetime, timezone, timedelta
+
+        # Initialize introspection engine
+        store = SQLiteStore(db)
+        config = IntrospectionConfig()
+        engine = IntrospectionEngine(store, config)
+
+        # Get recent introspection events
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        all_events = store.all_events()
+        introspection_events = [
+            e
+            for e in all_events
+            if e.get("ts", "") >= cutoff_date
+            and e.get("kind") in ["introspection_command", "introspection_automatic"]
+        ]
+
+        # Analyze introspection patterns
+        user_commands = [
+            e for e in introspection_events if e.get("kind") == "introspection_command"
+        ]
+        automatic_triggers = [
+            e
+            for e in introspection_events
+            if e.get("kind") == "introspection_automatic"
+        ]
+
+        # Extract command types from tags
+        command_types = {}
+        trigger_reasons = {}
+
+        for event in introspection_events:
+            tags = event.get("meta", {}).get("tags", [])
+            for tag in tags:
+                if tag in [
+                    "patterns",
+                    "decisions",
+                    "growth",
+                    "commitments",
+                    "conflicts",
+                    "goals",
+                    "emergence",
+                    "memory",
+                    "reflection",
+                ]:
+                    command_types[tag] = command_types.get(tag, 0) + 1
+                if tag in [
+                    "failed_commitment",
+                    "trait_drift",
+                    "reflection_loop",
+                    "emergence_plateau",
+                    "pattern_conflict",
+                ]:
+                    trigger_reasons[tag] = trigger_reasons.get(tag, 0) + 1
+
+        # Get available commands
+        available_commands = engine.get_available_commands()
+
+        return {
+            "introspection_summary": {
+                "total_events": len(introspection_events),
+                "user_commands": len(user_commands),
+                "automatic_triggers": len(automatic_triggers),
+                "analysis_period_days": days,
+                "most_used_command": (
+                    max(command_types.keys(), key=command_types.get)
+                    if command_types
+                    else None
+                ),
+                "most_common_trigger": (
+                    max(trigger_reasons.keys(), key=trigger_reasons.get)
+                    if trigger_reasons
+                    else None
+                ),
+            },
+            "recent_events": [
+                {
+                    "timestamp": e.get("ts"),
+                    "type": e.get("kind"),
+                    "summary": e.get("content", "")[:100],
+                    "tags": e.get("meta", {}).get("tags", []),
+                }
+                for e in introspection_events[-10:]  # Last 10 events
+            ],
+            "command_usage": command_types,
+            "trigger_patterns": trigger_reasons,
+            "available_commands": available_commands,
+            "configuration": {
+                "automatic_enabled": config.enable_automatic,
+                "notification_enabled": config.notify_automatic,
+                "confidence_threshold": config.notify_threshold,
+                "lookback_days": config.lookback_days,
+                "trait_drift_threshold": config.trait_drift_threshold,
+                "emergence_plateau_days": config.emergence_plateau_days,
+            },
+            "system_status": {
+                "engine_initialized": True,
+                "last_check": engine.last_automatic_check.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                "cache_size": len(engine.analysis_cache),
+            },
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "db_path": db,
+        }
+
+    except Exception as e:
+        return {
+            "error": str(e),
+            "introspection_summary": {
+                "total_events": 0,
+                "user_commands": 0,
+                "automatic_triggers": 0,
+            },
+            "note": "Failed to load introspection system status.",
+        }
 
 
 @app.get("/emergence")

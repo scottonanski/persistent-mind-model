@@ -64,8 +64,8 @@ def test_adaptive_reflection_triggers():
             # Check if reflection was triggered
             recent_events = pmm.pmm.sqlite_store.recent_events(limit=5)
             reflection_events = [
-                e for e in recent_events if e[2] == "reflection"
-            ]  # kind is at index 2
+                e for e in recent_events if e.get("kind") == "reflection"
+            ]  # Use dict access instead of tuple indexing
 
             if len(reflection_events) > reflection_count:
                 reflection_count = len(reflection_events)

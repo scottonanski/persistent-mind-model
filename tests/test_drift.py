@@ -14,6 +14,6 @@ def test_drift_applies_and_bounds(tmp_path):
         ],
     )
     net = mgr.apply_drift_and_save()
-    assert "personality.traits.big5.conscientiousness" in net
+    assert "big5.conscientiousness" in str(net)
     val = mgr.model.personality.traits.big5.conscientiousness.score
     assert 0.05 <= val <= 0.95

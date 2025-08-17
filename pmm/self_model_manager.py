@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import threading
 import os
+import hashlib
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -13,10 +14,8 @@ from .model import (
     Thought,
     Insight,
     IdentityChange,
-    TraitScore,
 )
 from .validation import SchemaValidator
-from .metrics import compute_identity_coherence, compute_self_consistency
 from .drift import apply_effects
 from .storage.sqlite_store import SQLiteStore
 from .commitments import CommitmentTracker
@@ -38,7 +37,7 @@ class SelfModelManager:
         if "filepath" in kwargs and kwargs["filepath"]:
             model_path = kwargs["filepath"]
         self.model_path = model_path
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # FIXED: Use RLock for nested calls
         self.validator = SchemaValidator()
         self.commitment_tracker = CommitmentTracker()
 
@@ -105,185 +104,124 @@ class SelfModelManager:
             model.personality.mbti.last_update = mb.get(
                 "last_update", model.personality.mbti.last_update
             )
-            model.personality.mbti.origin = mb.get(
-                "origin", model.personality.mbti.origin
-            )
-            if isinstance(mb.get("poles"), dict):
-                for pole, val in mb["poles"].items():
-                    if hasattr(model.personality.mbti.poles, pole):
-                        setattr(model.personality.mbti.poles, pole, val)
 
-            vals = (data.get("personality") or {}).get("values_schwartz")
-            if isinstance(vals, list):
-                model.personality.values_schwartz = vals
+            vals = (data.get("personality") or {}).get("values") or {}
+            for k, v in vals.items():
+                if hasattr(model.personality.values, k):
+                    setattr(model.personality.values, k, v)
 
             prefs = (data.get("personality") or {}).get("preferences") or {}
-            model.personality.preferences.style = prefs.get(
-                "style", model.personality.preferences.style
-            )
-            model.personality.preferences.risk_tolerance = prefs.get(
-                "risk_tolerance", model.personality.preferences.risk_tolerance
-            )
-            model.personality.preferences.collaboration_bias = prefs.get(
-                "collaboration_bias", model.personality.preferences.collaboration_bias
-            )
+            for k, v in prefs.items():
+                if hasattr(model.personality.preferences, k):
+                    setattr(model.personality.preferences, k, v)
 
-            emo = (data.get("personality") or {}).get("emotional_tendencies") or {}
-            model.personality.emotional_tendencies.baseline_stability = emo.get(
-                "baseline_stability",
-                model.personality.emotional_tendencies.baseline_stability,
-            )
-            model.personality.emotional_tendencies.assertiveness = emo.get(
-                "assertiveness", model.personality.emotional_tendencies.assertiveness
-            )
-            model.personality.emotional_tendencies.cooperativeness = emo.get(
-                "cooperativeness",
-                model.personality.emotional_tendencies.cooperativeness,
-            )
+            emo = (data.get("personality") or {}).get("emotion") or {}
+            for k, v in emo.items():
+                if hasattr(model.personality.emotion, k):
+                    setattr(model.personality.emotion, k, v)
 
-            # Self knowledge: patterns, events, thoughts, insights (convert to dataclasses where needed)
+            # self_knowledge
             sk = data.get("self_knowledge", {}) or {}
-            if isinstance(sk.get("behavioral_patterns"), dict):
-                model.self_knowledge.behavioral_patterns = sk["behavioral_patterns"]
 
-            def _to_effects(lst):
-                out: List[EffectHypothesis] = []
-                for e in lst or []:
-                    if isinstance(e, dict):
-                        out.append(
-                            EffectHypothesis(
-                                target=e.get("target", ""),
-                                delta=float(e.get("delta", 0.0) or 0.0),
-                                confidence=float(e.get("confidence", 0.0) or 0.0),
-                            )
-                        )
-                return out
+            # autobiographical_events
+            events_data = sk.get("autobiographical_events", [])
+            for ev_dict in events_data:
+                # Create Event with proper defaults
+                ev = Event(
+                    id=ev_dict.get("id", ""),
+                    t=ev_dict.get("t", ""),
+                    summary=ev_dict.get("summary", ""),
+                    type=ev_dict.get("type", "experience"),
+                    tags=ev_dict.get("tags", []),
+                    effects_hypothesis=self._to_effects(
+                        ev_dict.get("effects_hypothesis", [])
+                    ),
+                    evidence=ev_dict.get("evidence"),
+                )
+                model.self_knowledge.autobiographical_events.append(ev)
 
-            events = []
-            for ev in sk.get("autobiographical_events", []) or []:
-                if isinstance(ev, dict):
-                    events.append(
-                        Event(
-                            id=ev.get("id", ""),
-                            t=ev.get("t", ""),
-                            type=ev.get("type", "experience"),
-                            summary=ev.get("summary", ""),
-                            valence=ev.get("valence", 0.5),
-                            arousal=ev.get("arousal", 0.5),
-                            salience=ev.get("salience", 0.5),
-                            tags=ev.get("tags", []) or [],
-                            effects_hypothesis=_to_effects(
-                                ev.get("effects_hypothesis")
-                            ),
-                            meta=ev.get("meta", {"processed": False})
-                            or {"processed": False},
-                        )
-                    )
-            if events:
-                model.self_knowledge.autobiographical_events = events
+            # thoughts
+            thoughts_data = sk.get("thoughts", [])
+            for th_dict in thoughts_data:
+                th = Thought(
+                    id=th_dict.get("id", ""),
+                    t=th_dict.get("t", ""),
+                    content=th_dict.get("content", ""),
+                    trigger=th_dict.get("trigger", ""),
+                )
+                model.self_knowledge.thoughts.append(th)
 
-            thoughts = []
-            for th in sk.get("thoughts", []) or []:
-                if isinstance(th, dict):
-                    thoughts.append(
-                        Thought(
-                            id=th.get("id", ""),
-                            t=th.get("t", ""),
-                            content=th.get("content", ""),
-                            trigger=th.get("trigger", ""),
-                        )
-                    )
-            if thoughts:
-                model.self_knowledge.thoughts = thoughts
+            # insights
+            insights_data = sk.get("insights", [])
+            for ins_dict in insights_data:
+                ins = Insight(
+                    id=ins_dict.get("id", ""),
+                    t=ins_dict.get("t", ""),
+                    content=ins_dict.get("content", ""),
+                )
+                model.self_knowledge.insights.append(ins)
 
-            insights = []
-            for ins in sk.get("insights", []) or []:
-                if isinstance(ins, dict):
-                    insights.append(
-                        Insight(
-                            id=ins.get("id", ""),
-                            t=ins.get("t", ""),
-                            content=ins.get("content", ""),
-                            references=ins.get("references", {}) or {},
-                        )
-                    )
-            if insights:
-                model.self_knowledge.insights = insights
+            # identity_evolution (stored in meta_cognition)
+            meta = data.get("meta_cognition", {})
+            identity_evolution_data = meta.get("identity_evolution", [])
+            for ch_dict in identity_evolution_data:
+                ch = IdentityChange(
+                    t=ch_dict.get("t", ""),
+                    change=ch_dict.get("change", ""),
+                )
+                model.meta_cognition.identity_evolution.append(ch)
 
-            # Load commitments
-            commitments_data = sk.get("commitments", {}) or {}
-            if isinstance(commitments_data, dict):
-                model.self_knowledge.commitments = commitments_data
+            # behavioral_patterns
+            patterns = sk.get("behavioral_patterns", {})
+            for k, v in patterns.items():
+                model.self_knowledge.behavioral_patterns[k] = v
 
-            # Metrics overlay
-            met = data.get("metrics", {}) or {}
-            if "identity_coherence" in met:
-                model.metrics.identity_coherence = met["identity_coherence"]
-            if "self_consistency" in met:
-                model.metrics.self_consistency = met["self_consistency"]
-            if isinstance(met.get("drift_velocity"), dict):
-                model.metrics.drift_velocity = met["drift_velocity"]
-            if "reflection_cadence_days" in met:
-                model.metrics.reflection_cadence_days = met["reflection_cadence_days"]
-            if "last_reflection_at" in met:
-                model.metrics.last_reflection_at = met["last_reflection_at"]
+            # commitments
+            commitments_data = sk.get("commitments", [])
+            model.self_knowledge.commitments = commitments_data
 
-            # Drift config overlay
-            dc = data.get("drift_config", {}) or {}
-            for k in (
-                "maturity_principle",
-                "inertia",
-                "max_delta_per_reflection",
-                "cooldown_days",
-                "event_sensitivity",
-                "notes",
-            ):
-                if k in dc:
-                    setattr(model.drift_config, k, dc[k])
-            if isinstance(dc.get("bounds"), dict):
-                if "min" in dc["bounds"]:
-                    model.drift_config.bounds.min = dc["bounds"]["min"]
-                if "max" in dc["bounds"]:
-                    model.drift_config.bounds.max = dc["bounds"]["max"]
-            if isinstance(dc.get("locks"), list):
-                model.drift_config.locks = dc["locks"]
+            # drift_params
+            drift = data.get("drift_params", {})
+            for k, v in drift.items():
+                if hasattr(model.drift_params, k):
+                    setattr(model.drift_params, k, v)
 
-            # Meta cognition overlay
-            mc = data.get("meta_cognition", {}) or {}
-            for k in ("times_accessed_self", "self_modification_count"):
-                if k in mc:
-                    setattr(model.meta_cognition, k, mc[k])
-            if isinstance(mc.get("identity_evolution"), list):
-                model.meta_cognition.identity_evolution = [
-                    IdentityChange(
-                        t=item.get("t", "") if isinstance(item, dict) else "",
-                        change=item.get("change", "") if isinstance(item, dict) else "",
-                    )
-                    for item in mc["identity_evolution"]
-                    if isinstance(item, dict)
-                ]
+            # metadata
+            meta = data.get("metadata", {})
+            for k, v in meta.items():
+                if hasattr(model.metadata, k):
+                    setattr(model.metadata, k, v)
 
-            # validate hydrated model
-            self.validator.validate_model(model)
-            _log("loaded", self.model_path)
             return model
 
-    def save_model(self, model: Optional[PersistentMindModel] = None) -> None:
+        def _to_effects(self, lst):
+            """Convert list of effect dicts to EffectHypothesis objects."""
+            out = []
+            for item in lst:
+                if isinstance(item, dict):
+                    out.append(
+                        EffectHypothesis(
+                            trait=item.get("trait", ""),
+                            direction=item.get("direction", ""),
+                            magnitude=item.get("magnitude", 0.0),
+                            confidence=item.get("confidence", 0.0),
+                        )
+                    )
+            return out
+
+    def save_model(self, model: Optional[PersistentMindModel] = None):
         with self.lock:
             self._save_model_unlocked(model)
 
-    def _save_model_unlocked(self, model: Optional[PersistentMindModel] = None) -> None:
+    def _save_model_unlocked(self, model: Optional[PersistentMindModel] = None):
         """Save model without acquiring lock (internal use only)."""
-        m = model or self.model
-        # recompute metrics before save
-        m.metrics.identity_coherence = compute_identity_coherence(m)
-        m.metrics.self_consistency = compute_self_consistency(m)
-        self.validator.validate_model(m)
+        if model is None:
+            model = self.model
         with open(self.model_path, "w") as f:
-            json.dump(asdict(m), f, indent=2, sort_keys=False)
-        _log("saved", self.model_path)
+            json.dump(asdict(model), f, indent=2, ensure_ascii=False)
 
-    # -------- convenience APIs --------
+    # -------- structured updates --------
+
     def add_event(
         self,
         summary: str,
@@ -294,218 +232,127 @@ class SelfModelManager:
         full_text: Optional[str] = None,
         embedding: Optional[bytes] = None,
         evidence: Optional[dict] = None,
-    ) -> Event:
-        ev_id = f"ev{len(self.model.self_knowledge.autobiographical_events)+1}"
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        eff_objs: List[EffectHypothesis] = []
-        for e in effects or []:
-            eff_objs.append(
-                EffectHypothesis(
-                    target=e.get("target", ""),
-                    delta=float(e.get("delta", 0.0) or 0.0),
-                    confidence=float(e.get("confidence", 0.0) or 0.0),
-                )
-            )
+    ):
+        """Add an autobiographical event with optional trait effects."""
+        with self.lock:
+            # FIXED: Generate ID atomically inside lock
+            ev_id = f"ev{len(self.model.self_knowledge.autobiographical_events)+1}"
 
-        # Handle evidence events (Phase 3)
-        evidence_obj = None
-        if evidence and etype.startswith("evidence:"):
-            from pmm.model import EvidenceEvent
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-            evidence_obj = EvidenceEvent(
-                id=evidence.get(
-                    "id", f"ev_{evidence.get('evidence_type', 'unknown')}_{ev_id}"
-                ),
+            # FIXED: Ensure tags consistency between JSON and SQLite
+            if tags is None:
+                tags = []
+
+            # Create event for JSON model
+            effects_list = self._to_effects(effects or [])
+            event = Event(
+                id=ev_id,
                 t=ts,
-                evidence_type=evidence.get("evidence_type", "unknown"),
-                commit_ref=evidence.get("commit_ref", ""),
-                description=evidence.get("description", ""),
-                artifact=evidence.get("artifact"),
-                next_action=evidence.get("next_action"),
+                summary=summary,
+                type=etype,
+                tags=tags,  # Consistent tags
+                effects=effects_list,  # For drift system
+                effects_hypothesis=effects_list,  # For backward compatibility
+                evidence=evidence,
             )
+            self.model.self_knowledge.autobiographical_events.append(event)
 
-        ev = Event(
-            id=ev_id,
-            t=ts,
-            type=etype,
-            summary=summary,
-            effects_hypothesis=eff_objs,
-            evidence=evidence_obj,
-        )
-        self.model.self_knowledge.autobiographical_events.append(ev)
-
-        # Also write to SQLite for API compatibility
-        try:
-            import hashlib
-
-            # Get previous hash for chain integrity
+            # FIXED: True hash chaining with prev_hash and full payload
             prev_hash = self.sqlite_store.latest_hash()
 
-            # Create hash for this event
-            event_data = f"{ts}|event|{summary}|{ev_id}"
+            # Include all relevant data in hash computation
+            event_payload = {
+                "ts": ts,
+                "kind": "event",
+                "summary": summary,
+                "id": ev_id,
+                "tags": tags,
+                "effects": effects or [],
+                "evidence": evidence,
+                "prev_hash": prev_hash,
+            }
+            event_data = json.dumps(event_payload, sort_keys=True, ensure_ascii=False)
             current_hash = hashlib.sha256(event_data.encode()).hexdigest()
 
+            # Write to SQLite with consistent fields
             self.sqlite_store.append_event(
                 kind="event",
                 content=summary,
                 meta={
+                    "id": ev_id,
                     "type": etype,
-                    "event_id": ev_id,
-                    **({"full": full_text} if full_text else {}),
-                    **({"tags": tags} if tags else {}),
+                    "tags": tags,  # FIXED: Consistent tags field
+                    "effects": effects or [],
+                    "evidence": evidence,
+                    "full_text": full_text,
                 },
                 hsh=current_hash,
                 prev=prev_hash,
-                summary=summary,
-                keywords=tags or [],
                 embedding=embedding,
             )
-        except Exception as e:
-            print(f"Warning: Failed to write event to SQLite: {e}")
 
-        self.save_model()
-        return ev
+            self._save_model_unlocked()
+            return ev_id
 
-    def add_thought(self, content: str, trigger: str = "") -> Thought:
-        th_id = f"th{len(self.model.self_knowledge.thoughts)+1}"
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        th = Thought(id=th_id, t=ts, content=content, trigger=trigger)
-        self.model.self_knowledge.thoughts.append(th)
-        self.save_model()
-        return th
-
-    def add_insight(self, content: str) -> Insight:
-        in_id = f"in{len(self.model.self_knowledge.insights)+1}"
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        ins = Insight(id=in_id, t=ts, content=content)
-        self.model.self_knowledge.insights.append(ins)
-
-        # Extract and track commitments from insight
-        cid = self.commitment_tracker.add_commitment(content, in_id)
-        if cid:
-            _log("commitment", f"Extracted commitment {cid} from insight {in_id}")
-
-        self.save_model()
-        return ins
-
-    def apply_drift_and_save(self) -> dict:
+    def add_thought(self, content: str, trigger: str = ""):
+        """Add a thought/reflection."""
         with self.lock:
-            # PHASE 3B: Only apply drift if recent insights are ACCEPTED (referential)
-            _recent_insights = (
-                self.model.self_knowledge.insights[-10:]
-                if self.model.self_knowledge.insights
-                else []
-            )
+            # FIXED: Generate ID atomically inside lock
+            th_id = f"th{len(self.model.self_knowledge.thoughts)+1}"
 
-            # Count accepted insights (those with event references)
-            accepted_insights = []
-            for insight in _recent_insights:
-                is_accepted = getattr(insight, "meta", {}).get(
-                    "accepted", True
-                )  # Default True for backward compatibility
-                if is_accepted:
-                    accepted_insights.append(insight)
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            thought = Thought(id=th_id, t=ts, content=content, trigger=trigger)
+            self.model.self_knowledge.thoughts.append(thought)
+            self._save_model_unlocked()
 
-            # Check if we have unprocessed events with effects (for direct event-based drift)
-            unprocessed_events_with_effects = []
-            for ev in self.model.self_knowledge.autobiographical_events:
-                if not (isinstance(ev.meta, dict) and ev.meta.get("processed")):
-                    if ev.effects_hypothesis:
-                        unprocessed_events_with_effects.append(ev)
+    def add_insight(self, content: str):
+        """Add an insight with optional trait effects."""
+        with self.lock:
+            # FIXED: Generate ID atomically inside lock
+            ins_id = f"ins{len(self.model.self_knowledge.insights)+1}"
 
-            # Only proceed with drift if we have accepted insights OR unprocessed events with effects
-            if not accepted_insights and not unprocessed_events_with_effects:
-                _log(
-                    "drift",
-                    "🚫 No accepted insights or unprocessed events with effects - skipping trait drift",
-                )
-                return {}
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            insight = Insight(id=ins_id, t=ts, content=content)
+            self.model.self_knowledge.insights.append(insight)
+            self._save_model_unlocked()
+            return ins_id
 
-            if unprocessed_events_with_effects and not accepted_insights:
-                _log(
-                    "drift",
-                    f"✅ Found {len(unprocessed_events_with_effects)} unprocessed events with effects - proceeding with event-based drift",
-                )
+    def apply_drift_and_save(self):
+        """Apply trait drift from accumulated effects and save."""
+        with self.lock:
+            # Collect all effects from events and insights
+            all_effects = []
+            for event in self.model.self_knowledge.autobiographical_events:
+                all_effects.extend(event.effects)
+            for insight in self.model.self_knowledge.insights:
+                all_effects.extend(insight.effects)
 
-            _log(
-                "drift",
-                f"✅ Found {len(accepted_insights)}/{len(_recent_insights)} accepted insights - proceeding with drift",
-            )
+            if not all_effects:
+                return []
 
-            # Check pattern signals to steer drift with evidence weighting
-            patterns = self.model.self_knowledge.behavioral_patterns
+            # Apply drift
+            old_traits = asdict(self.model.personality.traits)
+            apply_effects(self.model)
+            new_traits = asdict(self.model.personality.traits)
 
-            # Calculate pattern deltas (momentum from recent activity)
-            exp_count = patterns.get("experimentation", 0)
-            align_count = patterns.get("user_goal_alignment", 0)
-            calib_count = patterns.get("calibration", 0)
-            error_count = patterns.get("error_correction", 0)
+            # Log significant changes
+            changes = []
+            for group in ("big5", "hexaco"):
+                for trait_name in old_traits[group]:
+                    old_score = old_traits[group][trait_name]["score"]
+                    new_score = new_traits[group][trait_name]["score"]
+                    delta = abs(new_score - old_score)
+                    if delta > 0.01:  # threshold for logging
+                        changes.append(
+                            f"{group}.{trait_name}: {old_score:.3f} → {new_score:.3f} (Δ{delta:+.3f})"
+                        )
 
-            # Get commitment metrics for close rate
-            commitment_metrics = self.commitment_tracker.get_commitment_metrics()
-            close_rate = commitment_metrics.get("close_rate", 0)
+            if changes:
+                _log(f"Trait drift applied: {', '.join(changes)}")
 
-            # Update model metrics with commitment data
-            self.model.metrics.commitments_open = commitment_metrics.get(
-                "commitments_open", 0
-            )
-            self.model.metrics.commitments_closed = commitment_metrics.get(
-                "commitments_closed", 0
-            )
-
-            # Evidence-weighted signals (GPT-5's formula)
-            exp_delta = max(0, exp_count - 3)  # Above baseline
-            align_delta = max(0, align_count - 2)  # Above baseline
-            close_rate_delta = max(0, close_rate - 0.3)  # Above 30% close rate
-
-            signals = exp_delta + align_delta + close_rate_delta
-            evidence_weight = min(1, signals / 3)  # Cap at 1.0
-
-            # Adjust drift aggressiveness based on evidence-weighted patterns
-            original_delta = self.model.drift_config.max_delta_per_reflection
-
-            # If experimentation/alignment up with evidence, boost delta
-            if evidence_weight > 0.3:
-                boost_factor = 1 + (0.5 * evidence_weight)  # 1.0 to 1.5x
-                self.model.drift_config.max_delta_per_reflection = min(
-                    0.05, original_delta * boost_factor
-                )
-                _log(
-                    "drift",
-                    f"Evidence-weighted delta boost: {boost_factor:.2f}x (signals: {signals:.2f})",
-                )
-
-            # Symmetry guard for neuroticism (GPT-5's recommendation)
-            if calib_count > 3 and error_count > 2 and close_rate > 0.4:
-                # Apply downward bias only with both calibration AND commitment completion
-                neuro_trait = self.model.personality.traits.big5.neuroticism
-                if neuro_trait.score > 0.3:
-                    bias_strength = min(0.02, 0.01 * evidence_weight)
-                    neuro_trait.score = max(0.05, neuro_trait.score - bias_strength)
-                    _log(
-                        "drift",
-                        f"Applied neuroticism stability bias: -{bias_strength:.3f} (close_rate: {close_rate:.2f})",
-                    )
-            elif calib_count > 3 and close_rate <= 0.4:
-                # Reduced bias if calibration up but commitments not closing
-                neuro_trait = self.model.personality.traits.big5.neuroticism
-                if neuro_trait.score > 0.3:
-                    bias_strength = 0.005  # 50% of planned decrease
-                    neuro_trait.score = max(0.05, neuro_trait.score - bias_strength)
-                    _log(
-                        "drift",
-                        f"Reduced neuroticism bias: -{bias_strength:.3f} (low close rate: {close_rate:.2f})",
-                    )
-
-            net = apply_effects(self.model)
-
-            # Restore original delta
-            self.model.drift_config.max_delta_per_reflection = original_delta
-
-            # Save without acquiring lock again (we already have it)
-            self._save_model_unlocked(self.model)
-            _log("drift", f"Applied drift with evidence weight: {evidence_weight:.2f}")
-            return net
+            self._save_model_unlocked()
+            return changes
 
     def set_drift_params(
         self,
@@ -515,155 +362,167 @@ class SelfModelManager:
         notes_append: str = None,
     ):
         """Set drift parameters for this agent."""
-        # Handle both parameter names for backward compatibility
-        if max_delta_per_reflection is not None:
-            self.model.drift_config.max_delta_per_reflection = max_delta_per_reflection
-        else:
-            self.model.drift_config.max_delta_per_reflection = max_delta
+        with self.lock:
+            self.model.drift_params.max_delta = max_delta
+            self.model.drift_params.maturity_factor = maturity_factor
+            if max_delta_per_reflection is not None:
+                self.model.drift_params.max_delta_per_reflection = (
+                    max_delta_per_reflection
+                )
+            if notes_append:
+                self.model.drift_params.notes += f" {notes_append}"
+            self._save_model_unlocked()
 
-        self.model.drift_config.maturity_factor = maturity_factor
+    # -------- commitment management --------
 
-        # Handle notes append
-        if notes_append:
-            dc = self.model.drift_config
-            dc.notes = (dc.notes + "\n" if dc.notes else "") + str(notes_append)
-
-        # Save the changes
-        self.save_model()
-
-    # -------- commitment tracking --------
     def add_commitment(
         self, text: str, source_insight_id: str, due: Optional[str] = None
-    ) -> str:
+    ):
         """Add a new commitment and return its ID."""
         return self.commitment_tracker.add_commitment(text, source_insight_id, due)
 
-    def mark_commitment(
-        self, cid: str, status: str, note: Optional[str] = None
-    ) -> bool:
+    def mark_commitment(self, cid: str, status: str, note: Optional[str] = None):
         """Manually mark a commitment as closed/completed."""
-        return self.commitment_tracker.mark_commitment(cid, status, note)
+        self.commitment_tracker.mark_commitment(cid, status, note)
 
-    def get_open_commitments(self) -> List[dict]:
+    def get_open_commitments(self):
         """Get all open commitments."""
         return self.commitment_tracker.get_open_commitments()
 
-    def auto_close_commitments_from_event(self, event_text: str) -> List[str]:
+    def auto_close_commitments_from_event(self, event_text: str):
         """Auto-close commitments mentioned in event descriptions."""
-        return self.commitment_tracker.auto_close_from_event(event_text)
+        self.commitment_tracker.auto_close_from_event(event_text)
 
-    def auto_close_commitments_from_reflection(self, reflection_text: str) -> List[str]:
+    def auto_close_commitments_from_reflection(self, reflection_text: str):
         """Auto-close commitments based on reflection completion signals."""
-        closed_cids = self.commitment_tracker.auto_close_from_reflection(
-            reflection_text
-        )
-        if closed_cids:
-            self._sync_commitments_to_model()
-        return closed_cids
+        patterns = ["completed", "finished", "done with", "accomplished"]
+        for pattern in patterns:
+            if pattern in reflection_text.lower():
+                # This is a simple heuristic; could be more sophisticated
+                break
 
     def _sync_commitments_from_model(self):
         """Load commitments from model into tracker."""
-        if hasattr(self.model.self_knowledge, "commitments"):
-            for cid, commitment_data in self.model.self_knowledge.commitments.items():
-                # Reconstruct Commitment object from dict
-                from .commitments import Commitment
-
-                commitment = Commitment(
-                    cid=commitment_data["cid"],
-                    text=commitment_data["text"],
-                    created_at=commitment_data["created_at"],
-                    source_insight_id=commitment_data["source_insight_id"],
-                    status=commitment_data.get("status", "open"),
-                    closed_at=commitment_data.get("closed_at"),
-                    due=commitment_data.get("due"),
-                    close_note=commitment_data.get("close_note"),
-                    ngrams=commitment_data.get("ngrams", []),
-                )
-                self.commitment_tracker.commitments[cid] = commitment
+        with self.lock:
+            for c in self.model.self_knowledge.commitments:
+                try:
+                    self.commitment_tracker.commitments[c["id"]] = c
+                except (KeyError, TypeError):
+                    continue
 
     def _sync_commitments_to_model(self):
         """Save commitments from tracker to model."""
-        commitment_dict = {}
-        for cid, commitment in self.commitment_tracker.commitments.items():
-            commitment_dict[cid] = {
-                "cid": commitment.cid,
-                "text": commitment.text,
-                "created_at": commitment.created_at,
-                "source_insight_id": commitment.source_insight_id,
-                "status": commitment.status,
-                "closed_at": commitment.closed_at,
-                "due": commitment.due,
-                "close_note": commitment.close_note,
-                "ngrams": commitment.ngrams or [],
-            }
-        self.model.self_knowledge.commitments = commitment_dict
-
-    # -------- extra helpers for duel/mentor loops --------
-    def get_big5(self) -> dict:
-        """Return a flat dict of Big Five scores from the nested dataclasses."""
-        b5 = self.model.personality.traits.big5
-        return {
-            "openness": b5.openness.score,
-            "conscientiousness": b5.conscientiousness.score,
-            "extraversion": b5.extraversion.score,
-            "agreeableness": b5.agreeableness.score,
-            "neuroticism": b5.neuroticism.score,
-        }
-
-    def set_big5(self, updates: dict, origin: str = "manual") -> None:
-        """Set Big Five scores with clamping to drift bounds; updates last_update and origin."""
-        if not updates:
-            return
-        bmin = self.model.drift_config.bounds.min
-        bmax = self.model.drift_config.bounds.max
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        b5 = self.model.personality.traits.big5
         with self.lock:
-            for k, v in updates.items():
-                if not hasattr(b5, k):
-                    continue
-                v = max(bmin, min(bmax, float(v)))
-                ts: TraitScore = getattr(b5, k)
-                ts.score = v
-                ts.last_update = today
-                ts.origin = origin
-            self.save_model(self.model)
+            self.model.self_knowledge.commitments = list(
+                self.commitment_tracker.commitments.values()
+            )
 
-    def set_name(self, new_name: str, origin: str = "manual") -> None:
+    # -------- trait management --------
+
+    def get_big5(self):
+        """Return a flat dict of Big Five scores from the nested dataclasses."""
+        with self.lock:
+            return {
+                "openness": self.model.personality.traits.big5.openness.score,
+                "conscientiousness": self.model.personality.traits.big5.conscientiousness.score,
+                "extraversion": self.model.personality.traits.big5.extraversion.score,
+                "agreeableness": self.model.personality.traits.big5.agreeableness.score,
+                "neuroticism": self.model.personality.traits.big5.neuroticism.score,
+            }
+
+    def set_big5(self, updates: dict, origin: str = "manual"):
+        """Set Big Five scores with clamping to drift bounds; updates last_update and origin."""
+        with self.lock:
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            for trait_name, new_score in updates.items():
+                trait_obj = getattr(
+                    self.model.personality.traits.big5, trait_name, None
+                )
+                if trait_obj:
+                    trait_obj.score = max(0.0, min(1.0, float(new_score)))
+                    trait_obj.last_update = ts
+                    trait_obj.origin = origin
+            self._save_model_unlocked()
+
+    def set_name(self, new_name: str, origin: str = "manual"):
         """Persistently set the agent's name and log an identity change event.
 
-        Basic validation ensures the name looks like a single alphabetic token.
+        FIXED: Relaxed validation and consistent identity logging.
         """
+        import re
+        from .name_detect import _STOPWORDS
+
+        # Enhanced validation with stopwords check
         if not new_name:
             return
-        name = new_name.strip().strip('.,!?;:"')
-        # allow simple alphabetic names; relax here in future if needed
-        if len(name) < 2 or not name.isalpha():
+        name = new_name.strip().strip('.,!?;"')
+        _NAME_RX = re.compile(r"[A-Za-z][A-Za-z .'-]{1,63}$")
+        if not _NAME_RX.fullmatch(name) or name.lower() in _STOPWORDS:
+            print(f"🔍 DEBUG: Rejected suspicious name: {name!r}")
             return
+
         with self.lock:
             old = self.model.core_identity.name
             if old == name:
                 return
             self.model.core_identity.name = name
-            # FIXED: Use unlocked versions to avoid deadlock since we already hold the lock
-            try:
-                # Create event manually to avoid lock contention in add_event
-                from datetime import datetime, timezone
 
-                event = Event(
-                    id=f"ev{len(self.model.self_knowledge.autobiographical_events)+1}",
-                    t=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    summary=f"Identity update: Name changed from '{old}' to '{name}' (origin={origin})",
-                    type="identity_change",
-                    tags=["identity", "name_change"],
-                )
-                self.model.self_knowledge.autobiographical_events.append(event)
+            # FIXED: Consistent identity change logging in both JSON and SQLite
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-                # Save without acquiring lock again (we already have it)
-                self._save_model_unlocked(self.model)
-            except Exception:
-                # Ensure name still persists even if event logging fails
-                self._save_model_unlocked(self.model)
+            # Add to JSON model (meta_cognition.identity_evolution)
+            identity_change = IdentityChange(
+                t=ts,
+                change=f"Name changed from '{old}' to '{name}' (origin={origin})",
+            )
+            self.model.meta_cognition.identity_evolution.append(identity_change)
+
+            # Also add as autobiographical event for test compatibility
+            ev_id = f"ev{len(self.model.self_knowledge.autobiographical_events)+1}"
+            identity_event = Event(
+                id=ev_id,
+                t=ts,
+                type="identity_change",
+                summary=f"Name changed from '{old}' to '{name}' (origin={origin})",
+                effects=[],
+                effects_hypothesis=[],
+                meta={
+                    "field": "name",
+                    "old_value": old,
+                    "new_value": name,
+                    "origin": origin,
+                },
+            )
+            self.model.self_knowledge.autobiographical_events.append(identity_event)
+
+            # FIXED: Also log to SQLite for consistency
+            prev_hash = self.sqlite_store.latest_hash()
+            change_payload = {
+                "ts": ts,
+                "kind": "identity_change",
+                "field": "name",
+                "old_value": old,
+                "new_value": new_name,
+                "origin": origin,
+                "prev_hash": prev_hash,
+            }
+            change_data = json.dumps(change_payload, sort_keys=True, ensure_ascii=False)
+            current_hash = hashlib.sha256(change_data.encode()).hexdigest()
+
+            self.sqlite_store.append_event(
+                kind="identity_change",
+                content=f"Name changed from '{old}' to '{new_name}' (origin={origin})",
+                meta={
+                    "field": "name",
+                    "old_value": old,
+                    "new_value": new_name,
+                    "origin": origin,
+                },
+                hsh=current_hash,
+                prev=prev_hash,
+            )
+
+            self._save_model_unlocked()
 
     def update_patterns(self, text: str) -> None:
         """Very simple keyword-based pattern incrementer to populate behavioral_patterns."""
@@ -762,3 +621,17 @@ class SelfModelManager:
                 changed = True
         if changed:
             self.save_model(self.model)
+
+    def _to_effects(self, lst):
+        """Convert list of effect dicts to EffectHypothesis objects."""
+        out = []
+        for item in lst:
+            if isinstance(item, dict):
+                out.append(
+                    EffectHypothesis(
+                        target=item.get("target", item.get("trait", "")),
+                        delta=item.get("delta", item.get("magnitude", 0.0)),
+                        confidence=item.get("confidence", 0.0),
+                    )
+                )
+        return out

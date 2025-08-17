@@ -67,6 +67,8 @@ python chat.py
 - `personality` - View current personality traits
 - `memory` - Show recent conversation history
 - `quit` - Exit and save state
+- `models` - List available models
+
 
 ## Monitoring API
 

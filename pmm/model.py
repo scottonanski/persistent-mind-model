@@ -216,6 +216,7 @@ class Event:
     arousal: float = 0.5
     salience: float = 0.5
     tags: List[str] = field(default_factory=list)
+    effects: List[EffectHypothesis] = field(default_factory=list)
     effects_hypothesis: List[EffectHypothesis] = field(default_factory=list)
     meta: Dict[str, Any] = field(default_factory=lambda: {"processed": False})
     # Evidence data for evidence events
@@ -236,6 +237,7 @@ class Insight:
     t: str
     content: str
     references: Dict[str, List[str]] = field(default_factory=dict)
+    effects: List[EffectHypothesis] = field(default_factory=list)
 
 
 @dataclass
