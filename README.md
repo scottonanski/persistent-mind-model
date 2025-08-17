@@ -66,8 +66,9 @@ python chat.py
 **Available commands in chat:**
 - `personality` - View current personality traits
 - `memory` - Show recent conversation history
-- `quit` - Exit and save state
-- `models` - List available models
+- `models` - List available models and switch providers/models
+- `status` - Show PMM status (feature toggles, DB size, event counts)
+- `quit`/`exit`/`bye` - Exit and save state
 
 
 ## Monitoring API
