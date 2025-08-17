@@ -1,6 +1,6 @@
 # Persistent Mind Model (PMM)
 
-[![Tests](https://img.shields.io/badge/tests-51%2F51%20passing-green)](https://github.com/scottonanski/persistent-mind-model)
+[![Tests](https://img.shields.io/badge/tests-79%2F79%20passing-green)](https://github.com/scottonanski/persistent-mind-model)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://github.com/scottonanski/persistent-mind-model)
 [![License](https://img.shields.io/badge/license-dual-orange)](https://github.com/scottonanski/persistent-mind-model)
 
@@ -58,7 +58,7 @@ pip install -r requirements.txt
 export OPENAI_API_KEY='sk-your-key-here'
 ```
 
-**Start the chat interface:**
+**Start the main chat interface:**
 ```bash
 python chat.py
 ```
@@ -108,22 +108,22 @@ pmm/
 └── storage/              # SQLite with hash-chain integrity
 
 examples/
-└── langchain_chatbot_hybrid.py  # Main chat interface
+└── (removed - use chat.py instead)
 
-tests/                    # Test suite (51 tests)
+tests/                    # Test suite (79 tests)
 ```
 
 ## Development
 
 **Run tests:**
 ```bash
-pytest  # 51/51 tests should pass
+pytest  # 79/79 tests should pass
 ```
 
 **Code quality:**
 ```bash
 black .     # Format code
-ruff check  # Lint code
+ruff check  # Lint code (zero violations)
 ```
 
 ## License
