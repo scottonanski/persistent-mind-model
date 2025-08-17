@@ -1,10 +1,12 @@
+# I was just messing around and somehow ended up with this. I think this thing works?  🤔
+
 # Persistent Mind Model (PMM)
 
 [![Tests](https://img.shields.io/badge/tests-79%2F79%20passing-green)](https://github.com/scottonanski/persistent-mind-model)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://github.com/scottonanski/persistent-mind-model)
 [![License](https://img.shields.io/badge/license-dual-orange)](https://github.com/scottonanski/persistent-mind-model)
 
-PMM is a Python system for maintaining persistent AI personality traits, memory, and behavioral patterns across conversations and models. Meaning, it stores conversation events, tracks commitments, and applies personality drift based on interaction patterns.
+**PMM is a Python system for maintaining persistent AI personality traits, memory, and behavioral patterns across conversations and models.** Meaning, it stores conversation events, tracks commitments, and applies personality drift based on interaction patterns.
 
 Think of PMM as a personal persistent AI assistant that maintains a consistent identity and behavior, extended and adapted through time, across diverse operational contexts. Users may employ external API endpoints or local LLMs that serve as substrate engines feeding persistence, while PMM develops a customized persona free from vendor lock-in.
 
