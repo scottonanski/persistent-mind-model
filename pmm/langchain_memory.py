@@ -28,7 +28,6 @@ Usage:
 """
 
 from typing import Any, Dict, List, Optional
-from threading import Thread
 
 try:
     from datetime import UTC
@@ -41,10 +40,17 @@ from pydantic import Field
 
 from .self_model_manager import SelfModelManager
 from .reflection import reflect_once
-from .adapters.openai_adapter import OpenAIAdapter
 from .commitments import CommitmentTracker
 from .semantic_analysis import get_semantic_analyzer
 from .introspection import IntrospectionEngine, IntrospectionConfig
+from .phrase_deduper import PhraseDeduper
+from .stance_filter import StanceFilter
+from .model_baselines import ModelBaselineManager
+from .atomic_reflection import AtomicReflectionManager
+from .reflection_cooldown import ReflectionCooldownManager
+from .commitment_ttl import CommitmentTTLManager
+from .ngram_ban import NGramBanSystem
+from .emergence_stages import EmergenceStageManager
 
 
 class PersistentMindMemory(BaseChatMemory):
@@ -66,6 +72,19 @@ class PersistentMindMemory(BaseChatMemory):
     conversation_count: int = Field(default=0)
     enable_summary: bool = Field(default=False)
     enable_embeddings: bool = Field(default=False)
+    turns_since_last_reflection: int = Field(default=0)
+    active_model_config: Optional[Dict] = Field(default=None, exclude=True)
+    trigger_config: Optional[Any] = Field(default=None, exclude=True)
+    trigger_state: Optional[Any] = Field(default=None, exclude=True)
+    adaptive_trigger: Optional[Any] = Field(default=None, exclude=True)
+    phrase_deduper: Optional[Any] = Field(default=None, exclude=True)
+    stance_filter: Optional[Any] = Field(default=None, exclude=True)
+    model_baselines: Optional[Any] = Field(default=None, exclude=True)
+    atomic_reflection: Optional[Any] = Field(default=None, exclude=True)
+    reflection_cooldown: Optional[Any] = Field(default=None, exclude=True)
+    commitment_ttl: Optional[Any] = Field(default=None, exclude=True)
+    ngram_ban: Optional[Any] = Field(default=None, exclude=True)
+    emergence_stages: Optional[Any] = Field(default=None, exclude=True)
 
     def __init__(
         self,
@@ -99,6 +118,35 @@ class PersistentMindMemory(BaseChatMemory):
                     trait_obj = getattr(self.pmm.model.personality.traits.big5, trait)
                     trait_obj.score = max(0.0, min(1.0, float(value)))
             self.pmm.save_model()
+
+        # Initialize reflection cooldown tracking
+        self.turns_since_last_reflection = 0
+
+        # Initialize adaptive trigger system
+        from pmm.adaptive_triggers import AdaptiveTrigger, TriggerConfig, TriggerState
+
+        self.trigger_config = TriggerConfig(
+            cadence_days=None,  # Disable time-based for now
+            events_min_gap=3,  # Minimum 3 turns between reflections
+            ias_low=0.35,
+            gas_low=0.35,
+            ias_high=0.65,
+            gas_high=0.65,
+            min_cooldown_minutes=10,
+            max_skip_days=7.0,
+        )
+        self.trigger_state = TriggerState()
+        self.adaptive_trigger = AdaptiveTrigger(self.trigger_config, self.trigger_state)
+
+        # Initialize components
+        self.phrase_deduper = PhraseDeduper()
+        self.stance_filter = StanceFilter()
+        self.model_baselines = ModelBaselineManager()
+        self.atomic_reflection = AtomicReflectionManager(self.pmm)
+        self.reflection_cooldown = ReflectionCooldownManager()
+        self.commitment_ttl = CommitmentTTLManager()
+        self.ngram_ban = NGramBanSystem()
+        self.emergence_stages = EmergenceStageManager(self.model_baselines)
 
         # LangChain memory interface requirements - ConversationChain uses "response" as output key
         self.memory_key = "history"
@@ -149,18 +197,47 @@ class PersistentMindMemory(BaseChatMemory):
                 f"Behavioral Patterns: {', '.join(f'{k}({v})' for k, v in patterns.items())}"
             )
 
-        # Add recent memories and insights
-        recent_events = self.pmm.model.self_knowledge.autobiographical_events[
-            -3:
-        ]  # Last 3 events
+        # Add recent memories and insights with model-namespaced filtering
+        from .memory_keys import agent_namespace
+        from .llm_factory import get_llm_factory
+
+        # Get current model config for namespacing
+        llm_factory = get_llm_factory()
+        active_config = llm_factory.get_active_config()
+        install_id = getattr(self.pmm, "install_id", "default")
+
+        if active_config:
+            agent_namespace(active_config, install_id)
+            current_model = active_config.get("name", "unknown")
+        else:
+            current_model = "unknown"
+
+        # Filter events by model source to prevent cross-model memory bleeding
+        recent_events = []
+        for event in self.pmm.model.self_knowledge.autobiographical_events[-10:]:
+            # Only include events from current model or model-agnostic events
+            event_source = getattr(event, "model_source", None)
+            if event_source is None or event_source == current_model:
+                recent_events.append(event)
+                if len(recent_events) >= 3:
+                    break
+
         if recent_events:
-            context_parts.append("\nRecent Memories:")
+            context_parts.append(f"\nRecent Memories ({current_model}):")
             for event in recent_events:
                 context_parts.append(f"• {event.summary}")
 
-        recent_insights = self.pmm.model.self_knowledge.insights[-2:]  # Last 2 insights
+        # Filter insights by model source
+        recent_insights = []
+        for insight in self.pmm.model.self_knowledge.insights[-10:]:
+            insight_source = getattr(insight, "model_source", None)
+            if insight_source is None or insight_source == current_model:
+                recent_insights.append(insight)
+                if len(recent_insights) >= 2:
+                    break
+
         if recent_insights:
-            context_parts.append("\nRecent Insights:")
+            context_parts.append(f"\nRecent Insights ({current_model}):")
             for insight in recent_insights:
                 context_parts.append(
                     f"• {insight.content[:100]}{'...' if len(insight.content) > 100 else ''}"
@@ -415,6 +492,46 @@ class PersistentMindMemory(BaseChatMemory):
             if not ai_output and outputs:
                 ai_output = list(outputs.values())[0] if outputs.values() else ""
 
+        # ---- 0.25) Input Hygiene: Check if input is non-behavioral ----
+        is_non_behavioral = self._is_non_behavioral_input(human_input)
+        if is_non_behavioral:
+            print(
+                "🔍 DEBUG: Non-behavioral input detected, skipping behavioral triggers"
+            )
+
+        # ---- 0.3) Apply stance filter and phrase deduplication ----
+        if ai_output and not is_non_behavioral:
+            # Get current model name for phrase deduplication
+            current_model = getattr(self, "_active_model_config", {}).get(
+                "name", "unknown"
+            )
+
+            # Apply stance filter to remove anthropomorphic language
+            filtered_output, stance_filters = self.stance_filter.filter_response(
+                ai_output
+            )
+            if stance_filters:
+                print(
+                    f"🔍 DEBUG: Applied stance filters: {len(stance_filters)} changes"
+                )
+
+            # Check for phrase repetition
+            is_repetitive, repeated_phrases, repetition_score = (
+                self.phrase_deduper.check_response(current_model, filtered_output)
+            )
+
+            if is_repetitive:
+                print(
+                    f"🔍 DEBUG: Repetitive phrases detected: {repeated_phrases[:3]}... (score: {repetition_score:.3f})"
+                )
+                # Could implement re-generation here, for now just log
+
+            # Add response to phrase cache for future deduplication
+            self.phrase_deduper.add_response(current_model, filtered_output)
+
+            # Use filtered output
+            ai_output = filtered_output
+
         # ---- 0.5) Input Hygiene: Check if input is non-behavioral ----
         is_non_behavioral = self._is_non_behavioral_input(human_input)
         if is_non_behavioral:
@@ -577,32 +694,10 @@ class PersistentMindMemory(BaseChatMemory):
 
                     cand = extract_agent_name_command(ai_output, "assistant")
                     if cand:
-                        # Check cooldown
-                        last_change = getattr(
-                            self.pmm.model.metrics, "last_name_change_at", None
-                        )
-                        if not _too_soon_since_last_name_change(last_change, days=1):
-                            print(
-                                f"🔍 DEBUG: Assistant self-declaration detected → '{cand}'"
-                            )
-                            try:
-                                self.pmm.set_name(cand, origin="assistant_self")
-                                # Record cooldown marker
-                                self.pmm.model.metrics.last_name_change_at = (
-                                    _utcnow_str()
-                                )
-                                self.pmm.save_model()
-                                # Emit identity_update event for traceability
-                                self.pmm.add_event(
-                                    summary=f"Identity update: Name changed to '{cand}' (origin=assistant_self)",
-                                    effects=[],
-                                    etype="identity_update",
-                                )
-                                print(f"🔍 DEBUG: Successfully set name to: {cand}")
-                            except Exception as e:
-                                print(f"🔍 DEBUG: Failed to set name: {e}")
-                        else:
-                            print("🔍 DEBUG: Name change blocked by cooldown")
+                        # Assistant self-naming disabled to prevent pollution
+                        print("🔍 DEBUG: Name change blocked by cooldown")
+                    else:
+                        print("🔍 DEBUG: No assistant self-declaration found; skipping")
             except Exception:
                 pass
 
@@ -846,6 +941,12 @@ class PersistentMindMemory(BaseChatMemory):
                             "🔍 DEBUG: No topic loop detected, proceeding with reflection..."
                         )
                         insight = self.trigger_reflection()
+                        if insight:
+                            if self._is_similar_to_recent_insights(insight):
+                                print(
+                                    "🔍 DEBUG: Suppressing reflection due to similarity to recent insights"
+                                )
+                                insight = None
                         print(
                             f"🔍 DEBUG: Reflection completed, insight: {bool(insight)}"
                         )
@@ -1213,6 +1314,7 @@ class PersistentMindMemory(BaseChatMemory):
                     if "User said:" in content:
                         user_msg = content.replace("User said: ", "")
                         relevant_memories.append(f"[Relevant] Human: {user_msg}")
+
                     elif "I responded:" in content:
                         ai_msg = content.replace("I responded: ", "")
                         relevant_memories.append(f"[Relevant] Assistant: {ai_msg}")
@@ -1226,95 +1328,182 @@ class PersistentMindMemory(BaseChatMemory):
             return relevant_memories
 
         except Exception as e:
-            print(f"Warning: Semantic context retrieval failed: {e}")
+            print(f"🔍 DEBUG: Semantic context retrieval failed: {e}")
             return []
 
-    def _is_similar_to_recent_insights(
-        self, text: str, max_check: int = 6, thresh: float = 0.8
-    ) -> bool:
-        """Shallow similarity check vs. recent insights to avoid duplicates."""
-        try:
-            import re
+    def _is_similar_to_recent_insights(self, content: str) -> bool:
+        """Check if content is too similar to recent insights using 0.88 threshold."""
+        if not content or not content.strip():
+            return True
 
-            toks = set(re.findall(r"[a-zA-Z]{3,}", text.lower()))
-            recent = self.pmm.model.self_knowledge.insights[-max_check:]
-            for ins in recent:
-                itoks = set(re.findall(r"[a-zA-Z]{3,}", ins.content.lower()))
-                if not itoks:
+        # Get recent insights for comparison
+        recent_insights = self.pmm.model.self_knowledge.insights[
+            -8:
+        ]  # Last 8 insights for better dedup
+        if not recent_insights:
+            return False
+
+        try:
+            from openai import OpenAI
+
+            client = OpenAI()
+
+            # Get embedding for new content
+            new_embedding = (
+                client.embeddings.create(
+                    input=content.strip(), model="text-embedding-ada-002"
+                )
+                .data[0]
+                .embedding
+            )
+
+            # Compare with recent insights
+            for insight in recent_insights:
+                if not insight.content:
                     continue
-                overlap = len(toks & itoks) / max(1, len(toks | itoks))
-                if overlap >= thresh:
+
+                existing_embedding = (
+                    client.embeddings.create(
+                        input=insight.content.strip(), model="text-embedding-ada-002"
+                    )
+                    .data[0]
+                    .embedding
+                )
+
+                # Calculate cosine similarity
+                import numpy as np
+
+                similarity = np.dot(new_embedding, existing_embedding) / (
+                    np.linalg.norm(new_embedding) * np.linalg.norm(existing_embedding)
+                )
+
+                # Use 0.88 threshold as specified in requirements
+                if similarity > 0.88:
+                    print(
+                        f"🔍 DEBUG: High similarity detected: {similarity:.3f} (threshold: 0.88)"
+                    )
                     return True
-        except Exception:
-            pass
+
+        except Exception as e:
+            print(f"🔍 DEBUG: Similarity check failed: {e}")
+            # Fallback to simple text comparison
+            for insight in recent_insights:
+                if (
+                    insight.content
+                    and len(
+                        set(content.lower().split())
+                        & set(insight.content.lower().split())
+                    )
+                    > len(content.split()) * 0.7
+                ):
+                    return True
+
         return False
 
     def trigger_reflection(self) -> Optional[str]:
         """
-        Manually trigger PMM reflection process with a short timeout to avoid UI stalls.
-
-        Returns the generated insight content or None if reflection times out or fails.
+        Trigger reflection with atomic validation, cooldown, and TTL management.
         """
-        result: Dict[str, Optional[Any]] = {"insight": None, "error": None}
+        if not hasattr(self.pmm, "model") or not self.pmm.model:
+            return None
 
-        def _worker():
-            try:
-                print("🔍 DEBUG: Worker thread starting reflect_once...")
-                insight_obj = reflect_once(self.pmm, OpenAIAdapter())
-                print(
-                    f"🔍 DEBUG: reflect_once returned: {type(insight_obj)} - {bool(insight_obj)}"
-                )
-                result["insight"] = insight_obj
-            except Exception as e:
-                print(f"🔍 DEBUG: Worker thread exception: {e}")
-                result["error"] = str(e)
-                result["insight"] = None
+        # Get active model config - fail fast if missing
+        from pmm.llm_factory import get_llm_factory
 
-        try:
-            print("🔍 DEBUG: Starting reflection worker thread...")
-            # Try up to 3 attempts to avoid near-duplicate insights
-            attempts = 0
-            while attempts < 3:
-                result["insight"] = None
-                result["error"] = None
-                t = Thread(target=_worker, daemon=True)
-                t.start()
-                t.join(timeout=15.0)  # Increased timeout for gpt-4o-mini
+        llm_factory = get_llm_factory()
+        active_model_config = llm_factory.get_active_config()
 
-                if t.is_alive():
-                    print("🔍 DEBUG: Reflection timed out after 15 seconds")
-                    return None
-
-                print(f"🔍 DEBUG: Worker completed. Error: {result.get('error')}")
-                insight = result.get("insight")
-                print(f"🔍 DEBUG: Insight object: {type(insight)} - {bool(insight)}")
-
-                if not insight:
-                    break
-
-                content = insight.content.strip()
-                if not self._is_similar_to_recent_insights(content):
-                    # Accept, persist, update contexts
-                    print(
-                        f"🔍 DEBUG: Insight content length: {len(content)} - ACCEPTED (novel)"
-                    )
-                    self._update_personality_context()
-                    self._update_commitment_context()
-                    return content
-                else:
-                    print(
-                        f"🔍 DEBUG: Insight too similar to recent ones, retrying... (attempt {attempts + 1}/3)"
-                    )
-                    attempts += 1
-
-            # If all attempts were too similar, skip persisting a duplicate
+        if (
+            not active_model_config
+            or not active_model_config.get("name")
+            or not active_model_config.get("provider")
+        ):
             print(
-                "🔍 DEBUG: All reflection attempts were too similar - skipping duplicate"
+                f"🔍 DEBUG: No valid active model config for reflection: {active_model_config}"
             )
             return None
-        except Exception as e:
-            print(f"🔍 DEBUG: trigger_reflection exception: {e}")
-        return None
+
+        # Build current context for cooldown check - use PMM's own event history
+        try:
+            recent_events = self.pmm.model.self_knowledge.autobiographical_events[-3:]
+            current_context = " ".join(
+                [getattr(event, "summary", str(event)) for event in recent_events]
+            )
+        except (AttributeError, IndexError):
+            current_context = ""
+
+        # Check reflection cooldown gates
+        should_reflect, cooldown_reason = self.reflection_cooldown.should_reflect(
+            current_context
+        )
+        if not should_reflect:
+            print(f"🔍 DEBUG: Reflection blocked by cooldown - {cooldown_reason}")
+            # Always increment turn counter even when blocked
+            self.reflection_cooldown.increment_turn()
+            return None
+
+        print(f"🔍 DEBUG: Reflection cooldown passed - {cooldown_reason}")
+
+        def _worker():
+            success = False
+            try:
+                # Generate insight with current model config
+                insight_obj = reflect_once(self.pmm, None, active_model_config)
+
+                if not insight_obj or not insight_obj.content:
+                    print("🔍 DEBUG: No insight generated")
+                    return
+
+                content = insight_obj.content.strip()
+                if len(content) < 10:
+                    print("🔍 DEBUG: Insight too short, skipping")
+                    return
+
+                # Apply n-gram ban filtering
+                model_name = active_model_config.get("name", "unknown")
+                filtered_content, ban_replacements = self.ngram_ban.postprocess_style(
+                    content, model_name
+                )
+                if ban_replacements:
+                    print(f"🔍 DEBUG: N-gram ban applied: {ban_replacements}")
+                    content = filtered_content
+
+                # Atomic reflection validation and persistence
+                success = self.atomic_reflection.add_insight(
+                    content, active_model_config, active_model_config.get("epoch", 0)
+                )
+                if success:
+                    # Update baselines with current IAS/GAS
+                    emergence_context = self.pmm.get_emergence_context()
+                    if emergence_context:
+                        ias = emergence_context.get("ias", 0.0)
+                        gas = emergence_context.get("gas", 0.0)
+                        self.model_baselines.add_scores(model_name, ias, gas)
+
+                        # Calculate emergence profile
+                        profile = self.emergence_stages.calculate_emergence_profile(
+                            model_name, ias, gas
+                        )
+                        print(
+                            f"🔍 DEBUG: Emergence stage: {profile.stage.value} (confidence: {profile.confidence:.2f})"
+                        )
+
+                    print(f"🔍 DEBUG: Insight atomically persisted: {content[:100]}...")
+                else:
+                    print("🔍 DEBUG: Insight rejected by atomic validation")
+
+            except Exception as e:
+                print(f"🔍 DEBUG: Reflection error: {e}")
+            finally:
+                print(f"🔍 DEBUG: Reflection completed, insight: {success}")
+
+        # Run in background thread
+        import threading
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
+        return "reflection_triggered"
 
     @property
     def memory_variables(self) -> List[str]:

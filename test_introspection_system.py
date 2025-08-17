@@ -103,7 +103,7 @@ def test_introspection_commands():
         try:
             os.unlink(db_path)
             os.unlink(db_path.replace(".db", ".json"))
-        except:
+        except Exception:
             pass
 
 
@@ -170,7 +170,7 @@ def test_automatic_introspection():
         try:
             os.unlink(db_path)
             os.unlink(db_path.replace(".db", ".json"))
-        except:
+        except Exception:
             pass
 
 

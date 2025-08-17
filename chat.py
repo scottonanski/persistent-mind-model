@@ -268,6 +268,73 @@ def main():
     else:  # openai
         llm = ChatOpenAI(model=model_name, temperature=0.7)
 
+    # Set active config in LLM factory for reflection system
+    from pmm.llm_factory import get_llm_factory
+    from pmm.embodiment import extract_model_family
+    from pmm.bridges import BridgeManager
+    from pmm.model_config import ModelConfig
+
+    llm_factory = get_llm_factory()
+
+    # Extract family and version from model name
+    family = extract_model_family(model_name)
+    version = "unknown"  # Could be extracted from model_config if available
+
+    # Create enhanced config with family info
+    enhanced_config = {
+        "name": model_name,
+        "provider": model_config.provider,
+        "family": family,
+        "version": version,
+        "epoch": llm_factory.get_current_epoch(),
+    }
+
+    # Set active config
+    prev_config = None
+    try:
+        prev_config = llm_factory.get_active_config()
+    except Exception:
+        pass
+
+    llm_factory.set_active_config(enhanced_config)
+
+    # Initialize bridge manager for embodiment-aware rendering
+    bridge_manager = BridgeManager(
+        factory=llm_factory,
+        storage=pmm_memory,
+        cooldown=pmm_memory.reflection_cooldown,
+        ngram_ban=pmm_memory.ngram_ban,
+        stages=pmm_memory.emergence_stages,
+    )
+
+    # Handle model switch
+    if prev_config:
+        prev_model_config = ModelConfig(
+            provider=prev_config.get("provider", "unknown"),
+            name=prev_config.get("name", "unknown"),
+            family=prev_config.get("family", "unknown"),
+            version=prev_config.get("version", "unknown"),
+            epoch=prev_config.get("epoch", 0),
+        )
+        curr_model_config = ModelConfig(
+            provider=enhanced_config["provider"],
+            name=enhanced_config["name"],
+            family=enhanced_config["family"],
+            version=enhanced_config["version"],
+            epoch=enhanced_config["epoch"],
+        )
+        bridge_manager.on_switch(prev_model_config, curr_model_config)
+    else:
+        # First initialization
+        curr_model_config = ModelConfig(
+            provider=enhanced_config["provider"],
+            name=enhanced_config["name"],
+            family=enhanced_config["family"],
+            version=enhanced_config["version"],
+            epoch=enhanced_config["epoch"],
+        )
+        bridge_manager.on_switch(None, curr_model_config)
+
     # Create enhanced system prompt with PMM context
     def get_pmm_system_prompt():
         # Always pull fresh memory right before each call
@@ -494,6 +561,46 @@ def main():
                         llm = OllamaLLM(model=model_config.name, temperature=0.7)
                     else:  # openai
                         llm = ChatOpenAI(model=model_config.name, temperature=0.7)
+
+                    # Update active config in LLM factory for reflection system
+                    from pmm.llm_factory import get_llm_factory
+                    from pmm.embodiment import extract_model_family
+
+                    llm_factory = get_llm_factory()
+
+                    # Extract family from model name
+                    family = extract_model_family(model_name)
+
+                    # Get previous config for bridge handover
+                    prev_config = llm_factory.get_active_config()
+
+                    # Update active config with family info
+                    enhanced_config = {
+                        "name": model_name,
+                        "provider": model_config.provider,
+                        "family": family,
+                        "version": "unknown",
+                        "epoch": llm_factory.get_current_epoch(),
+                    }
+                    llm_factory.set_active_config(enhanced_config)
+
+                    # Handle model switch through bridge manager
+                    if prev_config:
+                        prev_model_config = ModelConfig(
+                            provider=prev_config.get("provider", "unknown"),
+                            name=prev_config.get("name", "unknown"),
+                            family=prev_config.get("family", "unknown"),
+                            version=prev_config.get("version", "unknown"),
+                            epoch=prev_config.get("epoch", 0),
+                        )
+                        curr_model_config = ModelConfig(
+                            provider=enhanced_config["provider"],
+                            name=enhanced_config["name"],
+                            family=enhanced_config["family"],
+                            version=enhanced_config["version"],
+                            epoch=enhanced_config["epoch"],
+                        )
+                        bridge_manager.on_switch(prev_model_config, curr_model_config)
 
                     # Refresh conversation history with updated system prompt
                     conversation_history[0] = {

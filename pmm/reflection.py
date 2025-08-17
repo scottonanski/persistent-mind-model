@@ -132,7 +132,9 @@ def _build_context(mgr: SelfModelManager) -> str:
 PROMPT = """Produce one concise, first-person meta-insight (≤3 sentences) about my evolving behavior or mindset.\nGround it in the CONTEXT; avoid fluff and poetry. CRITICAL: Reference specific recent events by their IDs (e.g., "Based on event ev123...") or commitment hashes.\nIf nothing new stands out, briefly acknowledge steadiness but add one specific micro-adjustment to try next. Vary wording across runs.\n\nCONTEXT:\n"""
 
 
-def reflect_once(mgr: SelfModelManager, llm: OpenAIAdapter) -> Insight | None:
+def reflect_once(
+    mgr: SelfModelManager, llm: OpenAIAdapter = None, active_model_config: dict = None
+) -> Insight | None:
     ctx = _build_context(mgr)
 
     # Enhanced n-gram cache from last 8 insights
@@ -167,6 +169,15 @@ def reflect_once(mgr: SelfModelManager, llm: OpenAIAdapter) -> Insight | None:
     if ngram_cache:
         recent_phrases = list(ngram_cache)[:15]  # Limit context size
         ctx += f"\n\nAVOID repeating these recent phrases: {', '.join(recent_phrases)}"
+
+    # Use provided LLM or create one based on active model config
+    if llm is None:
+        if active_model_config and active_model_config.get("provider") == "ollama":
+            from .adapters.ollama_adapter import OllamaAdapter
+
+            llm = OllamaAdapter(model=active_model_config.get("name", "gemma3:4b"))
+        else:
+            llm = OpenAIAdapter()
 
     txt = llm.chat(system=sys, user=PROMPT + ctx)
     if not txt:

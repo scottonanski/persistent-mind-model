@@ -176,9 +176,20 @@ class SelfModelManager:
             for k, v in patterns.items():
                 model.self_knowledge.behavioral_patterns[k] = v
 
-            # commitments
-            commitments_data = sk.get("commitments", [])
-            model.self_knowledge.commitments = commitments_data
+            # commitments - ensure it's always a dictionary
+            commitments_data = sk.get("commitments", {})
+            if isinstance(commitments_data, list):
+                # Convert legacy list format to dictionary
+                commitments_dict = {}
+                for i, commitment in enumerate(commitments_data):
+                    if isinstance(commitment, dict) and "id" in commitment:
+                        commitments_dict[commitment["id"]] = commitment
+                    else:
+                        # Generate ID for legacy commitments without IDs
+                        commitments_dict[f"legacy_{i}"] = commitment
+                model.self_knowledge.commitments = commitments_dict
+            else:
+                model.self_knowledge.commitments = commitments_data
 
             # drift_params
             drift = data.get("drift_params", {})
@@ -379,7 +390,19 @@ class SelfModelManager:
         self, text: str, source_insight_id: str, due: Optional[str] = None
     ):
         """Add a new commitment and return its ID."""
-        return self.commitment_tracker.add_commitment(text, source_insight_id, due)
+        cid = self.commitment_tracker.add_commitment(text, source_insight_id, due)
+        if cid:
+            # Sync to model's self_knowledge for persistence
+            commitment = self.commitment_tracker.commitments[cid]
+            self.model.self_knowledge.commitments[cid] = {
+                "text": commitment.text,
+                "created_at": commitment.created_at,
+                "status": commitment.status,
+                "source_insight_id": commitment.source_insight_id,
+                "due": commitment.due,
+            }
+            self.save_model()
+        return cid
 
     def mark_commitment(self, cid: str, status: str, note: Optional[str] = None):
         """Manually mark a commitment as closed/completed."""
@@ -404,17 +427,33 @@ class SelfModelManager:
     def _sync_commitments_from_model(self):
         """Load commitments from model into tracker."""
         with self.lock:
-            for c in self.model.self_knowledge.commitments:
+            for cid, commitment_data in self.model.self_knowledge.commitments.items():
                 try:
-                    self.commitment_tracker.commitments[c["id"]] = c
+                    # Convert dict to Commitment object if needed
+                    if isinstance(commitment_data, dict):
+                        from pmm.commitments import Commitment
+
+                        commitment_obj = Commitment(
+                            cid=cid,
+                            text=commitment_data.get("text", ""),
+                            created_at=commitment_data.get("created_at", ""),
+                            status=commitment_data.get("status", "open"),
+                            source_insight_id=commitment_data.get(
+                                "source_insight_id", ""
+                            ),
+                            due=commitment_data.get("due"),
+                        )
+                        self.commitment_tracker.commitments[cid] = commitment_obj
+                    else:
+                        self.commitment_tracker.commitments[cid] = commitment_data
                 except (KeyError, TypeError):
                     continue
 
     def _sync_commitments_to_model(self):
         """Save commitments from tracker to model."""
         with self.lock:
-            self.model.self_knowledge.commitments = list(
-                self.commitment_tracker.commitments.values()
+            self.model.self_knowledge.commitments = dict(
+                self.commitment_tracker.commitments
             )
 
     # -------- trait management --------

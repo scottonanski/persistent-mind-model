@@ -268,7 +268,7 @@ class CommitmentTracker:
         # Strip markdown formatting first
         clean_text = self._strip_markdown(text)
 
-        # Expanded commitment patterns
+        # Expanded commitment patterns including imperative forms
         commitment_patterns = [
             "i will",
             "next, i will",
@@ -283,6 +283,23 @@ class CommitmentTracker:
             "going forward, i will",
             "moving forward, i will",
         ]
+
+        # Imperative commitment patterns (user requesting AI to make commitment)
+        imperative_patterns = [
+            r"\b(?:make|set)\s+(?:a\s+)?commitment\s+(?:to\s+yourself\s+)?to\s+(.+?)(?:[.!?]|$)",
+        ]
+
+        # Check for imperative commitment requests first
+        import re
+
+        for pattern in imperative_patterns:
+            match = re.search(pattern, clean_text, re.IGNORECASE)
+            if match:
+                imperative_text = match.group(1).strip()
+                # Convert to first person commitment
+                commitment_text = f"I will {imperative_text}"
+                if self._is_valid_commitment(commitment_text):
+                    return commitment_text, self._generate_ngrams(commitment_text)
 
         # First, try to extract commitment from the whole text
         if any(starter in clean_text.lower() for starter in commitment_patterns):
