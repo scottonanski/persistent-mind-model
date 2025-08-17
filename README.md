@@ -14,7 +14,7 @@ For a deeper architectural overview and roadmap-style notes, see:
 Plain-English overview of key concepts:
 - [🧠 PMM Glossary (Plain English)](PMM_Glossary.md)
 
-Independent technical analysis:
+Technical analysis (ChatGPT-5):
 - [📊 Technical Analysis: PMM Architecture & Innovation](TECHNICAL_ANALYSIS.md)
 
 
