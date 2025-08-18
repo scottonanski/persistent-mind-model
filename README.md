@@ -10,7 +10,7 @@
 
 Think of PMM as a personal persistent AI assistant that maintains a consistent identity and behavior, extended and adapted through time, across diverse operational contexts. Users may employ external API endpoints or local LLMs that serve as substrate engines feeding persistence, while PMM develops a customized persona free from vendor lock-in.
 
-Simply put, it attemps to address key challenges in LLM applications, such as maintaining consistent model personality, memory, and commitments across different models, sessions and devices.
+Simply put, it attemps to address key challenges in LLM applications, such as maintaining consistent model personality, memory, and commitments across different models, sessions, and devices.
 
 Plain-English overview of key concepts:
 - [🧠 PMM Glossary (Plain English)](PMM_Glossary.md)
