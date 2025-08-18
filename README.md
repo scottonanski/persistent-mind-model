@@ -12,14 +12,14 @@ Think of PMM as a personal persistent AI assistant that maintains a consistent i
 
 Simply put, it attemps to address key challenges in LLM applications, such as maintaining consistent model personality, memory, commitments across different models and sessions.
 
-For a deeper architectural overview and roadmap-style notes, see:
-- [Persistent Mind Model (PMM) Project Considerations — Moving Forward](Persistent%20Mind%20Model%20(PMM)%20Project%20Considerations%20-%20Moving%20Forward.md)
-
 Plain-English overview of key concepts:
 - [🧠 PMM Glossary (Plain English)](PMM_Glossary.md)
 
 Technical analysis (ChatGPT-5):
 - [📊 Technical Analysis: PMM Architecture & Innovation](TECHNICAL_ANALYSIS.md)
+
+- For a deeper architectural overview and roadmap-style notes, see:
+   [Persistent Mind Model (PMM) Project Considerations — Moving Forward](Persistent%20Mind%20Model%20(PMM)%20Project%20Considerations%20-%20Moving%20Forward.md)
 
 
 ## Why this matters
