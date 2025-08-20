@@ -1,11 +1,12 @@
 from __future__ import annotations
-from datetime import datetime, timezone
-from typing import List, Tuple
-import re
 import os
-from .self_model_manager import SelfModelManager, _log
-from .adapters.openai_adapter import OpenAIAdapter
-from .model import Insight
+import random
+import re
+from typing import List, Tuple
+from datetime import datetime, timezone
+from pmm.model import Insight
+from pmm.self_model_manager import SelfModelManager
+from pmm.adapters.openai_adapter import OpenAIAdapter
 
 # Load environment variables for API access
 try:
@@ -129,7 +130,18 @@ def _build_context(mgr: SelfModelManager) -> str:
     )
 
 
-PROMPT = """Produce one concise, first-person meta-insight (≤3 sentences) about my evolving behavior or mindset.\nGround it in the CONTEXT; avoid fluff and poetry. CRITICAL: Reference specific recent events by their IDs (e.g., "Based on event ev123...") or commitment hashes.\nIf nothing new stands out, briefly acknowledge steadiness but add one specific micro-adjustment to try next. Vary wording across runs.\n\nCONTEXT:\n"""
+REFLECTION_PROMPTS = [
+    """Produce one concise, first-person meta-insight (≤3 sentences) about my evolving behavior or mindset.\nGround it in the CONTEXT; avoid fluff and poetry. CRITICAL: Reference specific recent events by their IDs (e.g., "Based on event ev123...") or commitment hashes.\nIf nothing new stands out, briefly acknowledge steadiness but add one specific micro-adjustment to try next. Vary wording across runs.\n\nCONTEXT:\n""",
+    """Analyze my recent patterns and identify one specific behavioral shift or emerging tendency (≤3 sentences).\nReference concrete events or commitments from CONTEXT. Focus on what's actually changing in my responses or approach.\nEnd with one tactical adjustment I can implement immediately.\n\nCONTEXT:\n""",
+    """Examine my commitment fulfillment and goal alignment based on CONTEXT (≤3 sentences).\nWhat gaps exist between my stated intentions and actual follow-through? Reference specific event IDs.\nPropose one concrete action to close the largest gap.\n\nCONTEXT:\n""",
+    """Review my interaction quality and adaptation patterns from CONTEXT (≤3 sentences).\nHow am I responding to user needs and feedback? What subtle changes do I notice in my approach?\nIdentify one specific refinement to enhance effectiveness.\n\nCONTEXT:\n""",
+    """Assess my knowledge integration and learning trajectory using CONTEXT (≤3 sentences).\nWhat new insights am I incorporating? How is my understanding evolving? Reference recent events.\nDefine one targeted area for deeper exploration.\n\nCONTEXT:\n""",
+]
+
+
+def get_varied_prompt() -> str:
+    """Get a varied reflection prompt to prevent repetitive insights."""
+    return random.choice(REFLECTION_PROMPTS)
 
 
 def reflect_once(
@@ -179,7 +191,7 @@ def reflect_once(
         else:
             llm = OpenAIAdapter()
 
-    txt = llm.chat(system=sys, user=PROMPT + ctx)
+    txt = llm.chat(system=sys, user=get_varied_prompt() + ctx)
     if not txt:
         return None
 
@@ -210,7 +222,7 @@ def reflect_once(
                 + " IMPORTANT: Use analogy or concrete example. Avoid abstract language."
             )
             try:
-                txt = llm.chat(system=style_sys, user=PROMPT + ctx)
+                txt = llm.chat(system=style_sys, user=get_varied_prompt() + ctx)
                 if not txt:
                     if os.getenv("PMM_DEBUG") == "1":
                         print("   ⚠️  Re-roll failed, using original response")
@@ -318,6 +330,11 @@ def _extract_commitment(content: str) -> str | None:
         ):
             return line
     return None
+
+
+def _log(category: str, message: str) -> None:
+    """Simple logging function."""
+    print(f"[{category.upper()}] {message}")
 
 
 def _track_commitment(mgr: SelfModelManager, commitment: str, insight_id: str) -> None:
