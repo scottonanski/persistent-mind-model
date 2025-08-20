@@ -1493,66 +1493,61 @@ class PersistentMindMemory(BaseChatMemory):
 
         print(f"🔍 DEBUG: Reflection cooldown passed - {cooldown_reason}")
 
-        def _worker():
-            success = False
-            try:
-                # Generate insight with current model config
-                insight_obj = reflect_once(self.pmm, None, active_model_config)
+        # Run synchronously to avoid threading issues
+        success = False
+        try:
+            # Generate insight with current model config
+            insight_obj = reflect_once(self.pmm, None, active_model_config)
 
-                if not insight_obj or not insight_obj.content:
-                    print("🔍 DEBUG: No insight generated")
-                    return
+            if not insight_obj or not insight_obj.content:
+                print("🔍 DEBUG: No insight generated")
+                return None
 
-                content = insight_obj.content.strip()
-                if len(content) < 10:
-                    print("🔍 DEBUG: Insight too short, skipping")
-                    return
+            content = insight_obj.content.strip()
+            if len(content) < 10:
+                print("🔍 DEBUG: Insight too short, skipping")
+                return None
 
-                # Apply n-gram ban filtering
-                model_name = active_model_config.get("name", "unknown")
-                filtered_content, ban_replacements = self.ngram_ban.postprocess_style(
-                    content, model_name
-                )
-                if ban_replacements:
-                    print(f"🔍 DEBUG: N-gram ban applied: {ban_replacements}")
-                    content = filtered_content
+            # Apply n-gram ban filtering
+            model_name = active_model_config.get("name", "unknown")
+            filtered_content, ban_replacements = self.ngram_ban.postprocess_style(
+                content, model_name
+            )
+            if ban_replacements:
+                print(f"🔍 DEBUG: N-gram ban applied: {ban_replacements}")
+                content = filtered_content
 
-                # Atomic reflection validation and persistence
-                success = self.atomic_reflection.add_insight(
-                    content, active_model_config, active_model_config.get("epoch", 0)
-                )
-                if success:
-                    # Update baselines with current IAS/GAS
-                    emergence_context = self.pmm.get_emergence_context()
-                    if emergence_context:
-                        ias = emergence_context.get("ias", 0.0)
-                        gas = emergence_context.get("gas", 0.0)
-                        self.model_baselines.add_scores(model_name, ias, gas)
+            # Atomic reflection validation and persistence
+            success = self.atomic_reflection.add_insight(
+                content, active_model_config, active_model_config.get("epoch", 0)
+            )
+            if success:
+                # Update baselines with current IAS/GAS
+                emergence_context = self.pmm.get_emergence_context()
+                if emergence_context:
+                    ias = emergence_context.get("ias", 0.0)
+                    gas = emergence_context.get("gas", 0.0)
+                    self.model_baselines.add_scores(model_name, ias, gas)
 
-                        # Calculate emergence profile
-                        profile = self.emergence_stages.calculate_emergence_profile(
-                            model_name, ias, gas
-                        )
-                        print(
-                            f"🔍 DEBUG: Emergence stage: {profile.stage.value} (confidence: {profile.confidence:.2f})"
-                        )
+                    # Calculate emergence profile
+                    profile = self.emergence_stages.calculate_emergence_profile(
+                        model_name, ias, gas
+                    )
+                    print(
+                        f"🔍 DEBUG: Emergence stage: {profile.stage.value} (confidence: {profile.confidence:.2f})"
+                    )
 
-                    print(f"🔍 DEBUG: Insight atomically persisted: {content[:100]}...")
-                else:
-                    print("🔍 DEBUG: Insight rejected by atomic validation")
+                print(f"🔍 DEBUG: Insight atomically persisted: {content[:100]}...")
+                return content
+            else:
+                print("🔍 DEBUG: Insight rejected by atomic validation")
+                return None
 
-            except Exception as e:
-                print(f"🔍 DEBUG: Reflection error: {e}")
-            finally:
-                print(f"🔍 DEBUG: Reflection completed, insight: {success}")
-
-        # Run in background thread
-        import threading
-
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
-
-        return "reflection_triggered"
+        except Exception as e:
+            print(f"🔍 DEBUG: Reflection error: {e}")
+            return None
+        finally:
+            print(f"🔍 DEBUG: Reflection completed, insight: {success}")
 
     @property
     def memory_variables(self) -> List[str]:
