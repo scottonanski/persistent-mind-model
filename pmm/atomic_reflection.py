@@ -20,7 +20,7 @@ class ReflectionCandidate:
 class AtomicReflectionManager:
     """Manages atomic reflection validation → dedup → persist pipeline."""
 
-    def __init__(self, pmm_manager, embedding_threshold: float = 0.92):
+    def __init__(self, pmm_manager, embedding_threshold: float = 0.85):
         self.pmm = pmm_manager
         self.embedding_threshold = embedding_threshold
         self._lock = threading.Lock()
