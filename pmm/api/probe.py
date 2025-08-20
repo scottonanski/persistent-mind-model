@@ -1,7 +1,8 @@
 from __future__ import annotations
 import json
 from typing import List, Optional
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
+from pydantic import BaseModel
 from dotenv import load_dotenv
 from pmm.storage.sqlite_store import SQLiteStore
 from pmm.storage.integrity import verify_chain
@@ -13,6 +14,17 @@ from pmm.meta_reflection import get_meta_reflection_analyzer
 load_dotenv()
 
 app = FastAPI(title="PMM Probe API", version="0.1.0")
+
+# ---- Pydantic Models ------------------------------------------------------
+
+
+class EvidenceEvent(BaseModel):
+    type: str
+    commitment_id: int
+    text: str
+    source: str
+    meta: dict = {}
+
 
 # ---- Helpers --------------------------------------------------------------
 
@@ -148,9 +160,102 @@ def recent_events(
     return {"items": _load_events(db, limit, kind)}
 
 
+@app.post("/events")
+def create_evidence_event(
+    evidence: EvidenceEvent,
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+):
+    """Create an evidence event to close a commitment with proper hash chaining."""
+    try:
+        store = SQLiteStore(db)
+
+        # Find the commitment to reference
+        commitment_query = """
+        SELECT id, ts, kind, content, meta, prev_hash, hash 
+        FROM events 
+        WHERE kind='commitment' AND id=? 
+        LIMIT 1
+        """
+        commitment_row = list(
+            store.conn.execute(commitment_query, (evidence.commitment_id,))
+        )
+
+        if not commitment_row:
+            raise HTTPException(
+                status_code=404, detail=f"Commitment {evidence.commitment_id} not found"
+            )
+
+        commitment_dict = _row_to_dict(commitment_row[0])
+        commit_ref_hash = commitment_dict["hash"]
+
+        # Build evidence metadata with commitment reference
+        evidence_meta = evidence.meta.copy()
+        evidence_meta["commit_ref"] = commit_ref_hash
+        evidence_meta["commitment_id"] = evidence.commitment_id
+
+        # Use enhanced SQLite store with automatic hash generation and chain integrity
+        result = store.append_event(
+            kind="evidence", content=evidence.text, meta=evidence_meta
+        )
+
+        return {
+            "success": True,
+            "event_id": result["event_id"],
+            "hash": result["hash"],
+            "prev_hash": result["prev_hash"],
+            "commit_ref": commit_ref_hash,
+            "timestamp": result["timestamp"],
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/commitments")
-def commitments(db: str = Query("pmm.db"), limit: int = Query(100, ge=1, le=500)):
-    return {"items": _commitments_with_status(db, limit)}
+def commitments(
+    db: str = Query("pmm.db"),
+    limit: int = Query(100, ge=1, le=500),
+    status: Optional[str] = Query(None, description="Filter by status: open|closed"),
+    fields: Optional[str] = Query(None, description="Comma-separated fields to return"),
+):
+    items = _commitments_with_status(db, limit)
+
+    # Filter out test fixtures and invalid entries
+    filtered_items = []
+    for item in items:
+        # Skip test fixtures
+        if item.get("meta", {}).get("commitment_id") == "test_commit":
+            continue
+        # Skip invalid hashes (not 64-char hex)
+        if (
+            not item.get("hash", "").replace("-", "").isalnum()
+            or len(item.get("hash", "")) != 64
+        ):
+            continue
+        # Skip entries with null prev_hash (except intentional genesis)
+        if item.get("prev_hash") is None and item.get("id", 0) > 1:
+            continue
+
+        filtered_items.append(item)
+
+    # Apply status filter if specified
+    if status:
+        filtered_items = [
+            item for item in filtered_items if item.get("status") == status
+        ]
+
+    # Apply field projection if specified
+    if fields:
+        field_list = [f.strip() for f in fields.split(",")]
+        projected_items = []
+        for item in filtered_items:
+            projected = {
+                field: item.get(field) for field in field_list if field in item
+            }
+            projected_items.append(projected)
+        filtered_items = projected_items
+
+    return {"items": filtered_items}
 
 
 # PHASE 3B+: Identity endpoint to verify current agent name

@@ -37,23 +37,19 @@ def test_emergence_analyzer_commitment_close_rate():
         # Initialize SQLite store and create schema
         store = SQLiteStore(db_path)
 
-        # Insert test commitment
-        commitment_hash = "abc123def456"
-        store.append_event(
+        # Insert test commitment (server generates hash)
+        commitment_result = store.append_event(
             kind="commitment",
             content="Next, I will complete the Phase 3C implementation",
             meta={"commitment_id": "test_commit_1"},
-            hsh=commitment_hash,
-            prev="prev123",
         )
+        commitment_hash = commitment_result["hash"]
 
-        # Insert evidence referencing the commitment
+        # Insert evidence referencing the commitment (using actual generated hash)
         store.append_event(
             kind="evidence",
             content="Done: Phase 3C implementation completed successfully",
             meta={"commit_ref": commitment_hash, "evidence_type": "done"},
-            hsh="evidence123",
-            prev=commitment_hash,
         )
 
         # Test analyzer
@@ -68,8 +64,6 @@ def test_emergence_analyzer_commitment_close_rate():
             kind="commitment",
             content="Next, I will test without evidence",
             meta={"commitment_id": "test_commit_2"},
-            hsh="unclosed456",
-            prev="evidence123",
         )
 
         close_rate_partial = analyzer.commitment_close_rate(window=10)

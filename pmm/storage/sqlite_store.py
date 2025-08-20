@@ -62,22 +62,59 @@ class SQLiteStore:
         kind: str,
         content: str,
         meta: Dict[str, Any],
-        hsh: str,
-        prev: Optional[str],
+        hsh: Optional[str] = None,
+        prev: Optional[str] = None,
         *,
         summary: Optional[str] = None,
         keywords: Optional[list] = None,
         embedding: Optional[bytes] = None,
     ):
-        """Append new event to the chain.
+        """Append new event to the chain with automatic hash generation and chain integrity.
 
         summary/keywords/embedding are optional and persisted when available.
         keywords will be JSON-encoded for storage.
+
+        Hash and prev_hash are computed server-side for integrity.
         """
+        import hashlib
+
         kw_json = json.dumps(keywords or [], ensure_ascii=False)
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
         with self._lock:
-            self.conn.execute(
+            # Get latest hash for chain integrity
+            if prev is None:
+                prev = self.latest_hash()
+
+            # Validate chain integrity (reject if prev_hash is null except for genesis)
+            if prev is None:
+                event_count = self.conn.execute(
+                    "SELECT COUNT(*) FROM events"
+                ).fetchone()[0]
+                if event_count > 0:
+                    raise ValueError(
+                        "Chain integrity violation: prev_hash cannot be null for non-genesis events"
+                    )
+
+            # Create canonical event for hashing
+            event_data = {
+                "ts": ts,
+                "kind": kind,
+                "content": content,
+                "meta": meta,
+                "prev_hash": prev,
+            }
+
+            # Generate proper SHA-256 hash server-side
+            canonical_json = json.dumps(
+                event_data, sort_keys=True, separators=(",", ":")
+            )
+            computed_hash = hashlib.sha256(canonical_json.encode()).hexdigest()
+
+            # Use computed hash (ignore user-provided hash for security)
+            final_hash = computed_hash
+
+            cursor = self.conn.execute(
                 """
                 INSERT INTO events(ts,kind,content,meta,prev_hash,hash,summary,keywords,embedding)
                 VALUES(?,?,?,?,?,?,?,?,?)
@@ -88,13 +125,20 @@ class SQLiteStore:
                     content,
                     json.dumps(meta, ensure_ascii=False),
                     prev,
-                    hsh,
+                    final_hash,
                     summary,
                     kw_json,
                     embedding,
                 ),
             )
             self.conn.commit()
+
+            return {
+                "event_id": cursor.lastrowid,
+                "hash": final_hash,
+                "prev_hash": prev,
+                "timestamp": ts,
+            }
 
     def all_events(self):
         """Get all events in chronological order."""
