@@ -244,6 +244,7 @@ class CommitmentTracker:
             "my goal is to",
             "going forward, i will",
             "moving forward, i will",
+            "i acknowledge",  # Add for acknowledgment-based commitments
         ]
         has_ownership = any(
             indicator in text_lower for indicator in ownership_indicators
@@ -282,6 +283,14 @@ class CommitmentTracker:
             "i shall",
             "going forward, i will",
             "moving forward, i will",
+            # Add patterns for acknowledgment-based commitments
+            "i acknowledge",
+            "registered!",
+            "as a permanent commitment",
+            "as a permanent directive",
+            "permanent commitment",
+            "permanent directive",
+            "guiding principle",
         ]
 
         # Imperative commitment patterns (user requesting AI to make commitment)
@@ -622,14 +631,16 @@ class CommitmentTracker:
         """Get all open commitments."""
         return [
             {
-                "cid": c.cid,
-                "text": c.text,
-                "created_at": c.created_at,
-                "source_insight_id": c.source_insight_id,
-                "due": c.due,
+                "cid": c.cid if hasattr(c, "cid") else str(c),
+                "text": c.text if hasattr(c, "text") else str(c),
+                "created_at": c.created_at if hasattr(c, "created_at") else "",
+                "source_insight_id": (
+                    c.source_insight_id if hasattr(c, "source_insight_id") else ""
+                ),
+                "due": c.due if hasattr(c, "due") else None,
             }
             for c in self.commitments.values()
-            if c.status == "open"
+            if hasattr(c, "status") and c.status == "open"
         ]
 
     def get_commitment_metrics(self) -> Dict:
@@ -692,7 +703,8 @@ class CommitmentTracker:
 
             if is_legacy or is_invalid:
                 # Archive with hygiene metadata
-                commitment.status = "archived_legacy"
+                if hasattr(commitment, "status"):
+                    commitment.status = "archived_legacy"
                 commitment.closed_at = datetime.now(timezone.utc).strftime(
                     "%Y-%m-%dT%H:%M:%SZ"
                 )

@@ -41,6 +41,7 @@ from pydantic import Field
 from .self_model_manager import SelfModelManager
 from .reflection import reflect_once
 from .commitments import CommitmentTracker
+from .integrated_directive_system import IntegratedDirectiveSystem
 from .semantic_analysis import get_semantic_analyzer
 from .introspection import IntrospectionEngine, IntrospectionConfig
 from .phrase_deduper import PhraseDeduper
@@ -63,6 +64,7 @@ class PersistentMindMemory(BaseChatMemory):
     """
 
     pmm: SelfModelManager = Field(default=None, exclude=True)
+    directive_system: IntegratedDirectiveSystem = Field(default=None, exclude=True)
     introspection: IntrospectionEngine = Field(default=None, exclude=True)
     personality_context: str = Field(default="")
     commitment_context: str = Field(default="")
@@ -103,6 +105,9 @@ class PersistentMindMemory(BaseChatMemory):
         """
         super().__init__()
         self.pmm = SelfModelManager(agent_path)
+        self.directive_system = IntegratedDirectiveSystem(
+            storage_manager=self.pmm.sqlite_store
+        )
         self.enable_summary = bool(enable_summary)
         self.enable_embeddings = bool(enable_embeddings)
 
@@ -706,38 +711,49 @@ class PersistentMindMemory(BaseChatMemory):
             new_commitment_text = None
             if not is_non_behavioral:
                 try:
-                    tracker = CommitmentTracker()
-                    # Check user input first
-                    new_commitment_text, _ = tracker.extract_commitment(human_input)
-                    if new_commitment_text:
+                    # Use integrated directive system instead of old CommitmentTracker
+                    detected_directives = self.directive_system.process_response(
+                        user_message=human_input,
+                        ai_response=ai_output,
+                        event_id=f"langchain_{self.conversation_count}",
+                    )
+
+                    if detected_directives:
                         print(
-                            f"🔍 DEBUG: Found commitment in user input: {new_commitment_text}"
+                            f"🔍 DEBUG: Detected {len(detected_directives)} directives:"
                         )
+                        for directive in detected_directives:
+                            print(
+                                f"  - {directive.__class__.__name__}: {directive.content[:80]}..."
+                            )
+
+                            # Add to PMM for backward compatibility
+                            if hasattr(directive, "content"):
+                                self.pmm.add_commitment(
+                                    text=directive.content,
+                                    source_insight_id="langchain_interaction",
+                                )
+                                new_commitment_text = directive.content
+                    else:
+                        print("🔍 DEBUG: No directives found in conversation")
+
+                    # Check for evolution triggers
+                    evolution_triggered = (
+                        self.directive_system.trigger_evolution_if_needed()
+                    )
+                    if evolution_triggered:
+                        print("🔍 DEBUG: Meta-principle triggered natural evolution")
+
+                except Exception as e:
+                    print(f"🔍 DEBUG: Directive processing error: {e}")
+                    # Fallback to old system
+                    tracker = CommitmentTracker()
+                    new_commitment_text, _ = tracker.extract_commitment(ai_output)
+                    if new_commitment_text:
                         self.pmm.add_commitment(
                             text=new_commitment_text,
                             source_insight_id="langchain_interaction",
                         )
-                    else:
-                        # Check AI response for commitments
-                        ai_commitment_text, _ = tracker.extract_commitment(ai_output)
-                        if ai_commitment_text:
-                            print(
-                                f"🔍 DEBUG: Found commitment in AI response: {ai_commitment_text}"
-                            )
-                            self.pmm.add_commitment(
-                                text=ai_commitment_text,
-                                source_insight_id="langchain_interaction",
-                            )
-                            new_commitment_text = (
-                                ai_commitment_text  # Set for reflection trigger
-                            )
-                        else:
-                            print(
-                                f"🔍 DEBUG: No commitment found in: {human_input[:100]}..."
-                            )
-                except Exception as e:
-                    print(f"🔍 DEBUG: Commitment extraction error: {e}")
-                    pass
 
                 try:
                     evidence_events = self._process_evidence_events(human_input)
@@ -1101,6 +1117,39 @@ class PersistentMindMemory(BaseChatMemory):
 
         if self.commitment_context:
             pmm_context_parts.append(self.commitment_context)
+
+        # Add directive hierarchy context
+        try:
+            self.directive_system.get_directive_summary()
+
+            # Add meta-principles
+            meta_principles = self.directive_system.get_meta_principles()
+            if meta_principles:
+                mp_text = "Core Meta-Principles (evolutionary self-rules):\n"
+                for mp in meta_principles[:3]:  # Top 3 most important
+                    mp_text += f"• {mp['content']}\n"
+                pmm_context_parts.append(mp_text)
+
+            # Add active principles
+            principles = self.directive_system.get_active_principles()
+            if principles:
+                p_text = "Active Guiding Principles:\n"
+                for p in principles[:5]:  # Top 5 most important
+                    p_text += f"• {p['content']}\n"
+                pmm_context_parts.append(p_text)
+
+            # Add active commitments with new format
+            commitments = self.directive_system.get_active_commitments()
+            if commitments:
+                c_text = "Current Behavioral Commitments:\n"
+                for c in commitments[:8]:  # Top 8 most recent
+                    c_text += f"• {c['text']}\n"
+                pmm_context_parts.append(c_text)
+
+        except Exception as e:
+            print(f"🔍 DEBUG: Failed to load directive context: {e}")
+            # Fallback to legacy commitment loading
+            pass
 
         # Load conversation history using hybrid approach: semantic + chronological
         try:

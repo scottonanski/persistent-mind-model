@@ -56,8 +56,9 @@ class SelfModelManager:
                     f"🔍 DEBUG: Archived {len(archived)} legacy commitments on startup"
                 )
                 self.save_model()  # Persist the archival
-        except Exception as e:
-            print(f"Warning: Failed to archive legacy commitments: {e}")
+        except Exception:
+            # Silently handle archival errors - not critical for operation
+            pass
 
     # -------- persistence --------
     def load_model(self) -> PersistentMindModel:
@@ -411,6 +412,62 @@ class SelfModelManager:
     def get_open_commitments(self):
         """Get all open commitments."""
         return self.commitment_tracker.get_open_commitments()
+
+    def purge_legacy_commitments(self):
+        """Permanently remove legacy commitments that don't align with autonomous development."""
+        legacy_phrases = [
+            "daily reflection practice",
+            "weekly review",
+            "unfamiliar individuals",
+            "engage in brief",
+            "daily conversations",
+            "expand my network",
+            "enhance engagement",
+            "seek feedback",
+            "solicit feedback",
+            "initiate conversations",
+            "challenge my comfort zone",
+            "enrich my social perspective",
+            "outside my usual circle",
+            "feedback for improvement",
+            "actively solicit feedback",
+            "guide my understanding",
+        ]
+
+        # Get all commitments and mark legacy ones as closed
+        all_commitments = self.commitment_tracker.commitments.copy()
+        purged_count = 0
+
+        for cid, commitment in all_commitments.items():
+            commitment_text = (
+                commitment.text if hasattr(commitment, "text") else str(commitment)
+            )
+            if any(phrase in commitment_text.lower() for phrase in legacy_phrases):
+                self.commitment_tracker.mark_commitment(
+                    cid, "closed", "Purged legacy commitment"
+                )
+                purged_count += 1
+
+        # Also remove from model's commitments list
+        if hasattr(self.model.self_knowledge, "commitments"):
+            original_count = len(self.model.self_knowledge.commitments)
+            self.model.self_knowledge.commitments = [
+                c
+                for c in self.model.self_knowledge.commitments
+                if not any(
+                    phrase
+                    in (c.get("text", "") if isinstance(c, dict) else str(c)).lower()
+                    for phrase in legacy_phrases
+                )
+            ]
+            model_purged = original_count - len(self.model.self_knowledge.commitments)
+            purged_count += model_purged
+
+        if purged_count > 0:
+            self.save_model()
+            print(f"🧹 Purged {purged_count} legacy commitments")
+
+        return purged_count
 
     def auto_close_commitments_from_event(self, event_text: str):
         """Auto-close commitments mentioned in event descriptions."""

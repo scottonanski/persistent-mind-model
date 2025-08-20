@@ -15,10 +15,26 @@ CREATE TABLE IF NOT EXISTS events (
   prev_hash TEXT,             -- hex
   hash TEXT NOT NULL          -- hex
 );
+CREATE TABLE IF NOT EXISTS directives (
+  id TEXT PRIMARY KEY,        -- UUID
+  type TEXT NOT NULL,         -- 'meta-principle' | 'principle' | 'commitment'
+  content TEXT NOT NULL,      -- directive text
+  created_at TEXT NOT NULL,   -- ISO timestamp
+  status TEXT NOT NULL,       -- 'active' | 'inactive' | 'evolved'
+  parent_id TEXT,             -- references directives.id for hierarchy
+  source_event_id TEXT,       -- references events.id
+  metadata TEXT,              -- JSON: additional properties
+  FOREIGN KEY (parent_id) REFERENCES directives(id),
+  FOREIGN KEY (source_event_id) REFERENCES events(id)
+);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_hash ON events(hash);
 CREATE INDEX IF NOT EXISTS idx_events_prev_hash ON events(prev_hash);
 CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
+CREATE INDEX IF NOT EXISTS idx_directives_type ON directives(type);
+CREATE INDEX IF NOT EXISTS idx_directives_status ON directives(status);
+CREATE INDEX IF NOT EXISTS idx_directives_parent ON directives(parent_id);
+CREATE INDEX IF NOT EXISTS idx_directives_created ON directives(created_at);
 """
 
 
@@ -280,3 +296,93 @@ class SQLiteStore:
 
     def __exit__(self, exc_type, exc, tb):
         self.close()
+
+    # Directive storage methods
+    def store_directive(
+        self,
+        directive_id: str,
+        directive_type: str,
+        content: str,
+        created_at: str,
+        status: str = "active",
+        parent_id: Optional[str] = None,
+        source_event_id: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ) -> None:
+        """Store a directive in the database."""
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT OR REPLACE INTO directives 
+                (id, type, content, created_at, status, parent_id, source_event_id, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    directive_id,
+                    directive_type,
+                    content,
+                    created_at,
+                    status,
+                    parent_id,
+                    source_event_id,
+                    json.dumps(metadata) if metadata else None,
+                ),
+            )
+            self.conn.commit()
+
+    def get_directives_by_type(
+        self, directive_type: str, status: str = "active"
+    ) -> List[Dict[str, Any]]:
+        """Get all directives of a specific type and status."""
+        with self._lock:
+            rows = list(
+                self.conn.execute(
+                    "SELECT * FROM directives WHERE type = ? AND status = ? ORDER BY created_at DESC",
+                    (directive_type, status),
+                )
+            )
+        return [dict(row) for row in rows]
+
+    def get_directive_hierarchy(
+        self, parent_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get directive hierarchy starting from parent_id (None for root level)."""
+        with self._lock:
+            if parent_id is None:
+                rows = list(
+                    self.conn.execute(
+                        "SELECT * FROM directives WHERE parent_id IS NULL ORDER BY created_at DESC"
+                    )
+                )
+            else:
+                rows = list(
+                    self.conn.execute(
+                        "SELECT * FROM directives WHERE parent_id = ? ORDER BY created_at DESC",
+                        (parent_id,),
+                    )
+                )
+        return [dict(row) for row in rows]
+
+    def update_directive_status(self, directive_id: str, status: str) -> None:
+        """Update the status of a directive."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE directives SET status = ? WHERE id = ?", (status, directive_id)
+            )
+            self.conn.commit()
+
+    def get_directive_by_id(self, directive_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific directive by ID."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM directives WHERE id = ?", (directive_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_all_directives(self) -> List[Dict[str, Any]]:
+        """Get all directives regardless of type or status."""
+        with self._lock:
+            rows = list(
+                self.conn.execute("SELECT * FROM directives ORDER BY created_at DESC")
+            )
+        return [dict(row) for row in rows]
