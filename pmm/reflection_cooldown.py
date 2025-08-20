@@ -25,8 +25,8 @@ class ReflectionCooldownManager:
 
     def __init__(
         self,
-        min_turns: int = 3,
-        min_wall_time_seconds: int = 90,
+        min_turns: int = 1,
+        min_wall_time_seconds: int = 30,
         novelty_threshold: float = 0.82,
         context_window: int = 5,
     ):

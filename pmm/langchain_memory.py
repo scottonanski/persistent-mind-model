@@ -956,7 +956,7 @@ class PersistentMindMemory(BaseChatMemory):
                         print(
                             "🔍 DEBUG: No topic loop detected, proceeding with reflection..."
                         )
-                        insight = self.trigger_reflection()
+                        insight = self._auto_reflect()
                         if insight:
                             if self._is_similar_to_recent_insights(insight):
                                 print(
@@ -1034,9 +1034,18 @@ class PersistentMindMemory(BaseChatMemory):
                             UTC
                         ).isoformat()
                         self.pmm.model.self_knowledge.events_since_reflection = 0
-                        print(
-                            "🔍 DEBUG: Updated reflection bookkeeping for adaptive triggers"
-                        )
+                        # ---- 6) Update commitment context for next turn ----
+                        self._update_commitment_context()
+
+                        # ---- 7) Increment reflection cooldown turn counter ----
+                        if human_input:  # Only increment on actual user turns
+                            self.reflection_cooldown.increment_turn()
+
+                        # ---- 8) Update reflection bookkeeping for adaptive triggers ----
+                        try:
+                            self.adaptive_trigger.update_reflection_bookkeeping()
+                        except Exception:
+                            pass  # Never crash on bookkeeping
                     except Exception as e:
                         print(f"🔍 DEBUG: Failed to update reflection bookkeeping: {e}")
                 else:
@@ -1060,10 +1069,14 @@ class PersistentMindMemory(BaseChatMemory):
         self._update_personality_context()
         self._update_commitment_context()
 
-        # ---- 7) Persist PMM ----
+        # ---- 7) Increment reflection cooldown turn counter ----
+        if human_input:  # Only increment on actual user turns
+            self.reflection_cooldown.increment_turn()
+
+        # ---- 8) Persist PMM ----
         self.pmm.save_model()
 
-        # ---- 8) Keep LangChain compatibility ----
+        # ---- 9) Keep LangChain compatibility ----
         # FIXED: Commented out to prevent hanging - PMM handles all persistence internally
         # super().save_context(inputs, outputs)
 
@@ -1449,9 +1462,10 @@ class PersistentMindMemory(BaseChatMemory):
 
         return False
 
-    def trigger_reflection(self) -> Optional[str]:
+    def _auto_reflect(self) -> Optional[str]:
         """
-        Trigger reflection with atomic validation, cooldown, and TTL management.
+        Internal automatic reflection with atomic validation, cooldown, and TTL management.
+        This method is only called by the adaptive trigger system - no manual invocation.
         """
         if not hasattr(self.pmm, "model") or not self.pmm.model:
             return None
@@ -1487,8 +1501,6 @@ class PersistentMindMemory(BaseChatMemory):
         )
         if not should_reflect:
             print(f"🔍 DEBUG: Reflection blocked by cooldown - {cooldown_reason}")
-            # Always increment turn counter even when blocked
-            self.reflection_cooldown.increment_turn()
             return None
 
         print(f"🔍 DEBUG: Reflection cooldown passed - {cooldown_reason}")
