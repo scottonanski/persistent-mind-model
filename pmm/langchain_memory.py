@@ -1394,71 +1394,40 @@ class PersistentMindMemory(BaseChatMemory):
             return []
 
     def _is_similar_to_recent_insights(self, content: str) -> bool:
-        """Check if content is too similar to recent insights using 0.88 threshold."""
+        """Delegate to AtomicReflectionManager embedding dedup (env-driven threshold).
+
+        Falls back to a simple token-overlap check if the atomic call fails.
+        """
         if not content or not content.strip():
             return True
 
-        # Get recent insights for comparison
-        recent_insights = self.pmm.model.self_knowledge.insights[
-            -8:
-        ]  # Last 8 insights for better dedup
+        # Prefer centralized atomic dedup to ensure parity across the system
+        try:
+            arm = AtomicReflectionManager(self.pmm)
+            is_dup = arm._is_duplicate_embedding(content)
+            if is_dup:
+                # Surface effective threshold for observability
+                print(
+                    f"🔍 DEBUG: High similarity via AtomicReflectionManager (threshold: {arm.embedding_threshold})"
+                )
+            return is_dup
+        except Exception as e:
+            print(f"🔍 DEBUG: Atomic dedup check failed, using fallback: {e}")
+
+        # Fallback to simple text comparison against recent insights
+        recent_insights = self.pmm.model.self_knowledge.insights[-8:]
         if not recent_insights:
             return False
 
-        try:
-            from openai import OpenAI
-
-            client = OpenAI()
-
-            # Get embedding for new content
-            new_embedding = (
-                client.embeddings.create(
-                    input=content.strip(), model="text-embedding-ada-002"
+        for insight in recent_insights:
+            if (
+                getattr(insight, "content", None)
+                and len(
+                    set(content.lower().split()) & set(insight.content.lower().split())
                 )
-                .data[0]
-                .embedding
-            )
-
-            # Compare with recent insights
-            for insight in recent_insights:
-                if not insight.content:
-                    continue
-
-                existing_embedding = (
-                    client.embeddings.create(
-                        input=insight.content.strip(), model="text-embedding-ada-002"
-                    )
-                    .data[0]
-                    .embedding
-                )
-
-                # Calculate cosine similarity
-                import numpy as np
-
-                similarity = np.dot(new_embedding, existing_embedding) / (
-                    np.linalg.norm(new_embedding) * np.linalg.norm(existing_embedding)
-                )
-
-                # Use 0.88 threshold as specified in requirements
-                if similarity > 0.88:
-                    print(
-                        f"🔍 DEBUG: High similarity detected: {similarity:.3f} (threshold: 0.88)"
-                    )
-                    return True
-
-        except Exception as e:
-            print(f"🔍 DEBUG: Similarity check failed: {e}")
-            # Fallback to simple text comparison
-            for insight in recent_insights:
-                if (
-                    insight.content
-                    and len(
-                        set(content.lower().split())
-                        & set(insight.content.lower().split())
-                    )
-                    > len(content.split()) * 0.7
-                ):
-                    return True
+                > len(content.split()) * 0.7
+            ):
+                return True
 
         return False
 
@@ -1501,6 +1470,25 @@ class PersistentMindMemory(BaseChatMemory):
         )
         if not should_reflect:
             print(f"🔍 DEBUG: Reflection blocked by cooldown - {cooldown_reason}")
+            # Telemetry: consolidate attempt even when blocked
+            try:
+                telemetry = os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
+            except Exception:
+                telemetry = False
+            if telemetry:
+                try:
+                    cd_status = self.reflection_cooldown.get_status()
+                    ar_stats = self.atomic_reflection.get_stats()
+                    print(
+                        f"[PMM_TELEMETRY] reflection_attempt: decision=blocked, reason={cooldown_reason}, "
+                        f"turns_gate={cd_status.get('turns_gate_passed')}, time_gate={cd_status.get('time_gate_passed')}, "
+                        f"novelty_threshold={cd_status.get('novelty_threshold')}, "
+                        f"embedding_threshold_effective={ar_stats.get('embedding_threshold_effective'):.3f}, "
+                        f"embedding_threshold_configured={ar_stats.get('embedding_threshold_configured'):.3f}, "
+                        f"adaptive_enabled={ar_stats.get('adaptive_enabled')}"
+                    )
+                except Exception:
+                    pass
             return None
 
         print(f"🔍 DEBUG: Reflection cooldown passed - {cooldown_reason}")
@@ -1550,9 +1538,47 @@ class PersistentMindMemory(BaseChatMemory):
                     )
 
                 print(f"🔍 DEBUG: Insight atomically persisted: {content[:100]}...")
+                # Telemetry: consolidated acceptance line
+                try:
+                    telemetry = os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
+                except Exception:
+                    telemetry = False
+                if telemetry:
+                    try:
+                        cd_status = self.reflection_cooldown.get_status()
+                        ar_stats = self.atomic_reflection.get_stats()
+                        print(
+                            f"[PMM_TELEMETRY] reflection_attempt: decision=accepted, reason={cooldown_reason}, "
+                            f"turns_gate={cd_status.get('turns_gate_passed')}, time_gate={cd_status.get('time_gate_passed')}, "
+                            f"novelty_threshold={cd_status.get('novelty_threshold')}, "
+                            f"embedding_threshold_effective={ar_stats.get('embedding_threshold_effective'):.3f}, "
+                            f"embedding_threshold_configured={ar_stats.get('embedding_threshold_configured'):.3f}, "
+                            f"adaptive_enabled={ar_stats.get('adaptive_enabled')}"
+                        )
+                    except Exception:
+                        pass
                 return content
             else:
                 print("🔍 DEBUG: Insight rejected by atomic validation")
+                # Telemetry: consolidated rejection line
+                try:
+                    telemetry = os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
+                except Exception:
+                    telemetry = False
+                if telemetry:
+                    try:
+                        cd_status = self.reflection_cooldown.get_status()
+                        ar_stats = self.atomic_reflection.get_stats()
+                        print(
+                            f"[PMM_TELEMETRY] reflection_attempt: decision=rejected, reason={cooldown_reason}, "
+                            f"turns_gate={cd_status.get('turns_gate_passed')}, time_gate={cd_status.get('time_gate_passed')}, "
+                            f"novelty_threshold={cd_status.get('novelty_threshold')}, "
+                            f"embedding_threshold_effective={ar_stats.get('embedding_threshold_effective'):.3f}, "
+                            f"embedding_threshold_configured={ar_stats.get('embedding_threshold_configured'):.3f}, "
+                            f"adaptive_enabled={ar_stats.get('adaptive_enabled')}"
+                        )
+                    except Exception:
+                        pass
                 return None
 
         except Exception as e:
