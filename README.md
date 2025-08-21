@@ -16,6 +16,7 @@ That said, lower-end LLMs—such as Gemma3:1b-qat—often struggle to keep pace 
 
 And here’s the part worth stressing: the “evolution” of the mind is intentionally a slow burn 🔥. This is by design. The persistent mind-model reinforces steady, deliberate growth that evolves in sync with the user’s interactions, ensuring stability over speed.
 
+
 ---
 
 Plain-English overview of key concepts:
@@ -27,7 +28,8 @@ Technical analysis (ChatGPT-5):
 - For a deeper architectural overview and roadmap-style notes, (A little outdated here and there, need to clean it up...):
    [Persistent Mind Model (PMM) Project Considerations — Moving Forward](Persistent%20Mind%20Model%20(PMM)%20Project%20Considerations%20-%20Moving%20Forward.md)
 
-  ---
+---
+
 
 
 ## Why this matters
