@@ -41,3 +41,5 @@ isort>=5.12.0  # Import sorting
 mypy>=1.4.0  # Type checking
 pre-commit>=3.3.0  # Git hooks
 langchain
+langchain-openai>=0.1.0
+langchain-ollama>=0.1.0
