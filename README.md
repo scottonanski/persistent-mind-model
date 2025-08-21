@@ -6,11 +6,17 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://github.com/scottonanski/persistent-mind-model)
 [![License](https://img.shields.io/badge/license-dual-orange)](https://github.com/scottonanski/persistent-mind-model)
 
-**PMM is a Python system for maintaining persistent AI personality traits, memory, and behavioral patterns across conversations and models.** Meaning, it stores conversation events, tracks commitments, and applies personality drift based on interaction patterns.
+PMM is a Python system for maintaining persistent AI personality traits, memory, and behavioral patterns across conversations and models. It stores conversation events, tracks commitments, and applies personality drift based on interaction patterns.
 
-Think of PMM as a personal persistent AI assistant that maintains a consistent identity and behavior, extended and adapted through time, across diverse operational contexts. Users may employ external API endpoints or local LLMs that serve as substrate engines feeding persistence, while PMM develops a customized persona free from vendor lock-in.
+Think of PMM as a personal, persistent AI assistant that maintains a consistent identity and behavior, adapting and extending itself over time across diverse operational contexts. Users can connect external API endpoints or local LLMs as substrate engines to feed persistence, while PMM develops a customized persona free from vendor lock-in.
 
-Simply put, it attemps to address key challenges in LLM applications, such as maintaining consistent model personality, memory, and commitments across different models, sessions, and devices.
+In simple terms, it addresses key challenges in LLM applications, such as maintaining consistent personality, memory, and commitments across different models, sessions, and devices.
+
+That said, lower-end LLMs—such as Gemma3:1b-qat—often struggle to keep pace with the "mind." Their outputs can contaminate the database by introducing hallucinations. Interestingly, switching to more capable models—such as gpt-4-nano—appears to restore memory fidelity.
+
+And here’s the part worth stressing: the “evolution” of the mind is intentionally a slow burn 🔥. This is by design. The persistent mind-model reinforces steady, deliberate growth that evolves in sync with the user’s interactions, ensuring stability over speed.
+
+---
 
 Plain-English overview of key concepts:
 - [🧠 PMM Glossary (Plain English)](PMM_Glossary.md)
@@ -20,6 +26,8 @@ Technical analysis (ChatGPT-5):
 
 - For a deeper architectural overview and roadmap-style notes, (A little outdated here and there, need to clean it up...):
    [Persistent Mind Model (PMM) Project Considerations — Moving Forward](Persistent%20Mind%20Model%20(PMM)%20Project%20Considerations%20-%20Moving%20Forward.md)
+
+  ---
 
 
 ## Why this matters
