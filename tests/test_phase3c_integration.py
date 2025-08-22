@@ -76,8 +76,8 @@ def test_adaptive_reflection_triggers():
                 # Print the reflection content
                 latest_reflection = reflection_events[0]
                 print(
-                    f"   Reflection: {latest_reflection[3][:100]}..."
-                )  # content is at index 3
+                    f"   Reflection: {latest_reflection['content'][:100]}..."
+                )  # content is a dict field
 
         print(
             f"✅ Adaptive reflection test completed. Reflections triggered: {reflection_count}"

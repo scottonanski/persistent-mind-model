@@ -146,6 +146,71 @@ def estimate_cost(model_name: str, token_count: int) -> float:
     return (token_count / 1000) * config.cost_per_1k_tokens
 
 
+# --- PMM Feature Flags & Thresholds (env-driven) ---
+def _get_env_float(name: str, default: float) -> float:
+    """Read a float env var with fallback."""
+    try:
+        return float(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_env_int(name: str, default: int) -> int:
+    """Read an int env var with fallback."""
+    try:
+        return int(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _get_env_bool(name: str, default: bool) -> bool:
+    """Read a boolean env var with common truthy/falsey parsing."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def get_min_embedding_threshold() -> float:
+    """Minimum cap for adaptive embedding dedup threshold.
+
+    Env: PMM_MIN_EMBEDDING_THRESHOLD (float), default 0.88
+    """
+    return _get_env_float("PMM_MIN_EMBEDDING_THRESHOLD", 0.88)
+
+
+def get_threshold_cooldown_turns() -> int:
+    """Number of turns before allowing another threshold adjustment.
+
+    Env: PMM_THRESHOLD_COOLDOWN_TURNS (int), default 5
+    """
+    return _get_env_int("PMM_THRESHOLD_COOLDOWN_TURNS", 5)
+
+
+def get_novelty_penalty() -> float:
+    """Anti-repetition penalty applied pre-validation to encourage diversity.
+
+    Env: PMM_NOVELTY_PENALTY (float), default 0.05
+    """
+    return _get_env_float("PMM_NOVELTY_PENALTY", 0.05)
+
+
+def get_evidence_confidence_threshold() -> float:
+    """Confidence threshold to auto-close commitments from evidence.
+
+    Env: PMM_EVIDENCE_CONFIDENCE_THRESHOLD (float), default 0.6
+    """
+    return _get_env_float("PMM_EVIDENCE_CONFIDENCE_THRESHOLD", 0.6)
+
+
+def is_evidence_debug() -> bool:
+    """Enable verbose logging for evidence extraction and closure.
+
+    Env: PMM_EVIDENCE_DEBUG (bool), default False
+    """
+    return _get_env_bool("PMM_EVIDENCE_DEBUG", False)
+
+
 def print_model_info():
     """Print information about all available models."""
     print("=== PMM Available Models ===")

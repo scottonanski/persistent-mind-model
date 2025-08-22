@@ -42,7 +42,15 @@ class SelfModelManager:
         self.commitment_tracker = CommitmentTracker()
 
         # Initialize SQLiteStore for API compatibility
-        self.sqlite_store = SQLiteStore("pmm.db")
+        # Prefer explicit env override, otherwise co-locate DB with the JSON model path
+        db_path = os.environ.get("PMM_DB_PATH")
+        if not db_path:
+            try:
+                model_dir = os.path.dirname(os.path.abspath(self.model_path))
+                db_path = os.path.join(model_dir, "pmm.db")
+            except Exception:
+                db_path = "pmm.db"
+        self.sqlite_store = SQLiteStore(db_path)
 
         self.model = self.load_model()
         # Sync commitments from model to tracker
