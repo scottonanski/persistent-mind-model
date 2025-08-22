@@ -28,6 +28,9 @@ Usage:
 """
 
 from typing import Any, Dict, List, Optional
+import os
+import threading
+import atexit
 
 try:
     from datetime import UTC
@@ -52,6 +55,7 @@ from .reflection_cooldown import ReflectionCooldownManager
 from .commitment_ttl import CommitmentTTLManager
 from .ngram_ban import NGramBanSystem
 from .emergence_stages import EmergenceStageManager
+from .core.autonomy import AutonomyLoop
 
 
 class PersistentMindMemory(BaseChatMemory):
@@ -132,12 +136,12 @@ class PersistentMindMemory(BaseChatMemory):
 
         self.trigger_config = TriggerConfig(
             cadence_days=None,  # Disable time-based for now
-            events_min_gap=3,  # Minimum 3 turns between reflections
+            events_min_gap=2,  # Relax gap to increase cadence
             ias_low=0.35,
             gas_low=0.35,
             ias_high=0.65,
             gas_high=0.65,
-            min_cooldown_minutes=10,
+            min_cooldown_minutes=6,  # Shorter cooldown for tighter cadence
             max_skip_days=7.0,
         )
         self.trigger_state = TriggerState()
@@ -165,6 +169,61 @@ class PersistentMindMemory(BaseChatMemory):
         # Update context strings
         self._update_personality_context()
         self._update_commitment_context()
+
+        # === Autonomy autostart (opt-in via env PMM_AUTONOMY_AUTOSTART) ===
+        self._autonomy_thread = None
+        self._autonomy_stop = None
+        self._autonomy_loop = None
+        try:
+            enable = str(os.environ.get("PMM_AUTONOMY_AUTOSTART", "0")).lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+            if enable:
+                interval = 300  # fixed cadence (seconds)
+                self._autonomy_loop = AutonomyLoop(
+                    self.pmm,
+                    interval_seconds=interval,
+                    directive_system=self.directive_system,
+                )
+                self._autonomy_stop = threading.Event()
+
+                def _run():
+                    # Each loop uses the PMM’s own SQLite store; work is self-contained
+                    self._autonomy_loop.run_forever(stop_event=self._autonomy_stop)
+
+                self._autonomy_thread = threading.Thread(
+                    target=_run, name="PMM-Autonomy", daemon=True
+                )
+                self._autonomy_thread.start()
+                # optional: log an internal event for provenance
+                try:
+                    self.pmm.add_event(
+                        summary=f"Autonomy loop started (interval={interval}s)",
+                        etype="autonomy_start",
+                        effects=[],
+                    )
+                except Exception:
+                    pass
+        except Exception as _e:
+            # never crash init
+            print(f"[PMM] Autonomy autostart failed: {_e}")
+
+        # Ensure clean shutdown on process exit
+        atexit.register(self._shutdown_autonomy)
+
+    def _shutdown_autonomy(self) -> None:
+        """Stop autonomy thread if it was started (best-effort)."""
+        try:
+            if self._autonomy_stop is not None:
+                self._autonomy_stop.set()
+            if self._autonomy_thread is not None and self._autonomy_thread.is_alive():
+                # Don't block indefinitely; thread is daemon=True
+                self._autonomy_thread.join(timeout=0.5)
+        except Exception:
+            # best-effort cleanup
+            pass
 
     def _apply_personality_config(self, config: Dict[str, float]) -> None:
         """Apply initial personality configuration to PMM agent."""
@@ -703,6 +762,11 @@ class PersistentMindMemory(BaseChatMemory):
                         print("🔍 DEBUG: Name change blocked by cooldown")
                     else:
                         print("🔍 DEBUG: No assistant self-declaration found; skipping")
+                # Process evidence events from assistant output as well
+                try:
+                    self._process_evidence_events(ai_output)
+                except Exception as e:
+                    print(f"🔍 DEBUG: Assistant evidence processing failed: {e}")
             except Exception:
                 pass
 
@@ -1472,7 +1536,12 @@ class PersistentMindMemory(BaseChatMemory):
             print(f"🔍 DEBUG: Reflection blocked by cooldown - {cooldown_reason}")
             # Telemetry: consolidate attempt even when blocked
             try:
-                telemetry = os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
+                telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
             except Exception:
                 telemetry = False
             if telemetry:
@@ -1540,7 +1609,12 @@ class PersistentMindMemory(BaseChatMemory):
                 print(f"🔍 DEBUG: Insight atomically persisted: {content[:100]}...")
                 # Telemetry: consolidated acceptance line
                 try:
-                    telemetry = os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
+                    telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                        "on",
+                    )
                 except Exception:
                     telemetry = False
                 if telemetry:
@@ -1562,7 +1636,12 @@ class PersistentMindMemory(BaseChatMemory):
                 print("🔍 DEBUG: Insight rejected by atomic validation")
                 # Telemetry: consolidated rejection line
                 try:
-                    telemetry = os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
+                    telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                        "on",
+                    )
                 except Exception:
                     telemetry = False
                 if telemetry:

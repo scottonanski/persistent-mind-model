@@ -26,10 +26,10 @@ class ReflectionCooldownManager:
 
     def __init__(
         self,
-        min_turns: int = 1,
-        min_wall_time_seconds: int = 30,
-        novelty_threshold: float = 0.82,
-        context_window: int = 5,
+        min_turns: int = 0,
+        min_wall_time_seconds: int = 20,
+        novelty_threshold: float = 0.78,
+        context_window: int = 6,
     ):
         # Allow env var overrides for experimentation without code changes
         env_turns = os.getenv("PMM_REFLECTION_MIN_TURNS")
@@ -58,7 +58,9 @@ class ReflectionCooldownManager:
             self.novelty_threshold = novelty_threshold
 
         try:
-            self.context_window = int(env_ctx) if env_ctx is not None else context_window
+            self.context_window = (
+                int(env_ctx) if env_ctx is not None else context_window
+            )
         except ValueError:
             self.context_window = context_window
 
@@ -81,7 +83,12 @@ class ReflectionCooldownManager:
         with self._lock:
             now = datetime.now(timezone.utc)
 
-            telemetry = os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
+            telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            )
 
             # Check for force reasons first
             if force_reasons:
@@ -99,14 +106,7 @@ class ReflectionCooldownManager:
                 self._update_state_on_reflection(now, current_context)
                 return True, reason
 
-            # Gate 1: Minimum turns
-            if self.state.turns_since_last_reflection < self.min_turns:
-                reason = f"turns_gate: {self.state.turns_since_last_reflection}/{self.min_turns}"
-                if telemetry:
-                    self._telemetry_decision(allow=False, reason=reason, time_since_last=None)
-                return False, reason
-
-            # Gate 2: Minimum wall time
+            # Gate 1 (PRIMARY): Minimum wall time. Prioritize elapsed time for autonomous cadence.
             time_since_last = 0.0
             if self.state.last_reflection_time:
                 time_since_last = (
@@ -120,19 +120,33 @@ class ReflectionCooldownManager:
                         )
                     return False, reason
 
+            # Gate 2 (SECONDARY): Minimum turns (optional). If min_turns <= 0, skip this gate.
+            if (
+                self.min_turns > 0
+                and self.state.turns_since_last_reflection < self.min_turns
+            ):
+                reason = f"turns_gate: {self.state.turns_since_last_reflection}/{self.min_turns}"
+                if telemetry:
+                    self._telemetry_decision(
+                        allow=False,
+                        reason=reason,
+                        time_since_last=time_since_last or None,
+                    )
+                return False, reason
+
             # Gate 3: Semantic novelty
             if not self._passes_novelty_gate(current_context):
                 reason = f"novelty_gate: similarity > {self.novelty_threshold}"
                 if telemetry:
                     self._telemetry_decision(
-                        allow=False, reason=reason, time_since_last=time_since_last or None
+                        allow=False,
+                        reason=reason,
+                        time_since_last=time_since_last or None,
                     )
                 return False, reason
 
             # All gates passed
-            reason = (
-                f"all_gates_passed: turns={self.state.turns_since_last_reflection}, time={time_since_last:.0f}s"
-            )
+            reason = f"all_gates_passed: turns={self.state.turns_since_last_reflection}, time={time_since_last:.0f}s"
             if telemetry:
                 self._telemetry_decision(
                     allow=True, reason=reason, time_since_last=time_since_last or None
@@ -260,7 +274,11 @@ class ReflectionCooldownManager:
         now = datetime.now(timezone.utc)
 
         # Check gates without updating state
-        turns_passed = self.state.turns_since_last_reflection >= self.min_turns
+        turns_passed = (
+            True
+            if self.min_turns <= 0
+            else (self.state.turns_since_last_reflection >= self.min_turns)
+        )
 
         time_passed = True
         time_since_last = None

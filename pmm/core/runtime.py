@@ -1,10 +1,18 @@
 import json
 import numpy as np
+import threading
 from typing import List, Dict
 from pmm.adapters.base import Message, ModelAdapter
 from pmm.storage.sqlite_store import SQLiteStore
 from pmm.storage.integrity import make_linked_hash, verify_chain
 from pmm.self_model_manager import SelfModelManager
+from pmm.core.autonomy import AutonomyLoop
+from pmm.integrated_directive_system import IntegratedDirectiveSystem
+from pmm.name_detect import (
+    extract_agent_name_command,
+    _too_soon_since_last_name_change,
+    _utcnow_str,
+)
 
 
 class PMMRuntime:
@@ -16,6 +24,38 @@ class PMMRuntime:
         self.store = store
         # Initialize PMM personality system
         self.pmm_manager = SelfModelManager("persistent_self_model.json")
+        # Initialize directive system consistent with LangChain wrapper
+        try:
+            self.directive_system = IntegratedDirectiveSystem(
+                storage_manager=self.pmm_manager.sqlite_store
+            )
+        except Exception:
+            self.directive_system = None
+
+        # --- ALWAYS-ON AUTONOMY (no flags, no config) ---
+        try:
+            self._autonomy_loop = AutonomyLoop(self.pmm_manager, interval_seconds=300)
+            self._autonomy_stop = threading.Event()
+
+            def _aut_run():
+                self._autonomy_loop.run_forever(stop_event=self._autonomy_stop)
+
+            self._autonomy_thread = threading.Thread(
+                target=_aut_run, name="PMM-Autonomy", daemon=True
+            )
+            self._autonomy_thread.start()
+            # Record one-time start marker
+            try:
+                self._append(
+                    "event",
+                    "Autonomy loop started (interval=300s)",
+                    {"tag": "autonomy_start"},
+                )
+            except Exception:
+                pass
+        except Exception:
+            # Never block runtime init if autonomy fails
+            pass
 
     def _append(self, kind: str, content: str, meta: Dict):
         """Append event to hash-chain with integrity."""
@@ -175,8 +215,27 @@ Respond authentically as your developing autonomous self, not just as an LLM fol
 
     def _update_pmm_state(self, user_text: str, reply: str) -> None:
         """Update PMM mind state after generating response."""
-        # Check for identity updates (name changes)
-        self._detect_and_update_identity(user_text, reply)
+        # Check for identity updates (name changes) using strict detector + cooldown
+        try:
+            cand = extract_agent_name_command(user_text, role="user")
+            if cand:
+                last_change = getattr(
+                    self.pmm_manager.model.metrics, "last_name_change_at", None
+                )
+                if not _too_soon_since_last_name_change(last_change, days=1):
+                    self.pmm_manager.set_name(cand, origin="user_command")
+                    # record cooldown marker
+                    self.pmm_manager.model.metrics.last_name_change_at = _utcnow_str()
+                    self.pmm_manager.save_model()
+                    # emit identity_update event
+                    self.pmm_manager.add_event(
+                        summary=f"Identity update: Name changed to '{cand}' (origin=user_command)",
+                        effects=[],
+                        etype="identity_update",
+                    )
+        except Exception:
+            # Non-fatal
+            pass
 
         # Update behavioral patterns based on user input and response
         self.pmm_manager.update_patterns(user_text)
@@ -189,20 +248,24 @@ Respond authentically as your developing autonomous self, not just as an LLM fol
             etype="conversation",
         )
 
-        # Extract and track commitments from response
-        if "Next, I will" in reply or "I will" in reply:
-            # Extract commitment text
-            commitment_text = reply
-            if "Next, I will" in reply:
-                commitment_text = reply[reply.find("Next, I will") :]
-            elif "I will" in reply:
-                commitment_text = reply[reply.find("I will") :]
-
-            # Add commitment to PMM system
-            self.pmm_manager.add_commitment(
-                text=commitment_text[:200],  # Limit length
-                source_insight_id="response_generated",
-            )
+        # Extract and track directives/commitments using Integrated Directive System
+        try:
+            if self.directive_system:
+                detected = self.directive_system.process_response(
+                    user_message=user_text,
+                    ai_response=reply,
+                    event_id="runtime_interaction",
+                )
+                for directive in detected or []:
+                    content = getattr(directive, "content", None)
+                    if content:
+                        self.pmm_manager.add_commitment(
+                            text=content[:200],
+                            source_insight_id="runtime_interaction",
+                        )
+        except Exception:
+            # Graceful degradation: skip directive extraction on error
+            pass
 
     def _evaluate_commitments(self, reply: str) -> None:
         """Evaluate and potentially close commitments based on response."""
@@ -344,7 +407,7 @@ Respond authentically as your developing autonomous self, not just as an LLM fol
             # Get embeddings for commitment and recent history
             all_texts = [commitment_content] + recent_history
             embeddings_response = client.embeddings.create(
-                input=all_texts, model="text-embedding-ada-002"
+                input=all_texts, model="text-embedding-3-small"
             )
 
             # Calculate cosine similarity between commitment and recent responses

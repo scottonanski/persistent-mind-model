@@ -1,8 +1,6 @@
-import os
 import io
 import sys
 import types
-import builtins
 from contextlib import redirect_stdout
 
 import pytest
@@ -84,7 +82,7 @@ def test_dedup_parity_with_memory_path(monkeypatch):
     # Two similar insights in cache
     pmm_mgr.model.self_knowledge.insights = [
         DummyInsight("I like pizza and coding."),
-        DummyInsight("I enjoy pizza and programming.")
+        DummyInsight("I enjoy pizza and programming."),
     ]
 
     # Mock embeddings to make any of these texts map to identical vector
@@ -102,7 +100,9 @@ def test_dedup_parity_with_memory_path(monkeypatch):
     def _mock_openai_constructor():
         return _MockOpenAI(vectors)
 
-    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=_mock_openai_constructor))
+    monkeypatch.setitem(
+        sys.modules, "openai", types.SimpleNamespace(OpenAI=_mock_openai_constructor)
+    )
 
     # Build memory wrapper but inject our DummyPMM
     mem = PersistentMindMemory(agent_path=":memory:")
@@ -171,7 +171,9 @@ def test_structured_override_with_new_references(monkeypatch):
     def _mock_openai_constructor():
         return _MockOpenAI(vectors)
 
-    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(OpenAI=_mock_openai_constructor))
+    monkeypatch.setitem(
+        sys.modules, "openai", types.SimpleNamespace(OpenAI=_mock_openai_constructor)
+    )
 
     # Ensure low threshold so sim triggers duplicate branch
     arm = AtomicReflectionManager(pmm_mgr, embedding_threshold=0.80)

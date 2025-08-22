@@ -6,6 +6,7 @@ from typing import List, Tuple
 from datetime import datetime, timezone
 from pmm.model import Insight
 from pmm.self_model_manager import SelfModelManager
+from pmm.config.models import get_novelty_penalty
 from pmm.adapters.openai_adapter import OpenAIAdapter
 
 # Load environment variables for API access
@@ -90,14 +91,15 @@ def _build_context(mgr: SelfModelManager) -> str:
         f"{getattr(s,'t','')}:{getattr(s,'type','')}:{getattr(s,'summary','')}"
         for s in scenes
     ]
-    # recent autobiographical events (brief)
+    # recent autobiographical events (brief) with explicit IDs for anchoring
     events = (
         m.self_knowledge.autobiographical_events[-3:]
         if m.self_knowledge.autobiographical_events
         else []
     )
+    event_ids = [getattr(e, "id", None) for e in events if getattr(e, "id", None)]
     event_summ = [
-        f"{getattr(e,'t','')}:{getattr(e,'type','')}:{getattr(e,'summary','')}"
+        f"{getattr(e,'id','')}|{getattr(e,'t','')}:{getattr(e,'type','')}:{getattr(e,'summary','')}"
         for e in events
     ]
     # current Big5 snapshot (scores only)
@@ -118,13 +120,26 @@ def _build_context(mgr: SelfModelManager) -> str:
     insights = (
         _recent_texts(m.self_knowledge.insights, 2) if m.self_knowledge.insights else []
     )
+    # open commitments (top 3) with short hashes to encourage anchoring
+    open_commitments_brief = []
+    try:
+        open_commitments = mgr.get_open_commitments()
+        for c in open_commitments[:3]:
+            h = c.get("hash", "")
+            title = c.get("text", c.get("title", ""))
+            open_commitments_brief.append(f"{h[:16]}:{title[:60]}")
+    except Exception:
+        pass
+
     return (
         f"Identity: {name}\n"
         f"Inception: {inception}\n"
         f"Patterns: {patterns}\n"
         f"TraitSnapshot(Big5): {trait_snapshot}\n"
         f"RecentScenes: {scene_summ}\n"
+        f"RecentEventIDs: {event_ids}\n"
         f"RecentEvents: {event_summ}\n"
+        f"OpenCommitments: {open_commitments_brief}\n"
         f"RecentThoughts: {thoughts}\n"
         f"RecentInsights: {insights}\n"
     )
@@ -142,6 +157,21 @@ REFLECTION_PROMPTS = [
 def get_varied_prompt() -> str:
     """Get a varied reflection prompt to prevent repetitive insights."""
     return random.choice(REFLECTION_PROMPTS)
+
+
+# Additional style prompts to diversify phrasing and structure so
+# embeddings differ more across reflections without manual tuning.
+STYLE_PROMPTS = [
+    "Answer in 3 concise sentences.",
+    "Respond as a numbered list (3 bullets max).",
+    "Use a concrete metaphor to explain your point.",
+    "Be critical and harsh on yourself, keep it direct.",
+    "Write like a private journal entry—candid and specific.",
+]
+
+
+def get_style_prompt() -> str:
+    return random.choice(STYLE_PROMPTS)
 
 
 def reflect_once(
@@ -191,7 +221,10 @@ def reflect_once(
         else:
             llm = OpenAIAdapter()
 
-    txt = llm.chat(system=sys, user=get_varied_prompt() + ctx)
+    # Append randomized style to increase output diversity, reducing
+    # near-duplicate embeddings and allowing insights to pass dedup.
+    user_prompt = get_varied_prompt() + ctx + "\n\n" + get_style_prompt()
+    txt = llm.chat(system=sys, user=user_prompt)
     if not txt:
         return None
 
@@ -222,7 +255,10 @@ def reflect_once(
                 + " IMPORTANT: Use analogy or concrete example. Avoid abstract language."
             )
             try:
-                txt = llm.chat(system=style_sys, user=get_varied_prompt() + ctx)
+                reroll_user_prompt = (
+                    get_varied_prompt() + ctx + "\n\n" + get_style_prompt()
+                )
+                txt = llm.chat(system=style_sys, user=reroll_user_prompt)
                 if not txt:
                     if os.getenv("PMM_DEBUG") == "1":
                         print("   ⚠️  Re-roll failed, using original response")
@@ -235,6 +271,11 @@ def reflect_once(
                         f"   ⚠️  Re-roll failed ({type(e).__name__}), using original response"
                     )
                 # Keep original txt if re-roll fails
+
+        # Compute novelty score (1 - overlap)
+        novelty_score = 1.0 - overlap_ratio
+    else:
+        novelty_score = 1.0
 
     # Cap length
     if len(txt) > 400:  # ~80 words
@@ -279,6 +320,22 @@ def reflect_once(
     # PHASE 3B: Validate insight references for acceptance
     is_accepted, referenced_ids = _validate_insight_references(txt, mgr)
 
+    # Apply novelty gate: if novelty is below configured penalty, mark as inert
+    try:
+        novelty_penalty = float(get_novelty_penalty())
+    except Exception:
+        novelty_penalty = 0.05
+    low_novelty_reject = novelty_score < max(0.0, min(1.0, novelty_penalty))
+    # If there are valid references, soften novelty rejection to favor auditability
+    if referenced_ids:
+        low_novelty_reject = False
+    if low_novelty_reject:
+        if os.getenv("PMM_DEBUG") == "1":
+            print(
+                f"🔍 DEBUG: Reflection rejected for low novelty (score={novelty_score:.2f} < penalty={novelty_penalty:.2f})"
+            )
+        is_accepted = False
+
     # Add referenced IDs to insight metadata
     if referenced_ids:
         refs["referenced_event_ids"] = referenced_ids
@@ -295,6 +352,8 @@ def reflect_once(
 
     insight.meta["accepted"] = is_accepted
     insight.meta["referenced_ids"] = referenced_ids
+    insight.meta["novelty_score"] = round(novelty_score, 4)
+    insight.meta["novelty_penalty"] = round(novelty_penalty, 4)
 
     mgr.model.self_knowledge.insights.append(insight)
 

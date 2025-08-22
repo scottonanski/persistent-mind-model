@@ -9,6 +9,10 @@ import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+from pmm.config.models import (
+    get_evidence_confidence_threshold,
+    is_evidence_debug,
+)
 
 
 @dataclass
@@ -750,6 +754,7 @@ class CommitmentTracker:
             matches = re.finditer(pattern, normalized, re.IGNORECASE)
             for match in matches:
                 description = match.group(1).strip()
+                description_lc = description.lower()
 
                 # Extract artifact if present (file names, URLs, IDs)
                 artifact = self._extract_artifact(description)
@@ -761,7 +766,7 @@ class CommitmentTracker:
                         commit_hash = self.get_commitment_hash(commitment)
                         # Simple keyword matching - could be enhanced
                         if any(
-                            word in description
+                            word in description_lc
                             for word in commitment.text.lower().split()[:3]
                         ):
                             evidence_events.append(
@@ -781,6 +786,7 @@ class CommitmentTracker:
             matches = re.finditer(pattern, normalized, re.IGNORECASE)
             for match in matches:
                 reason = match.group(1).strip()
+                reason_lc = reason.lower()
                 next_action = match.group(2).strip() if match.group(2) else None
 
                 # Match to open commitments
@@ -788,7 +794,7 @@ class CommitmentTracker:
                     if commitment.status == "open":
                         commit_hash = self.get_commitment_hash(commitment)
                         if any(
-                            word in reason
+                            word in reason_lc
                             for word in commitment.text.lower().split()[:3]
                         ):
                             evidence_events.append(
@@ -808,13 +814,14 @@ class CommitmentTracker:
             for match in matches:
                 assignee = match.group(1).strip()
                 description = match.group(2).strip()
+                description_lc = description.lower()
 
                 # Match to open commitments
                 for cid, commitment in self.commitments.items():
                     if commitment.status == "open":
                         commit_hash = self.get_commitment_hash(commitment)
                         if any(
-                            word in description
+                            word in description_lc
                             for word in commitment.text.lower().split()[:3]
                         ):
                             evidence_events.append(
@@ -854,8 +861,13 @@ class CommitmentTracker:
         evidence_type: str,
         description: str,
         artifact: Optional[str] = None,
+        confidence: Optional[float] = None,
     ) -> bool:
-        """Close a commitment based on evidence. Only 'done' evidence closes commitments."""
+        """Close a commitment based on evidence.
+
+        Only 'done' evidence closes commitments, and only when confidence >= threshold.
+        Confidence can be provided or will be estimated heuristically.
+        """
         if evidence_type != "done":
             print(
                 f"🔍 DEBUG: Evidence type '{evidence_type}' does not close commitments"
@@ -882,22 +894,109 @@ class CommitmentTracker:
             )
             return False
 
-        # Close the commitment
+        # Compute/validate evidence confidence
+        if confidence is None:
+            confidence = self._estimate_evidence_confidence(
+                target_commitment.text, evidence_type, description, artifact
+            )
+
+        threshold = float(get_evidence_confidence_threshold())
+        debug = is_evidence_debug()
+
+        if debug:
+            print(
+                f"[PMM_EVIDENCE] type={evidence_type} hash={commit_hash} conf={confidence:.2f} thresh={threshold:.2f} desc='{description[:80]}' art={artifact}"
+            )
+
+        if confidence < threshold:
+            if debug:
+                print(
+                    f"[PMM_EVIDENCE] below_threshold: not closing commitment {target_cid}"
+                )
+            return False
+
+        # Close the commitment (meets threshold)
         target_commitment.status = "closed"
         target_commitment.closed_at = datetime.now(timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
-        target_commitment.close_note = f"Evidence: {description}"
+        # Ensure close note explicitly mentions evidence for auditability
+        note = f"Evidence: {description} | conf={confidence:.2f}"
         if artifact:
-            target_commitment.close_note += f" (Artifact: {artifact})"
-
+            note += f" | artifact={artifact}"
+        target_commitment.close_note = note
+        if artifact:
+            target_commitment.ngrams = (target_commitment.ngrams or []) + [artifact]
         print(f"🔍 DEBUG: Closed commitment {target_cid} with evidence: {description}")
         return True
+
+    def _estimate_evidence_confidence(
+        self,
+        commitment_text: str,
+        evidence_type: str,
+        description: str,
+        artifact: Optional[str] = None,
+    ) -> float:
+        """Heuristically estimate confidence that evidence supports the commitment."""
+        try:
+            ct = (commitment_text or "").lower()
+            desc = (description or "").lower()
+            base = 0.45  # slightly higher base prior for 'done' evidence
+
+            # N-gram token overlap (bigrams) between commitment and description
+            def bigrams(s: str) -> set:
+                toks = [t for t in re.split(r"\W+", s) if t]
+                return set(
+                    " ".join(toks[i : i + 2]) for i in range(max(0, len(toks) - 1))
+                )
+
+            def trigrams(s: str) -> set:
+                toks = [t for t in re.split(r"\W+", s) if t]
+                return set(
+                    " ".join(toks[i : i + 3]) for i in range(max(0, len(toks) - 2))
+                )
+
+            b_ct, b_desc = bigrams(ct), bigrams(desc)
+            t_ct, t_desc = trigrams(ct), trigrams(desc)
+            b_overlap = (len(b_ct & b_desc) / len(b_ct)) if b_ct else 0.0
+            t_overlap = (len(t_ct & t_desc) / len(t_ct)) if t_ct else 0.0
+
+            score = base + 0.3 * b_overlap + 0.2 * t_overlap
+
+            # Artifacts increase confidence
+            if artifact:
+                score += 0.15
+
+            # Action verbs in description push up slightly
+            action_cues = [
+                "done",
+                "completed",
+                "finished",
+                "implemented",
+                "delivered",
+                "merged",
+                "uploaded",
+                "deployed",
+                "tested",
+                "validated",
+            ]
+            if any(cue in desc for cue in action_cues):
+                score += 0.1
+
+            # Cap to [0,1]
+            return max(0.0, min(1.0, score))
+        except Exception:
+            return 0.5
 
     def expire_old_commitments(self, days_old: int = 30) -> List[str]:
         """Mark old commitments as expired."""
         expired_cids = []
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days_old)
+
+        # Calculate cutoff timestamp
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days_old)
+        except Exception:
+            cutoff = datetime.now(timezone.utc)
 
         for cid, commitment in self.commitments.items():
             if commitment.status != "open":
@@ -905,6 +1004,9 @@ class CommitmentTracker:
 
             try:
                 created = datetime.fromisoformat(commitment.created_at.replace("Z", ""))
+                # Normalize to aware datetime in UTC for comparison
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
                 if created < cutoff:
                     self.mark_commitment(
                         cid, "expired", f"Auto-expired after {days_old} days"
