@@ -70,6 +70,21 @@ export OPENAI_API_KEY='sk-your-key-here'
 python chat.py
 ```
 
+**Optional: enable debugging and telemetry (off by default):**
+```bash
+# Show low-level request/response details
+python chat.py --debug
+
+# Print PMM telemetry snapshots (stages, IAS/GAS, cooldowns)
+python chat.py --telemetry
+
+# Enable both
+python chat.py --debug --telemetry
+
+# Or use environment variable for telemetry
+PMM_TELEMETRY=true python chat.py
+```
+
 **Available commands in chat:**
 - `personality` - View current personality traits
 - `memory` - Show recent conversation history

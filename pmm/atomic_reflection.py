@@ -11,7 +11,7 @@ from pmm.config.models import (
     get_min_embedding_threshold,
     get_threshold_cooldown_turns,
 )
-from pmm.logging_config import pmm_tlog
+from pmm.logging_config import pmm_tlog, pmm_dlog
 
 
 @dataclass
@@ -147,12 +147,12 @@ class AtomicReflectionManager:
             # Step 1: Basic validation (with normalization to reduce style boilerplate)
             cleaned_content = self._clean_and_normalize(insight_content)
             if not self._passes_basic_validation(cleaned_content):
-                print("🔍 DEBUG: Insight failed basic validation")
+                pmm_dlog("🔍 DEBUG: Insight failed basic validation")
                 return False
 
             # Step 2: Fast text similarity check
             if self._is_duplicate_text(cleaned_content):
-                print("🔍 DEBUG: Insight rejected - duplicate text similarity")
+                pmm_dlog("🔍 DEBUG: Insight rejected - duplicate text similarity")
                 return False
 
             # Step 2.5: One-shot force-accept override (env-controlled)
@@ -189,7 +189,7 @@ class AtomicReflectionManager:
 
                 current_epoch = get_llm_factory().get_current_epoch()
                 if epoch != current_epoch:
-                    print(
+                    pmm_dlog(
                         f"🔍 DEBUG: Insight rejected - epoch mismatch {epoch} != {current_epoch}"
                     )
                     return False
@@ -197,16 +197,18 @@ class AtomicReflectionManager:
                     success = self._persist_insight(cleaned_content, model_config)
                     if success:
                         self._update_cache(cleaned_content)
-                        print("🔍 DEBUG: Insight successfully persisted (force-accept)")
+                        pmm_dlog(
+                            "🔍 DEBUG: Insight successfully persisted (force-accept)"
+                        )
                         self._on_decision(accepted=True)
                         return True
                     else:
-                        print(
+                        pmm_dlog(
                             "🔍 DEBUG: Insight persistence failed (force-accept path)"
                         )
                         return False
                 except Exception as e:
-                    print(f"🔍 DEBUG: Insight persistence error (force-accept): {e}")
+                    pmm_dlog(f"🔍 DEBUG: Insight persistence error (force-accept): {e}")
                     return False
 
             # Step 2.6: Automatic bootstrap acceptance (no env required)
@@ -251,14 +253,16 @@ class AtomicReflectionManager:
                     success = self._persist_insight(cleaned_content, model_config)
                     if success:
                         self._update_cache(cleaned_content)
-                        print("🔍 DEBUG: Insight successfully persisted (bootstrap)")
+                        pmm_dlog("🔍 DEBUG: Insight successfully persisted (bootstrap)")
                         self._on_decision(accepted=True)
                         return True
                     else:
-                        print("🔍 DEBUG: Insight persistence failed (bootstrap path)")
+                        pmm_dlog(
+                            "🔍 DEBUG: Insight persistence failed (bootstrap path)"
+                        )
                         return False
                 except Exception as e:
-                    print(f"🔍 DEBUG: Insight persistence error (bootstrap): {e}")
+                    pmm_dlog(f"🔍 DEBUG: Insight persistence error (bootstrap): {e}")
                     return False
 
             # Step 3: Embedding similarity check (more expensive), with first-hit pass for borderline cases
@@ -336,21 +340,21 @@ class AtomicReflectionManager:
                                     )
                             else:
                                 # Still duplicate; reject
-                                print(
+                                pmm_dlog(
                                     f"🔍 DEBUG: Insight rejected - embedding similarity {best_sim:.3f} > threshold {self._effective_threshold:.3f} (stage={_stage_for_logs})"
                                 )
                                 self._on_decision(accepted=False)
                                 return False
                         else:
                             # Regular rejection path
-                            print(
+                            pmm_dlog(
                                 f"🔍 DEBUG: Insight rejected - embedding similarity {best_sim:.3f} > threshold {self._effective_threshold:.3f} (stage={_stage_for_logs})"
                             )
                             # Adaptive: rejection event
                             self._on_decision(accepted=False)
                             return False
                     except Exception:
-                        print(
+                        pmm_dlog(
                             f"🔍 DEBUG: Insight rejected - embedding similarity {best_sim if best_sim is not None else -1:.3f} > threshold {self._effective_threshold:.3f} (stage={_stage_for_logs})"
                         )
                         self._on_decision(accepted=False)
@@ -361,7 +365,7 @@ class AtomicReflectionManager:
 
             current_epoch = get_llm_factory().get_current_epoch()
             if epoch != current_epoch:
-                print(
+                pmm_dlog(
                     f"🔍 DEBUG: Insight rejected - epoch mismatch {epoch} != {current_epoch}"
                 )
                 return False
@@ -371,17 +375,17 @@ class AtomicReflectionManager:
                 success = self._persist_insight(cleaned_content, model_config)
                 if success:
                     self._update_cache(cleaned_content)
-                    print(
+                    pmm_dlog(
                         f"🔍 DEBUG: Insight successfully persisted (stage={_stage_for_logs})"
                     )
                     # Adaptive: acceptance event
                     self._on_decision(accepted=True)
                     return True
                 else:
-                    print("🔍 DEBUG: Insight persistence failed")
+                    pmm_dlog("🔍 DEBUG: Insight persistence failed")
                     return False
             except Exception as e:
-                print(f"🔍 DEBUG: Insight persistence error: {e}")
+                pmm_dlog(f"🔍 DEBUG: Insight persistence error: {e}")
                 return False
 
     def _clean_and_normalize(self, content: str) -> str:
@@ -511,7 +515,7 @@ class AtomicReflectionManager:
                 import os
 
                 if not os.getenv("OPENAI_API_KEY"):
-                    print(
+                    pmm_dlog(
                         "🔍 DEBUG: No OpenAI API key - skipping embedding deduplication"
                     )
                     return (False, -1.0) if return_best_sim else False
@@ -551,7 +555,7 @@ class AtomicReflectionManager:
                 if best_insight is not None and (
                     best_sim >= 0.999 or best_sim > self._effective_threshold
                 ):
-                    print(f"🔍 DEBUG: High embedding similarity: {best_sim:.3f}")
+                    pmm_dlog(f"🔍 DEBUG: High embedding similarity: {best_sim:.3f}")
 
                     # Structured override: allow near-duplicates if they reference NEW IDs
                     candidate_refs = self._extract_referenced_ids(content)
@@ -600,11 +604,11 @@ class AtomicReflectionManager:
                 # Not similar enough to consider duplicate
                 return (False, best_sim) if return_best_sim else False
             except Exception as e:
-                print(f"🔍 DEBUG: Embedding check failed, allowing insight: {e}")
+                pmm_dlog(f"🔍 DEBUG: Embedding check failed, allowing insight: {e}")
                 return (False, -1.0) if return_best_sim else False
 
         except Exception as e:
-            print(f"🔍 DEBUG: Embedding similarity check failed: {e}")
+            pmm_dlog(f"🔍 DEBUG: Embedding similarity check failed: {e}")
             # Fallback to text similarity
             return False
 
@@ -629,7 +633,7 @@ class AtomicReflectionManager:
             return True
 
         except Exception as e:
-            print(f"🔍 DEBUG: Failed to persist insight: {e}")
+            pmm_dlog(f"🔍 DEBUG: Failed to persist insight: {e}")
             return False
 
     def _update_cache(self, content: str) -> None:

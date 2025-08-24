@@ -56,6 +56,7 @@ from .commitment_ttl import CommitmentTTLManager
 from .ngram_ban import NGramBanSystem
 from .emergence_stages import EmergenceStageManager
 from .core.autonomy import AutonomyLoop
+from .logging_config import pmm_tlog, pmm_dlog
 
 
 class PersistentMindMemory(BaseChatMemory):
@@ -213,7 +214,7 @@ class PersistentMindMemory(BaseChatMemory):
                     pass
         except Exception as _e:
             # never crash init
-            print(f"[PMM] Autonomy autostart failed: {_e}")
+            pmm_dlog(f"[PMM] Autonomy autostart failed: {_e}")
 
         # Ensure clean shutdown on process exit
         atexit.register(self._shutdown_autonomy)
@@ -369,7 +370,7 @@ class PersistentMindMemory(BaseChatMemory):
                     effects=[],
                     etype="identity_info",
                 )
-                print(f" Automatically remembered: User's name is {remembered}")
+                pmm_dlog(f" Automatically remembered: User's name is {remembered}")
 
             # Pattern order: strongest first, using original casing for capitalization heuristics
             # 1) "My name is X"
@@ -530,7 +531,7 @@ class PersistentMindMemory(BaseChatMemory):
         # ---- 0.25) Input Hygiene: Check if input is non-behavioral ----
         is_non_behavioral = self._is_non_behavioral_input(human_input)
         if is_non_behavioral:
-            print(
+            pmm_dlog(
                 "🔍 DEBUG: Non-behavioral input detected, skipping behavioral triggers"
             )
 
@@ -567,7 +568,7 @@ class PersistentMindMemory(BaseChatMemory):
                 ai_output, stage=stage_label
             )
             if stance_filters:
-                print(
+                pmm_dlog(
                     f"🔍 DEBUG: Applied stance filters: {len(stance_filters)} changes (stage={stage_label or 'auto'})"
                 )
 
@@ -577,7 +578,7 @@ class PersistentMindMemory(BaseChatMemory):
             )
 
             if is_repetitive:
-                print(
+                pmm_dlog(
                     f"🔍 DEBUG: Repetitive phrases detected: {repeated_phrases[:3]}... (score: {repetition_score:.3f})"
                 )
                 # Could implement re-generation here, for now just log
@@ -591,7 +592,7 @@ class PersistentMindMemory(BaseChatMemory):
         # ---- 0.5) Input Hygiene: Check if input is non-behavioral ----
         is_non_behavioral = self._is_non_behavioral_input(human_input)
         if is_non_behavioral:
-            print(
+            pmm_dlog(
                 "🔍 DEBUG: Non-behavioral input detected, skipping behavioral triggers"
             )
 
@@ -603,7 +604,7 @@ class PersistentMindMemory(BaseChatMemory):
         if human_input:
             command_type = self.introspection.parse_user_command(human_input)
             if command_type:
-                print(
+                pmm_dlog(
                     f"🔍 DEBUG: Processing introspection command: {command_type.value}"
                 )
 
@@ -665,8 +666,8 @@ class PersistentMindMemory(BaseChatMemory):
                         embedding_list = semantic_analyzer._get_embedding(human_input)
                         embedding = np.array(embedding_list, dtype=np.float32).tobytes()
                     except Exception as e:
-                        print(
-                            f"Warning: Failed to generate embedding for user input: {e}"
+                        pmm_dlog(
+                            f"[warn] Failed to generate embedding for user input: {e}"
                         )
 
                 self.pmm.add_event(
@@ -682,7 +683,7 @@ class PersistentMindMemory(BaseChatMemory):
 
                     # Name handling: ignore any user-driven rename attempts (policy).
                     if self.pmm:
-                        print(
+                        pmm_dlog(
                             "🔍 DEBUG: Ignoring user-driven agent rename attempts by policy"
                         )
 
@@ -690,7 +691,7 @@ class PersistentMindMemory(BaseChatMemory):
                     try:
                         self._process_evidence_events(behavioral_input)
                     except Exception as e:
-                        print(f"🔍 DEBUG: Evidence processing failed: {e}")
+                        pmm_dlog(f"🔍 DEBUG: Evidence processing failed: {e}")
                         pass
             except Exception:
                 pass  # never crash chat on memory write
@@ -732,18 +733,20 @@ class PersistentMindMemory(BaseChatMemory):
                                     effects=[],
                                     etype="identity_update",
                                 )
-                                print(f"🔍 DEBUG: Assistant self‑named to: {cand}")
+                                pmm_dlog(f"🔍 DEBUG: Assistant self‑named to: {cand}")
                             except Exception as e:
-                                print(f"🔍 DEBUG: Assistant self‑naming failed: {e}")
+                                pmm_dlog(f"🔍 DEBUG: Assistant self‑naming failed: {e}")
                         else:
-                            print("🔍 DEBUG: Name change blocked by cooldown")
+                            pmm_dlog("🔍 DEBUG: Name change blocked by cooldown")
                     else:
-                        print("🔍 DEBUG: No assistant self‑declaration found; skipping")
+                        pmm_dlog(
+                            "🔍 DEBUG: No assistant self‑declaration found; skipping"
+                        )
                 # Process evidence events from assistant output as well
                 try:
                     self._process_evidence_events(ai_output)
                 except Exception as e:
-                    print(f"🔍 DEBUG: Assistant evidence processing failed: {e}")
+                    pmm_dlog(f"🔍 DEBUG: Assistant evidence processing failed: {e}")
             except Exception:
                 pass
 
@@ -760,11 +763,11 @@ class PersistentMindMemory(BaseChatMemory):
                     )
 
                     if detected_directives:
-                        print(
+                        pmm_dlog(
                             f"🔍 DEBUG: Detected {len(detected_directives)} directives:"
                         )
                         for directive in detected_directives:
-                            print(
+                            pmm_dlog(
                                 f"  - {directive.__class__.__name__}: {directive.content[:80]}..."
                             )
 
@@ -776,17 +779,17 @@ class PersistentMindMemory(BaseChatMemory):
                                 )
                                 new_commitment_text = directive.content
                     else:
-                        print("🔍 DEBUG: No directives found in conversation")
+                        pmm_dlog("🔍 DEBUG: No directives found in conversation")
 
                     # Check for evolution triggers
                     evolution_triggered = (
                         self.directive_system.trigger_evolution_if_needed()
                     )
                     if evolution_triggered:
-                        print("🔍 DEBUG: Meta-principle triggered natural evolution")
+                        pmm_dlog("🔍 DEBUG: Meta-principle triggered natural evolution")
 
                 except Exception as e:
-                    print(f"🔍 DEBUG: Directive processing error: {e}")
+                    pmm_dlog(f"🔍 DEBUG: Directive processing error: {e}")
                     # Fallback to old system
                     tracker = CommitmentTracker()
                     new_commitment_text, _ = tracker.extract_commitment(ai_output)
@@ -799,11 +802,15 @@ class PersistentMindMemory(BaseChatMemory):
                 try:
                     evidence_events = self._process_evidence_events(human_input)
                     if evidence_events:
-                        print(f"🔍 DEBUG: Found {len(evidence_events)} evidence events")
+                        pmm_dlog(
+                            f"🔍 DEBUG: Found {len(evidence_events)} evidence events"
+                        )
                     else:
-                        print(f"🔍 DEBUG: No evidence found in: {human_input[:100]}...")
+                        pmm_dlog(
+                            f"🔍 DEBUG: No evidence found in: {human_input[:100]}..."
+                        )
                 except Exception as e:
-                    print(f"🔍 DEBUG: Evidence processing failed: {e}")
+                    pmm_dlog(f"🔍 DEBUG: Evidence processing failed: {e}")
                     pass
 
                 try:
@@ -898,17 +905,17 @@ class PersistentMindMemory(BaseChatMemory):
                         )  # Use Phase 3C window size
                         ias = scores.get("IAS", 0.0)
                         gas = scores.get("GAS", 0.0)
-                        print(
+                        pmm_dlog(
                             f"🔍 DEBUG: Real-time emergence scores - IAS: {ias}, GAS: {gas}"
                         )
-                        print(
+                        pmm_dlog(
                             f"🔍 DEBUG: Events analyzed: {scores.get('events_analyzed', 0)}, Stage: {scores.get('stage', 'Unknown')}"
                         )
                     except Exception as e:
-                        print(f"🔍 DEBUG: Failed to calculate emergence scores: {e}")
+                        pmm_dlog(f"🔍 DEBUG: Failed to calculate emergence scores: {e}")
                         import traceback
 
-                        print(f"🔍 DEBUG: Traceback: {traceback.format_exc()}")
+                        pmm_dlog(f"🔍 DEBUG: Traceback: {traceback.format_exc()}")
                         ias = None
                         gas = None
 
@@ -940,7 +947,7 @@ class PersistentMindMemory(BaseChatMemory):
                     if new_commitment_text:
                         should_reflect = True
                         reason = "new-commitment"
-                        print(
+                        pmm_dlog(
                             f"🔍 DEBUG: Commitment trigger - new commitment: {new_commitment_text}"
                         )
                     else:
@@ -948,15 +955,15 @@ class PersistentMindMemory(BaseChatMemory):
                             datetime.now(UTC), ias, gas, events_since_reflection
                         )
 
-                    print(
+                    pmm_dlog(
                         f"🔍 DEBUG: Adaptive trigger decision: {should_reflect} ({reason})"
                     )
-                    print(
+                    pmm_dlog(
                         f"🔍 DEBUG: Events since reflection: {events_since_reflection}, IAS: {ias}, GAS: {gas}"
                     )
 
                 except Exception as e:
-                    print(f"🔍 DEBUG: Adaptive reflection trigger check failed: {e}")
+                    pmm_dlog(f"🔍 DEBUG: Adaptive reflection trigger check failed: {e}")
                     # Fallback to simple event count trigger
                     behavioral_events = [
                         e
@@ -968,10 +975,12 @@ class PersistentMindMemory(BaseChatMemory):
                         new_commitment_text
                     )
             else:
-                print("🔍 DEBUG: Skipping reflection triggers for non-behavioral input")
+                pmm_dlog(
+                    "🔍 DEBUG: Skipping reflection triggers for non-behavioral input"
+                )
 
             if should_reflect:
-                print("🔍 DEBUG: Reflection triggered, checking for topic loops...")
+                pmm_dlog("🔍 DEBUG: Reflection triggered, checking for topic loops...")
                 # Skip reflection if the last few events look like a topical loop
                 try:
                     recent = self.pmm.sqlite_store.recent_events(limit=10)
@@ -989,30 +998,30 @@ class PersistentMindMemory(BaseChatMemory):
                                 window.append(content)
                     joined = " ".join(window).lower()
                     if joined.count("slop code") >= 3:
-                        print(
+                        pmm_dlog(
                             "🔍 DEBUG: Suppressing reflection due to topic loop (slop code)"
                         )
                         insight = None  # suppress looped reflections
                     else:
-                        print(
+                        pmm_dlog(
                             "🔍 DEBUG: No topic loop detected, proceeding with reflection..."
                         )
                         insight = self._auto_reflect()
                         if insight:
                             if self._is_similar_to_recent_insights(insight):
-                                print(
+                                pmm_dlog(
                                     "🔍 DEBUG: Suppressing reflection due to similarity to recent insights"
                                 )
                                 insight = None
-                        print(
+                        pmm_dlog(
                             f"🔍 DEBUG: Reflection completed, insight: {bool(insight)}"
                         )
                 except Exception as e:
-                    print(f"🔍 DEBUG: Reflection failed: {e}")
+                    pmm_dlog(f"🔍 DEBUG: Reflection failed: {e}")
                     insight = None
 
                 if insight:
-                    print(
+                    pmm_tlog(
                         f"\n🧠 Insight: {insight[:160]}{'...' if len(insight) > 160 else ''}"
                     )
 
@@ -1032,7 +1041,7 @@ class PersistentMindMemory(BaseChatMemory):
                                         auto_result
                                     )
                                 )
-                                print(
+                                pmm_tlog(
                                     f"\n🤖 Automatic Introspection Triggered:\n{formatted_auto}"
                                 )
 
@@ -1051,21 +1060,23 @@ class PersistentMindMemory(BaseChatMemory):
                                     full_text=formatted_auto,
                                 )
                     except Exception as e:
-                        print(f"🔍 DEBUG: Automatic introspection check failed: {e}")
+                        pmm_dlog(f"🔍 DEBUG: Automatic introspection check failed: {e}")
 
                     # (c) auto‑close from reflection + apply drift immediately
                     try:
-                        print("🔍 DEBUG: Auto-closing commitments from reflection...")
+                        pmm_dlog(
+                            "🔍 DEBUG: Auto-closing commitments from reflection..."
+                        )
                         self.pmm.auto_close_commitments_from_reflection(insight)
-                        print("🔍 DEBUG: Auto-close completed")
+                        pmm_dlog("🔍 DEBUG: Auto-close completed")
                     except Exception as e:
-                        print(f"🔍 DEBUG: Auto-close failed: {e}")
+                        pmm_dlog(f"🔍 DEBUG: Auto-close failed: {e}")
                     try:
-                        print("🔍 DEBUG: Applying trait drift...")
+                        pmm_dlog("🔍 DEBUG: Applying trait drift...")
                         self.pmm.apply_drift_and_save()
-                        print("🔍 DEBUG: Trait drift completed")
+                        pmm_dlog("🔍 DEBUG: Trait drift completed")
                     except Exception as e:
-                        print(f"🔍 DEBUG: Trait drift failed: {e}")
+                        pmm_dlog(f"🔍 DEBUG: Trait drift failed: {e}")
 
                     # Phase 3C: Persist reflection bookkeeping for adaptive triggers
                     try:
@@ -1084,7 +1095,9 @@ class PersistentMindMemory(BaseChatMemory):
                         except Exception:
                             pass  # Never crash on bookkeeping
                     except Exception as e:
-                        print(f"🔍 DEBUG: Failed to update reflection bookkeeping: {e}")
+                        pmm_dlog(
+                            f"🔍 DEBUG: Failed to update reflection bookkeeping: {e}"
+                        )
                 else:
                     # Increment events_since_reflection counter even if reflection failed
                     try:
@@ -1157,7 +1170,7 @@ class PersistentMindMemory(BaseChatMemory):
                     )
 
         except Exception as e:
-            print(f"🔍 DEBUG: Evidence event processing error: {e}")
+            pmm_dlog(f"🔍 DEBUG: Evidence event processing error: {e}")
 
     def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, str]:
         """
@@ -1207,7 +1220,7 @@ class PersistentMindMemory(BaseChatMemory):
                 pmm_context_parts.append(c_text)
 
         except Exception as e:
-            print(f"🔍 DEBUG: Failed to load directive context: {e}")
+            pmm_dlog(f"🔍 DEBUG: Failed to load directive context: {e}")
             # Fallback to legacy commitment loading
             pass
 
@@ -1295,7 +1308,7 @@ class PersistentMindMemory(BaseChatMemory):
                         + "\n".join(conversation_history[-15:])
                     )  # Last 15 exchanges
         except Exception as e:
-            print(f"Warning: Failed to load conversation history from SQLite: {e}")
+            pmm_dlog(f"Warning: Failed to load conversation history from SQLite: {e}")
 
         # Combine PMM context with conversation history
         if pmm_context_parts:
@@ -1349,7 +1362,7 @@ class PersistentMindMemory(BaseChatMemory):
         if not command_type:
             return None
 
-        print(f"🔍 DEBUG: Processing introspection command: {command_type.value}")
+        pmm_dlog(f"🔍 DEBUG: Processing introspection command: {command_type.value}")
 
         if user_input.lower().strip() == "@introspect help":
             # Special case: show available commands
@@ -1437,7 +1450,7 @@ class PersistentMindMemory(BaseChatMemory):
             return relevant_memories
 
         except Exception as e:
-            print(f"🔍 DEBUG: Semantic context retrieval failed: {e}")
+            pmm_dlog(f"🔍 DEBUG: Semantic context retrieval failed: {e}")
             return []
 
     def _is_similar_to_recent_insights(self, content: str) -> bool:
@@ -1454,12 +1467,12 @@ class PersistentMindMemory(BaseChatMemory):
             is_dup = arm._is_duplicate_embedding(content)
             if is_dup:
                 # Surface effective threshold for observability
-                print(
+                pmm_dlog(
                     f"🔍 DEBUG: High similarity via AtomicReflectionManager (threshold: {arm.embedding_threshold})"
                 )
             return is_dup
         except Exception as e:
-            print(f"🔍 DEBUG: Atomic dedup check failed, using fallback: {e}")
+            pmm_dlog(f"🔍 DEBUG: Atomic dedup check failed, using fallback: {e}")
 
         # Fallback to simple text comparison against recent insights
         recent_insights = self.pmm.model.self_knowledge.insights[-8:]
@@ -1497,7 +1510,7 @@ class PersistentMindMemory(BaseChatMemory):
             or not active_model_config.get("name")
             or not active_model_config.get("provider")
         ):
-            print(
+            pmm_dlog(
                 f"🔍 DEBUG: No valid active model config for reflection: {active_model_config}"
             )
             return None
@@ -1546,7 +1559,7 @@ class PersistentMindMemory(BaseChatMemory):
             except Exception:
                 telemetry = False
             if telemetry:
-                print(
+                pmm_tlog(
                     f"[PMM_TELEMETRY] novelty_adapt: base={base_thresh:.2f}, adapted={adapted_thresh:.2f}, "
                     f"stage={profile.stage.value}, IAS={ias:.3f}, GAS={gas:.3f}"
                 )
@@ -1559,7 +1572,7 @@ class PersistentMindMemory(BaseChatMemory):
             current_context
         )
         if not should_reflect:
-            print(f"🔍 DEBUG: Reflection blocked by cooldown - {cooldown_reason}")
+            pmm_dlog(f"🔍 DEBUG: Reflection blocked by cooldown - {cooldown_reason}")
             # Telemetry: consolidate attempt even when blocked
             try:
                 telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
@@ -1574,7 +1587,7 @@ class PersistentMindMemory(BaseChatMemory):
                 try:
                     cd_status = self.reflection_cooldown.get_status()
                     ar_stats = self.atomic_reflection.get_stats()
-                    print(
+                    pmm_tlog(
                         f"[PMM_TELEMETRY] reflection_attempt: decision=blocked, reason={cooldown_reason}, "
                         f"turns_gate={cd_status.get('turns_gate_passed')}, time_gate={cd_status.get('time_gate_passed')}, "
                         f"novelty_threshold={cd_status.get('novelty_threshold')}, "
@@ -1586,40 +1599,26 @@ class PersistentMindMemory(BaseChatMemory):
                     pass
             return None
 
-        print(f"🔍 DEBUG: Reflection cooldown passed - {cooldown_reason}")
+        # Passed cooldown gates
+        pmm_dlog(f"🔍 DEBUG: Reflection cooldown passed - {cooldown_reason}")
 
-        # Run synchronously to avoid threading issues
         success = False
         try:
-            # Generate insight with current model config
+            # Generate a candidate insight
             insight_obj = reflect_once(self.pmm, None, active_model_config)
 
-            if not insight_obj or not insight_obj.content:
-                print("🔍 DEBUG: No insight generated")
+            if not insight_obj or not getattr(insight_obj, "content", None):
+                pmm_dlog("🔍 DEBUG: No insight generated")
                 return None
 
             content = insight_obj.content.strip()
             if len(content) < 10:
-                print("🔍 DEBUG: Insight too short, skipping")
+                pmm_dlog("🔍 DEBUG: Insight too short, skipping")
                 return None
 
             # Apply n-gram ban filtering (stage-aware)
-            model_name = active_model_config.get("name", "unknown")
-            stage_label = None
             try:
-                from pmm.emergence import compute_emergence_scores
-
-                scores = compute_emergence_scores(
-                    window=5, storage_manager=getattr(self.pmm, "sqlite_store", None)
-                )
-                ias = float(scores.get("IAS", 0.0) or 0.0)
-                gas = float(scores.get("GAS", 0.0) or 0.0)
-                profile = self.emergence_stages.calculate_emergence_profile(
-                    model_name, ias, gas
-                )
-                stage_label = getattr(profile.stage, "value", None) or str(
-                    profile.stage
-                )
+                stage_label = profile.stage.value  # from earlier computation
             except Exception:
                 stage_label = None
 
@@ -1627,7 +1626,7 @@ class PersistentMindMemory(BaseChatMemory):
                 content, model_name, stage=stage_label
             )
             if ban_replacements:
-                print(
+                pmm_dlog(
                     f"🔍 DEBUG: N-gram ban applied: {ban_replacements} (stage={stage_label or 'auto'})"
                 )
             content = filtered_content
@@ -1653,14 +1652,14 @@ class PersistentMindMemory(BaseChatMemory):
                     profile = self.emergence_stages.calculate_emergence_profile(
                         model_name, ias, gas
                     )
-                    print(
+                    pmm_dlog(
                         f"🔍 DEBUG: Emergence stage: {profile.stage.value} (confidence: {profile.confidence:.2f})"
                     )
                 except Exception:
                     # Non-fatal; continue without emergence update
                     pass
 
-                print(f"🔍 DEBUG: Insight atomically persisted: {content[:100]}...")
+                pmm_dlog(f"🔍 DEBUG: Insight atomically persisted: {content[:100]}...")
                 # Telemetry: consolidated acceptance line
                 try:
                     telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
@@ -1675,7 +1674,7 @@ class PersistentMindMemory(BaseChatMemory):
                     try:
                         cd_status = self.reflection_cooldown.get_status()
                         ar_stats = self.atomic_reflection.get_stats()
-                        print(
+                        pmm_tlog(
                             f"[PMM_TELEMETRY] reflection_attempt: decision=accepted, reason={cooldown_reason}, "
                             f"turns_gate={cd_status.get('turns_gate_passed')}, time_gate={cd_status.get('time_gate_passed')}, "
                             f"novelty_threshold={cd_status.get('novelty_threshold')}, "
@@ -1687,7 +1686,7 @@ class PersistentMindMemory(BaseChatMemory):
                         pass
                 return content
             else:
-                print("🔍 DEBUG: Insight rejected by atomic validation")
+                pmm_dlog("🔍 DEBUG: Insight rejected by atomic validation")
                 # Telemetry: consolidated rejection line
                 try:
                     telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
@@ -1702,7 +1701,7 @@ class PersistentMindMemory(BaseChatMemory):
                     try:
                         cd_status = self.reflection_cooldown.get_status()
                         ar_stats = self.atomic_reflection.get_stats()
-                        print(
+                        pmm_tlog(
                             f"[PMM_TELEMETRY] reflection_attempt: decision=rejected, reason={cooldown_reason}, "
                             f"turns_gate={cd_status.get('turns_gate_passed')}, time_gate={cd_status.get('time_gate_passed')}, "
                             f"novelty_threshold={cd_status.get('novelty_threshold')}, "
@@ -1713,12 +1712,11 @@ class PersistentMindMemory(BaseChatMemory):
                     except Exception:
                         pass
                 return None
-
         except Exception as e:
-            print(f"🔍 DEBUG: Reflection error: {e}")
+            pmm_dlog(f"🔍 DEBUG: Reflection error: {e}")
             return None
         finally:
-            print(f"🔍 DEBUG: Reflection completed, insight: {success}")
+            pmm_dlog(f"🔍 DEBUG: Reflection completed, insight: {success}")
 
     @property
     def memory_variables(self) -> List[str]:

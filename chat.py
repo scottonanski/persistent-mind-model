@@ -38,6 +38,16 @@ def parse_args():
         action="store_true",
         help="Force non-interactive mode; do not try to read from /dev/tty",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logs (API call info, internal anchors)",
+    )
+    parser.add_argument(
+        "--telemetry",
+        action="store_true",
+        help="Enable PMM telemetry logs in chat output",
+    )
     return parser.parse_args()
 
 
@@ -504,6 +514,10 @@ def main():
             return tty_file.readline().strip()
         return input("\n👤 You: ").strip()
 
+    # CLI-controlled logging toggles (off by default)
+    debug_on = bool(getattr(args, "debug", False))
+    telemetry_flag = bool(getattr(args, "telemetry", False))
+
     while True:
         try:
             # Get user input
@@ -731,9 +745,10 @@ def main():
             system_prompt = get_pmm_system_prompt(identity_nudge_flag)
             if add_identity_anchor:
                 system_prompt = (system_prompt or "") + identity_anchor_text
-                pmm_tlog(
-                    f"[ANCHOR] stage={stage} IAS={ias:.3f} GAS={gas:.3f} events={ev_n} -> applied=1"
-                )
+                if debug_on:
+                    pmm_tlog(
+                        f"[ANCHOR] stage={stage} IAS={ias:.3f} GAS={gas:.3f} events={ev_n} -> applied=1"
+                    )
                 # remember we fired this turn (in-memory only; no persistence)
                 last_anchor_turn = current_turn
 
@@ -745,9 +760,10 @@ def main():
             # Show API call info
             current_config = get_model_config(model_name)
             provider_name = current_config.provider.upper()
-            print(
-                f"🤖 PMM: [API] Calling {provider_name} with prompt: {user_input[:50]}..."
-            )
+            if debug_on:
+                print(
+                    f"🤖 PMM: [API] Calling {provider_name} with prompt: {user_input[:50]}..."
+                )
             response = invoke_model(conversation_history)
 
             # Handle response format differences
@@ -756,7 +772,8 @@ def main():
             else:
                 response_text = response.content  # OpenAI returns message object
 
-            print(f"[API] Response received: {len(response_text)} chars")
+            if debug_on:
+                print(f"[API] Response received: {len(response_text)} chars")
             print(response_text)
 
             # Add AI response to conversation history
@@ -786,11 +803,8 @@ def main():
                     s0_consecutive = 0
 
                 # Telemetry snapshot (uses the same precomputed scores)
-                telemetry_on = os.getenv("PMM_TELEMETRY", "").lower() in (
-                    "1",
-                    "true",
-                    "yes",
-                    "on",
+                telemetry_on = telemetry_flag or (
+                    os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
                 )
                 if telemetry_on:
                     try:

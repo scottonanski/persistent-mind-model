@@ -73,3 +73,15 @@ def pmm_tlog(*args, **kwargs):
     except Exception:
         # Never let telemetry printing crash runtime
         pass
+
+
+# Minimal debug print helper (stderr) guarded by PMM_DEBUG
+def pmm_dlog(*args, **kwargs):
+    """Minimal debug print when PMM_DEBUG is truthy."""
+    try:
+        flag = os.getenv("PMM_DEBUG", "")
+        if flag:
+            print(*args, **kwargs, file=sys.stderr, flush=True)
+    except Exception:
+        # Never let debug printing crash runtime
+        pass

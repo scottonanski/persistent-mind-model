@@ -1,4 +1,3 @@
-
 from pmm.name_detect import extract_agent_name_command
 from pmm.atomic_reflection import AtomicReflectionManager
 
