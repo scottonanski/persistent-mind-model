@@ -370,3 +370,55 @@ def get_meta_reflection_analyzer() -> MetaReflectionAnalyzer:
     if _meta_analyzer is None:
         _meta_analyzer = MetaReflectionAnalyzer()
     return _meta_analyzer
+
+
+# --- Step 12: Prompt nudge utilities ---
+def _recent_event_ids(storage_manager, k: int = 20):
+    try:
+        # Prefer a generic accessor if available
+        if hasattr(storage_manager, "get_recent_events"):
+            evs = storage_manager.get_recent_events(limit=k) or []
+        elif hasattr(storage_manager, "recent_events"):
+            # Compatibility with SQLiteStore.recent_events(limit)
+            evs = storage_manager.recent_events(limit=k) or []
+        else:
+            evs = []
+    except Exception:
+        evs = []
+    ids = []
+    for ev in evs:
+        eid = ev.get("id") or ev.get("event_id")
+        if not eid:
+            continue
+        s = str(eid)
+        if not s.startswith("ev"):
+            s = f"ev{s}"
+        ids.append(s)
+    # keep order, drop dups
+    seen = set()
+    out = []
+    for s in ids:
+        if s not in seen:
+            out.append(s)
+            seen.add(s)
+    return out
+
+
+def apply_ref_nudge(prompt: str, storage_manager) -> str:
+    """Append explicit reference instructions and candidate IDs to a reflection prompt.
+
+    This function is intentionally lightweight and side-effect free so it can be
+    called right before sending the prompt to the LLM.
+    """
+    try:
+        # Instruction lines (verbatim per spec)
+        prompt += "\nInclude 2–3 concrete event references by ID from the last 20 events (e.g., “ev312”, “ev315”); if none apply, pick the most relevant recent ones. Also mention one PMM anchor term (commitments, memory, drift, identity, emergence) once.\n\n"
+        prompt += "Format: one short paragraph; then a single line exactly like:\nrefs: ev###, ev###\n"
+
+        # Candidate IDs list
+        recent_ids = ", ".join(_recent_event_ids(storage_manager, 20)[:12])
+        prompt += f"\nRecent event IDs: {recent_ids}\n"
+    except Exception:
+        # Fail-quiet to avoid interrupting reflection pipeline
+        pass
+    return prompt

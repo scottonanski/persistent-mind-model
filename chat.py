@@ -22,6 +22,9 @@ from pmm.config import (
     AVAILABLE_MODELS,
     get_ollama_models,
 )
+from pmm.emergence import compute_emergence_scores
+from pmm.reflection import reflect_once
+from pmm.logging_config import pmm_tlog
 
 
 def parse_args():
@@ -114,6 +117,7 @@ def show_model_selection(force_tty=True):
 
                     if choice.lower() == "list":
                         tty.write("\n📋 Available Models (see above)\n")
+                        tty.flush()
                         continue
 
                     # Try to parse as number
@@ -122,20 +126,24 @@ def show_model_selection(force_tty=True):
                         if 1 <= idx <= len(available_models):
                             selected_model = available_models[idx - 1]
                             tty.write(f"✅ Selected model {idx}: {selected_model}\n")
+                            tty.flush()
                             return selected_model
                         tty.write(
                             f"❌ Please enter a number between 1 and {len(available_models)}\n"
                         )
+                        tty.flush()
                         continue
 
                     # Try exact model name
                     if choice in available_models:
                         tty.write(f"✅ Selected model by name: {choice}\n")
+                        tty.flush()
                         return choice
 
                     tty.write(
                         f"❌ Unknown model '{choice}'. Type 'list' to see available models.\n"
                     )
+                    tty.flush()
 
         except Exception as e:
             print(
@@ -335,8 +343,23 @@ def main():
         )
         bridge_manager.on_switch(None, curr_model_config)
 
+    # Recovery state: identity nudge + S0 streak tracking
+    s0_streak_threshold = 3
+    try:
+        env_thr = os.getenv("PMM_S0_STREAK_THRESHOLD")
+        if env_thr is not None:
+            s0_streak_threshold = max(1, int(env_thr))
+    except Exception:
+        pass
+
+    s0_consecutive = 0
+    identity_nudge_flag = False
+    # Local turn tracking for identity anchor cooldown
+    current_turn = 0
+    last_anchor_turn = None
+
     # Create enhanced system prompt with PMM context
-    def get_pmm_system_prompt():
+    def get_pmm_system_prompt(identity_nudge: bool = False):
         # Always pull fresh memory right before each call
         raw_context = pmm_memory.load_memory_variables({}).get("history", "")
 
@@ -396,22 +419,23 @@ def main():
             "\n".join([f"- {c['text']}" for c in opens]) if opens else "none"
         )
 
-        # Mind Policy: short, deterministic, and placed BEFORE the memory blob
-        mind_policy = (
-            "MIND POLICY\n"
-            f"Identity: {agent_name}\n"
-            "Operate as a persistent, self‑reflective agent. Honor your commitments and use your stored memories.\n"
-            "When uncertain, propose next actions, ask clarifying questions, or reflect briefly.\n"
-            "Calibrate confidence; prefer concrete steps; close the loop on prior promises.\n"
-            f"Top Patterns: {top_patterns_str}\n"
-            "Behavioral Directives:\n"
-            "  1) If an open commitment is listed, address it first (plan, update, or close with evidence).\n"
-            "  2) Commitments should arise naturally from reflection, not casual conversation.\n"
-            "  3) If you notice contradictions or drift, reflect briefly then proceed.\n"
-            "Open Commitments:\n"
-            f"{open_commitments_str}\n"
-            "— end policy —"
-        )
+        # Mind Policy: neutral, concise, placed BEFORE the memory blob
+        mind_policy_lines = [
+            "MIND POLICY",
+            f"Identity: {agent_name}",
+            "Be direct and concise. If uncertain, state uncertainty briefly and answer your best.",
+            "You may propose next steps and form commitments when helpful. If the user opts out, stop.",
+            "Ask clarifying questions only when necessary to proceed.",
+            f"Top Patterns (awareness only): {top_patterns_str}",
+            "Open Commitments:",
+            f"{open_commitments_str}",
+        ]
+        if identity_nudge:
+            mind_policy_lines.append(
+                "Identity Nudge: Speak in first-person as this PMM agent. Prefer 'I' statements, reference my open commitments explicitly, avoid generic assistant voice."
+            )
+        mind_policy_lines.append("— end policy —")
+        mind_policy = "\n".join(mind_policy_lines)
 
         # Personality + cross‑session memory for rich context (truncated for prompt safety)
         persona = (
@@ -422,7 +446,8 @@ def main():
         )
 
         return (
-            f"You are a Persistent Mind Model (PMM) with genuine memory and evolving personality.\n"
+            f"You are {agent_name}.\n"
+            "You have access to persistent memory (below). Use it as context; otherwise answer directly and plainly.\n"
             f"{mind_policy}{loop_hint}\n\n"
             f"{persona}\n\n"
             "CROSS‑SESSION MEMORY (condensed):\n"
@@ -436,7 +461,9 @@ def main():
     print("Start chatting...")
 
     # Initialize conversation history with PMM system prompt
-    conversation_history = [{"role": "system", "content": get_pmm_system_prompt()}]
+    conversation_history = [
+        {"role": "system", "content": get_pmm_system_prompt(identity_nudge_flag)}
+    ]
 
     def invoke_model(messages):
         """Invoke model with proper format based on provider type."""
@@ -605,7 +632,7 @@ def main():
                     # Refresh conversation history with updated system prompt
                     conversation_history[0] = {
                         "role": "system",
-                        "content": get_pmm_system_prompt(),
+                        "content": get_pmm_system_prompt(identity_nudge_flag),
                     }
 
                     print(
@@ -664,9 +691,55 @@ def main():
             conversation_history.append({"role": "user", "content": user_input})
 
             # CRITICAL FIX: Refresh system prompt with latest memory context before each response
+            # --- One-turn identity anchor for S0/S1 with low momentum, gated on real context ---
+            try:
+                # Use the same storage and a wider window so we read the same snapshot as EMERGENCE logs
+                storage = (
+                    getattr(pmm_memory, "pmm", None).sqlite_store
+                    if hasattr(pmm_memory.pmm, "sqlite_store")
+                    else None
+                )
+                scores = compute_emergence_scores(window=15, storage_manager=storage)
+
+                stage = scores.get("stage", "")
+                ias = float(scores.get("ias", 0.0))
+                gas = float(scores.get("gas", 0.0))
+                ev_n = int(scores.get("events_analyzed", 0))
+            except Exception:
+                stage, ias, gas, ev_n = "", 0.0, 0.0, 0
+
+            # Optional: 1-turn cooldown to avoid immediate re-fire on the very next turn
+            # Track turns locally to avoid global state dependencies
+            current_turn += 1
+            cooldown_ok = (last_anchor_turn is None) or (
+                current_turn - last_anchor_turn >= 1
+            )
+
+            add_identity_anchor = (
+                ev_n > 0  # don’t fire on cold/empty context
+                and cooldown_ok  # avoid back-to-back anchors
+                and stage in ("S0: Substrate", "S1: Resistance")
+                and (ias < 0.25 or gas < 0.50)
+            )
+
+            identity_anchor_text = (
+                "\n\n[identity-anchor] In your next single reply, use first-person once "
+                "and mention one PMM concept (commitments, memory, or drift) briefly. "
+                "Do not change tone; keep it natural."
+            )
+
+            system_prompt = get_pmm_system_prompt(identity_nudge_flag)
+            if add_identity_anchor:
+                system_prompt = (system_prompt or "") + identity_anchor_text
+                pmm_tlog(
+                    f"[ANCHOR] stage={stage} IAS={ias:.3f} GAS={gas:.3f} events={ev_n} -> applied=1"
+                )
+                # remember we fired this turn (in-memory only; no persistence)
+                last_anchor_turn = current_turn
+
             conversation_history[0] = {
                 "role": "system",
-                "content": get_pmm_system_prompt(),
+                "content": system_prompt,
             }
 
             # Show API call info
@@ -696,6 +769,98 @@ def main():
                 )
             except Exception as _e:
                 print(f"[warn] save_context failed: {_e}")
+
+            # --- Autonomous S0 Recovery & Telemetry ---
+            try:
+                # Reuse the precomputed emergence snapshot from earlier this turn
+                # to avoid divergence between analyzers/telemetry and prevent
+                # spurious S0 streak escalations.
+                # The snapshot was computed with window=15 and the active storage.
+                stage = scores.get("stage", "Unknown")
+                is_s0 = stage.startswith("S0")
+
+                # Track consecutive S0
+                if is_s0:
+                    s0_consecutive += 1
+                else:
+                    s0_consecutive = 0
+
+                # Telemetry snapshot (uses the same precomputed scores)
+                telemetry_on = os.getenv("PMM_TELEMETRY", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+                if telemetry_on:
+                    try:
+                        cd_status = pmm_memory.reflection_cooldown.get_status()
+                    except Exception:
+                        cd_status = {}
+                    print(
+                        f"[PMM_TELEMETRY] emergence: stage={stage}, IAS={scores.get('IAS')}, GAS={scores.get('GAS')}, pmmspec={scores.get('pmmspec_avg')}, selfref={scores.get('selfref_avg')}, novelty={scores.get('novelty')}, commit_close_rate={scores.get('commit_close_rate')}, s0_streak={s0_consecutive}/{s0_streak_threshold}, cooldown={cd_status}"
+                    )
+
+                # Decide on recovery actions when stuck in S0
+                if s0_consecutive >= s0_streak_threshold:
+                    identity_nudge_flag = True  # Nudge next turn
+
+                    # Ensure an identity anchoring commitment exists
+                    try:
+                        existing = pmm_memory.pmm.get_open_commitments()
+                        anchor_exists = any(
+                            isinstance(c, dict)
+                            and "identity" in c.get("text", "").lower()
+                            and "anchor" in c.get("text", "").lower()
+                            for c in (existing or [])
+                        )
+                        if not anchor_exists:
+                            pmm_memory.pmm.add_commitment(
+                                text="Short-term identity anchoring: I will speak in first-person as my PMM identity and reference my open commitments over the next 3 turns.",
+                                source_insight_id="system:emergence_s0_recovery",
+                                due=None,
+                            )
+                            if telemetry_on:
+                                print(
+                                    "[PMM_TELEMETRY] commitment: opened identity anchoring commitment"
+                                )
+                    except Exception as _e:
+                        if telemetry_on:
+                            print(f"[PMM_TELEMETRY] commitment_error: {str(_e)}")
+
+                    # Force a reflection to break substrate inertia
+                    try:
+                        allowed, reason = pmm_memory.reflection_cooldown.should_reflect(
+                            current_context=response_text,
+                            force_reasons=["emergence_s0_stuck"],
+                        )
+                        if allowed:
+                            # Use active model config for adapter selection
+                            try:
+                                active_cfg = llm_factory.get_active_config()
+                            except Exception:
+                                active_cfg = None
+                            _ins = reflect_once(
+                                pmm_memory.pmm, active_model_config=active_cfg
+                            )
+                            if telemetry_on:
+                                print(
+                                    f"[PMM_TELEMETRY] reflection: forced reason=emergence_s0_stuck, accepted={getattr(_ins, 'meta', {}).get('accepted') if _ins else None}"
+                                )
+                    except Exception as _e:
+                        if telemetry_on:
+                            print(f"[PMM_TELEMETRY] reflection_error: {str(_e)}")
+
+                else:
+                    # When not stuck, disable nudge to avoid oversteer
+                    identity_nudge_flag = False
+
+            except Exception as _e:
+                # Never let recovery logic break the chat loop
+                if os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on"):
+                    print(
+                        f"[PMM_TELEMETRY] s0_recovery_error: {type(_e).__name__}: {_e}"
+                    )
 
         except KeyboardInterrupt:
             print("\n\n👋 Chat interrupted. Your conversation is saved!")

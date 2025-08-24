@@ -152,7 +152,12 @@ class PersistentMindMemory(BaseChatMemory):
         self.stance_filter = StanceFilter()
         self.model_baselines = ModelBaselineManager()
         self.atomic_reflection = AtomicReflectionManager(self.pmm)
-        self.reflection_cooldown = ReflectionCooldownManager()
+        # Configure stricter default cooldown gates to reduce reflection frequency
+        self.reflection_cooldown = ReflectionCooldownManager(
+            min_turns=2,
+            min_wall_time_seconds=90,
+            novelty_threshold=0.82,
+        )
         self.commitment_ttl = CommitmentTTLManager()
         self.ngram_ban = NGramBanSystem()
         self.emergence_stages = EmergenceStageManager(self.model_baselines)
@@ -396,43 +401,9 @@ class PersistentMindMemory(BaseChatMemory):
             # Detect agent name assignments and persist them
             # Only accept explicit *agent* rename directives.
             # DO NOT infer from casual phrasing like "you're ...".
-            agent_name_patterns = [
-                r"\byour name is (\w+)\b",
-                r"\bwe will call you (\w+)\b",
-                r"\blet['']s call you (\w+)\b",
-                r"\bi['']ll call you (\w+)\b",
-            ]
-
-            # Prevent silly names like "doing", "working", "fine", etc.
-            forbidden_names = {
-                "doing",
-                "working",
-                "fine",
-                "ok",
-                "okay",
-                "good",
-                "thanks",
-                "cool",
-            }
-            for pattern in agent_name_patterns:
-                match = re.search(pattern, user_lower)
-                if match:
-                    candidate = match.group(1).strip().lower()
-                    if candidate in forbidden_names:
-                        continue
-                    agent_name = candidate.title()
-                    self.pmm.set_name(agent_name, origin="chat_detect")
-
-                    # PHASE 3B+: Emit explicit identity_update event for traceability
-                    self.pmm.add_event(
-                        summary=f"IDENTITY UPDATE: Agent name officially adopted as '{agent_name}' via user affirmation",
-                        effects=[],
-                        etype="identity_update",
-                    )
-
-                    print(f" Persisted agent name change to: {agent_name}")
-                    print(" Emitted identity_update event for traceability")
-                    break
+            # IMPORTANT POLICY: Do not accept user-driven agent renames here.
+            # User inputs should never rename the agent. Only assistant self‑declarations may.
+            # (Name changes, if any, are handled later from assistant output with cooldown.)
 
             # Extract preferences and other key info
             preference_patterns = [
@@ -571,12 +542,33 @@ class PersistentMindMemory(BaseChatMemory):
             )
 
             # Apply stance filter to remove anthropomorphic language
+            # Determine emergence stage label for stage-aware filtering
+            stage_label = None
+            try:
+                from pmm.emergence import compute_emergence_scores
+
+                scores = compute_emergence_scores(
+                    window=5, storage_manager=getattr(self.pmm, "sqlite_store", None)
+                )
+                ias = float(scores.get("IAS", 0.0) or 0.0)
+                gas = float(scores.get("GAS", 0.0) or 0.0)
+                model_name = current_model
+                profile = self.emergence_stages.calculate_emergence_profile(
+                    model_name, ias, gas
+                )
+                stage_label = getattr(profile.stage, "value", None) or str(
+                    profile.stage
+                )
+            except Exception:
+                # Fall back to internal resolution in filter if stage cannot be computed
+                stage_label = None
+
             filtered_output, stance_filters = self.stance_filter.filter_response(
-                ai_output
+                ai_output, stage=stage_label
             )
             if stance_filters:
                 print(
-                    f"🔍 DEBUG: Applied stance filters: {len(stance_filters)} changes"
+                    f"🔍 DEBUG: Applied stance filters: {len(stance_filters)} changes (stage={stage_label or 'auto'})"
                 )
 
             # Check for phrase repetition
@@ -688,46 +680,11 @@ class PersistentMindMemory(BaseChatMemory):
                 if behavioral_input:
                     self._auto_extract_key_info(behavioral_input)
 
-                    # Check for agent name adoption patterns using strict detector
+                    # Name handling: ignore any user-driven rename attempts (policy).
                     if self.pmm:
-                        from .name_detect import (
-                            extract_agent_name_command,
-                            _too_soon_since_last_name_change,
-                            _utcnow_str,
+                        print(
+                            "🔍 DEBUG: Ignoring user-driven agent rename attempts by policy"
                         )
-
-                        cand = extract_agent_name_command(behavioral_input, "user")
-                        if cand:
-                            # Check cooldown
-                            last_change = getattr(
-                                self.pmm.model.metrics, "last_name_change_at", None
-                            )
-                            if not _too_soon_since_last_name_change(
-                                last_change, days=1
-                            ):
-                                print(
-                                    f"🔍 DEBUG: Explicit agent naming detected → '{cand}'"
-                                )
-                                try:
-                                    self.pmm.set_name(cand, origin="user_command")
-                                    # Record cooldown marker
-                                    self.pmm.model.metrics.last_name_change_at = (
-                                        _utcnow_str()
-                                    )
-                                    self.pmm.save_model()
-                                    # Emit identity_update event for traceability
-                                    self.pmm.add_event(
-                                        summary=f"Identity update: Name changed to '{cand}' (origin=user_command)",
-                                        effects=[],
-                                        etype="identity_update",
-                                    )
-                                    print(f"🔍 DEBUG: Successfully set name to: {cand}")
-                                except Exception as e:
-                                    print(f"🔍 DEBUG: Failed to set name: {e}")
-                            else:
-                                print("🔍 DEBUG: Name change blocked by cooldown")
-                        else:
-                            print("🔍 DEBUG: No explicit agent naming found; skipping")
 
                     # NEW: Phase 3 - Detect and process evidence events from human input
                     try:
@@ -758,10 +715,30 @@ class PersistentMindMemory(BaseChatMemory):
 
                     cand = extract_agent_name_command(ai_output, "assistant")
                     if cand:
-                        # Assistant self-naming disabled to prevent pollution
-                        print("🔍 DEBUG: Name change blocked by cooldown")
+                        # Apply cooldown and persist assistant self‑declaration
+                        last_change = getattr(
+                            self.pmm.model.metrics, "last_name_change_at", None
+                        )
+                        if not _too_soon_since_last_name_change(last_change, days=1):
+                            try:
+                                self.pmm.set_name(cand, origin="assistant_self")
+                                # Record cooldown marker
+                                self.pmm.model.metrics.last_name_change_at = (
+                                    _utcnow_str()
+                                )
+                                self.pmm.save_model()
+                                self.pmm.add_event(
+                                    summary=f"Identity update: Name changed to '{cand}' (origin=assistant_self)",
+                                    effects=[],
+                                    etype="identity_update",
+                                )
+                                print(f"🔍 DEBUG: Assistant self‑named to: {cand}")
+                            except Exception as e:
+                                print(f"🔍 DEBUG: Assistant self‑naming failed: {e}")
+                        else:
+                            print("🔍 DEBUG: Name change blocked by cooldown")
                     else:
-                        print("🔍 DEBUG: No assistant self-declaration found; skipping")
+                        print("🔍 DEBUG: No assistant self‑declaration found; skipping")
                 # Process evidence events from assistant output as well
                 try:
                     self._process_evidence_events(ai_output)
@@ -1101,11 +1078,7 @@ class PersistentMindMemory(BaseChatMemory):
                         # ---- 6) Update commitment context for next turn ----
                         self._update_commitment_context()
 
-                        # ---- 7) Increment reflection cooldown turn counter ----
-                        if human_input:  # Only increment on actual user turns
-                            self.reflection_cooldown.increment_turn()
-
-                        # ---- 8) Update reflection bookkeeping for adaptive triggers ----
+                        # ---- 7) Update reflection bookkeeping for adaptive triggers ----
                         try:
                             self.adaptive_trigger.update_reflection_bookkeeping()
                         except Exception:
@@ -1136,6 +1109,19 @@ class PersistentMindMemory(BaseChatMemory):
         # ---- 7) Increment reflection cooldown turn counter ----
         if human_input:  # Only increment on actual user turns
             self.reflection_cooldown.increment_turn()
+
+            # Also feed the novelty gate with a compact current context snapshot
+            try:
+                recent_events = self.pmm.model.self_knowledge.autobiographical_events[
+                    -3:
+                ]
+                current_context = " ".join(
+                    [getattr(event, "summary", str(event)) for event in recent_events]
+                )
+            except Exception:
+                current_context = ""
+            if current_context:
+                self.reflection_cooldown.add_context(current_context)
 
         # ---- 8) Persist PMM ----
         self.pmm.save_model()
@@ -1182,20 +1168,17 @@ class PersistentMindMemory(BaseChatMemory):
                 formatted for optimal LLM performance.
         """
         # Get base memory variables from LangChain
-        base_variables = super().load_memory_variables(inputs)
-        if base_variables is None:
+        # Ensure we always have a dict to augment
+        try:
+            base_variables = super().load_memory_variables(inputs)
+            if not isinstance(base_variables, dict):
+                base_variables = {}
+        except Exception:
             base_variables = {}
 
-        # Add PMM personality context
-        pmm_context_parts = []
+        # Collect PMM-rendered context chunks to prepend later
+        pmm_context_parts: List[str] = []
 
-        if self.personality_context:
-            pmm_context_parts.append(self.personality_context)
-
-        if self.commitment_context:
-            pmm_context_parts.append(self.commitment_context)
-
-        # Add directive hierarchy context
         try:
             self.directive_system.get_directive_summary()
 
@@ -1528,6 +1511,49 @@ class PersistentMindMemory(BaseChatMemory):
         except (AttributeError, IndexError):
             current_context = ""
 
+        # Stage-adapt the novelty threshold before checking cooldown gates
+        try:
+            from pmm.emergence import compute_emergence_scores
+
+            scores = compute_emergence_scores(
+                window=5, storage_manager=getattr(self.pmm, "sqlite_store", None)
+            )
+            ias = float(scores.get("IAS", 0.0) or 0.0)
+            gas = float(scores.get("GAS", 0.0) or 0.0)
+
+            model_name = active_model_config.get("name", "unknown")
+            profile = self.emergence_stages.calculate_emergence_profile(
+                model_name, ias, gas
+            )
+
+            base_thresh = float(self.reflection_cooldown.novelty_threshold)
+            adapted_thresh = float(
+                self.emergence_stages.adapt_novelty_threshold(
+                    base_thresh, profile.stage
+                )
+            )
+            # Set adapted novelty threshold for this decision
+            self.reflection_cooldown.novelty_threshold = adapted_thresh
+
+            # Telemetry: record adaptation
+            try:
+                telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            except Exception:
+                telemetry = False
+            if telemetry:
+                print(
+                    f"[PMM_TELEMETRY] novelty_adapt: base={base_thresh:.2f}, adapted={adapted_thresh:.2f}, "
+                    f"stage={profile.stage.value}, IAS={ias:.3f}, GAS={gas:.3f}"
+                )
+        except Exception as _e:
+            # Non-fatal: keep existing threshold on any failure
+            pass
+
         # Check reflection cooldown gates
         should_reflect, cooldown_reason = self.reflection_cooldown.should_reflect(
             current_context
@@ -1577,25 +1603,50 @@ class PersistentMindMemory(BaseChatMemory):
                 print("🔍 DEBUG: Insight too short, skipping")
                 return None
 
-            # Apply n-gram ban filtering
+            # Apply n-gram ban filtering (stage-aware)
             model_name = active_model_config.get("name", "unknown")
+            stage_label = None
+            try:
+                from pmm.emergence import compute_emergence_scores
+
+                scores = compute_emergence_scores(
+                    window=5, storage_manager=getattr(self.pmm, "sqlite_store", None)
+                )
+                ias = float(scores.get("IAS", 0.0) or 0.0)
+                gas = float(scores.get("GAS", 0.0) or 0.0)
+                profile = self.emergence_stages.calculate_emergence_profile(
+                    model_name, ias, gas
+                )
+                stage_label = getattr(profile.stage, "value", None) or str(
+                    profile.stage
+                )
+            except Exception:
+                stage_label = None
+
             filtered_content, ban_replacements = self.ngram_ban.postprocess_style(
-                content, model_name
+                content, model_name, stage=stage_label
             )
             if ban_replacements:
-                print(f"🔍 DEBUG: N-gram ban applied: {ban_replacements}")
-                content = filtered_content
+                print(
+                    f"🔍 DEBUG: N-gram ban applied: {ban_replacements} (stage={stage_label or 'auto'})"
+                )
+            content = filtered_content
 
             # Atomic reflection validation and persistence
             success = self.atomic_reflection.add_insight(
                 content, active_model_config, active_model_config.get("epoch", 0)
             )
             if success:
-                # Update baselines with current IAS/GAS
-                emergence_context = self.pmm.get_emergence_context()
-                if emergence_context:
-                    ias = emergence_context.get("ias", 0.0)
-                    gas = emergence_context.get("gas", 0.0)
+                # Update baselines with current IAS/GAS (safe computation)
+                try:
+                    from pmm.emergence import compute_emergence_scores
+
+                    scores = compute_emergence_scores(
+                        window=5,
+                        storage_manager=getattr(self.pmm, "sqlite_store", None),
+                    )
+                    ias = float(scores.get("IAS", 0.0) or 0.0)
+                    gas = float(scores.get("GAS", 0.0) or 0.0)
                     self.model_baselines.add_scores(model_name, ias, gas)
 
                     # Calculate emergence profile
@@ -1605,6 +1656,9 @@ class PersistentMindMemory(BaseChatMemory):
                     print(
                         f"🔍 DEBUG: Emergence stage: {profile.stage.value} (confidence: {profile.confidence:.2f})"
                     )
+                except Exception:
+                    # Non-fatal; continue without emergence update
+                    pass
 
                 print(f"🔍 DEBUG: Insight atomically persisted: {content[:100]}...")
                 # Telemetry: consolidated acceptance line

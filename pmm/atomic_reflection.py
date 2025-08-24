@@ -1,14 +1,17 @@
 # pmm/atomic_reflection.py
 from __future__ import annotations
 from typing import List, Dict, Any
+from collections import OrderedDict
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import os
+import uuid
 from pmm.config.models import (
     get_min_embedding_threshold,
     get_threshold_cooldown_turns,
 )
+from pmm.logging_config import pmm_tlog
 
 
 @dataclass
@@ -27,18 +30,18 @@ class AtomicReflectionManager:
 
     def __init__(self, pmm_manager, embedding_threshold: float | None = None):
         self.pmm = pmm_manager
-        # Allow override via env var; default to a more permissive 0.975
-        # so that only near-identical insights are rejected by embeddings.
+        # Allow override via env var; default to a more permissive 0.94
+        # so that only very similar insights are rejected by embeddings.
         env_threshold = os.getenv("PMM_EMBEDDING_THRESHOLD")
         if env_threshold is not None:
             try:
                 self.embedding_threshold = float(env_threshold)
             except ValueError:
                 # Fallback if env var is malformed
-                self.embedding_threshold = 0.975
+                self.embedding_threshold = 0.94
         else:
             self.embedding_threshold = (
-                float(embedding_threshold) if embedding_threshold is not None else 0.975
+                float(embedding_threshold) if embedding_threshold is not None else 0.94
             )
         self._lock = threading.Lock()
 
@@ -49,6 +52,13 @@ class AtomicReflectionManager:
             self._adaptive_enabled = True
         else:
             self._adaptive_enabled = flag.lower() in ("1", "true", "yes", "on")
+        # Stage-adaptive blending (separate toggle; enabled by default)
+        stage_flag = os.getenv("PMM_STAGE_ADAPTIVE_DEDUP")
+        self._stage_adaptive_enabled = (
+            True
+            if stage_flag is None
+            else stage_flag.lower() in ("1", "true", "yes", "on")
+        )
         # Start with configured threshold and adapt within bounds
         self._effective_threshold = self.embedding_threshold
         # Min threshold is env-driven to avoid over-aggressive dedup
@@ -65,6 +75,55 @@ class AtomicReflectionManager:
         self._recent_insights_cache = []
         self._max_cache_size = 10
 
+        # Lightweight LRU cache for embeddings to reduce API calls
+        self._embedding_cache: OrderedDict[str, List[float]] = OrderedDict()
+        self._embedding_cache_max = 64
+
+        # Global switches (env-driven) for experimentation and debugging
+        # - PMM_DISABLE_EMBEDDING_DEDUP: when truthy, skip embedding-based duplicate checks
+        # - PMM_FORCE_ACCEPT_NEXT_INSIGHT: when truthy, accept the next insight bypassing
+        #   dedup gates (one-shot). Cleared upon use.
+        try:
+            flag = os.getenv("PMM_DISABLE_EMBEDDING_DEDUP", "").lower()
+            self._disable_embedding_dedup = flag in ("1", "true", "yes", "on")
+        except Exception:
+            self._disable_embedding_dedup = False
+
+    def _get_emergence_context(self) -> dict:
+        """
+        Robust context fetcher that won't explode if a legacy accessor is missing.
+        Tries self_model.get_context(); falls back to compute_emergence_scores().
+        """
+        ctx: dict = {}
+        try:
+            smm = getattr(self, "self_model", None)
+
+            # Preferred modern accessor
+            if smm and hasattr(smm, "get_context"):
+                try:
+                    maybe = smm.get_context()
+                    ctx = maybe if isinstance(maybe, dict) else {}
+                except Exception:
+                    ctx = {}
+
+            # Fallback to on-demand emergence snapshot
+            if not ctx:
+                try:
+                    from pmm.emergence import compute_emergence_scores
+
+                    ctx = compute_emergence_scores(
+                        window=5,
+                        storage_manager=getattr(self, "storage_manager", None),
+                    )
+                    if not isinstance(ctx, dict):
+                        ctx = {}
+                except Exception:
+                    ctx = {}
+
+            return ctx
+        except Exception:
+            return {}
+
     def add_insight(
         self, insight_content: str, model_config: Dict[str, Any], epoch: int
     ) -> bool:
@@ -73,6 +132,18 @@ class AtomicReflectionManager:
         Returns True if insight was added, False if rejected.
         """
         with self._lock:
+            # Stage-adapt the effective threshold up front so subsequent dedup logic uses it
+            try:
+                self._apply_stage_adaptation()
+            except Exception:
+                # Never block on adaptation failures
+                pass
+            # Snapshot emergence stage for decision logging
+            try:
+                _ctx = self._get_emergence_context()
+                _stage_for_logs = str(_ctx.get("stage", "")).strip()
+            except Exception:
+                _stage_for_logs = ""
             # Step 1: Basic validation (with normalization to reduce style boilerplate)
             cleaned_content = self._clean_and_normalize(insight_content)
             if not self._passes_basic_validation(cleaned_content):
@@ -84,10 +155,130 @@ class AtomicReflectionManager:
                 print("🔍 DEBUG: Insight rejected - duplicate text similarity")
                 return False
 
-            # Step 3: Embedding similarity check (more expensive), with first-hit pass for borderline cases
-            dup_check = self._is_duplicate_embedding(
-                cleaned_content, return_best_sim=True
+            # Step 2.5: One-shot force-accept override (env-controlled)
+            try:
+                force_once = os.getenv("PMM_FORCE_ACCEPT_NEXT_INSIGHT", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            except Exception:
+                force_once = False
+
+            if force_once:
+                # Clear the env flag so it's one-shot. Best-effort; ignore failures.
+                try:
+                    os.environ.pop("PMM_FORCE_ACCEPT_NEXT_INSIGHT", None)
+                except Exception:
+                    pass
+
+                telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+                # Proceed to epoch validation then persist without dedup gates
+                if telemetry:
+                    print(
+                        "[PMM_TELEMETRY] dedup_override: reason=force_accept_once, gates=skipped(text_ok, embedding_skipped)"
+                    )
+                # Step 4: Epoch validation (ensure model hasn't changed)
+                from pmm.llm_factory import get_llm_factory
+
+                current_epoch = get_llm_factory().get_current_epoch()
+                if epoch != current_epoch:
+                    print(
+                        f"🔍 DEBUG: Insight rejected - epoch mismatch {epoch} != {current_epoch}"
+                    )
+                    return False
+                try:
+                    success = self._persist_insight(cleaned_content, model_config)
+                    if success:
+                        self._update_cache(cleaned_content)
+                        print("🔍 DEBUG: Insight successfully persisted (force-accept)")
+                        self._on_decision(accepted=True)
+                        return True
+                    else:
+                        print(
+                            "🔍 DEBUG: Insight persistence failed (force-accept path)"
+                        )
+                        return False
+                except Exception as e:
+                    print(f"🔍 DEBUG: Insight persistence error (force-accept): {e}")
+                    return False
+
+            # Step 2.6: Automatic bootstrap acceptance (no env required)
+            # If there are no existing insights, or we've had a short rejection streak with
+            # no recent acceptances, allow a single acceptance to break stalemates.
+            try:
+                no_insights = not bool(self.pmm.model.self_knowledge.insights)
+            except Exception:
+                no_insights = False
+
+            bootstrap_allowed = no_insights or (
+                self._accept_streak == 0 and self._reject_streak >= 3
             )
+
+            if bootstrap_allowed:
+                telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+                reason = (
+                    "bootstrap_no_insights"
+                    if no_insights
+                    else "bootstrap_rejection_streak"
+                )
+                if telemetry:
+                    print(
+                        f"[PMM_TELEMETRY] dedup_override: reason={reason}, gates=skipped(text_ok, embedding_skipped)"
+                    )
+                # Step 4: Epoch validation
+                from pmm.llm_factory import get_llm_factory
+
+                current_epoch = get_llm_factory().get_current_epoch()
+                if epoch != current_epoch:
+                    print(
+                        f"🔍 DEBUG: Insight rejected - epoch mismatch {epoch} != {current_epoch}"
+                    )
+                    return False
+
+                try:
+                    success = self._persist_insight(cleaned_content, model_config)
+                    if success:
+                        self._update_cache(cleaned_content)
+                        print("🔍 DEBUG: Insight successfully persisted (bootstrap)")
+                        self._on_decision(accepted=True)
+                        return True
+                    else:
+                        print("🔍 DEBUG: Insight persistence failed (bootstrap path)")
+                        return False
+                except Exception as e:
+                    print(f"🔍 DEBUG: Insight persistence error (bootstrap): {e}")
+                    return False
+
+            # Step 3: Embedding similarity check (more expensive), with first-hit pass for borderline cases
+            # Allow global switch to disable embedding dedup for debugging/experiments
+            if self._disable_embedding_dedup:
+                dup_check = (False, -1.0)
+                telemetry = os.getenv("PMM_TELEMETRY", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+                if telemetry:
+                    print(
+                        f"[PMM_TELEMETRY] dedup_override: reason=embedding_dedup_disabled, threshold={self._effective_threshold:.3f}"
+                    )
+            else:
+                dup_check = self._is_duplicate_embedding(
+                    cleaned_content, return_best_sim=True
+                )
             if isinstance(dup_check, tuple):
                 is_dup, best_sim = dup_check
             else:
@@ -104,15 +295,66 @@ class AtomicReflectionManager:
                     )
                     if telemetry:
                         print(
-                            f"[PMM_TELEMETRY] dedup_override: reason=first_hit_pass, sim={(best_sim if best_sim is not None else -1):.3f}, threshold={self._effective_threshold:.3f}"
+                            f"[PMM_TELEMETRY] dedup_override: reason=first_hit_pass, sim={(best_sim if best_sim is not None else -1):.3f}, threshold={self._effective_threshold:.3f}, stage={_stage_for_logs}"
                         )
                 else:
-                    print(
-                        f"🔍 DEBUG: Insight rejected - embedding similarity > {self._effective_threshold}"
-                    )
-                    # Adaptive: rejection event
-                    self._on_decision(accepted=False)
-                    return False
+                    # Before final rejection, if we're in early stages (S0/S1) and appear stuck, apply a one-shot threshold drop
+                    try:
+                        _stage_lower = (_stage_for_logs or "").lower()
+                        _stuck = self._reject_streak >= 2
+                        if (
+                            (
+                                _stage_lower.startswith("s0")
+                                or _stage_lower.startswith("s1")
+                            )
+                            and _stuck
+                            and best_sim is not None
+                        ):
+                            old_thr = self._effective_threshold
+                            new_thr = max(self._min_thresh, round(old_thr * 0.95, 4))
+                            if os.getenv("PMM_TELEMETRY", "").lower() in (
+                                "1",
+                                "true",
+                                "yes",
+                                "on",
+                            ):
+                                print(
+                                    f"[PMM_TELEMETRY] dedup_adapt: reason=stuck_drop, stage={_stage_for_logs}, reject_streak={self._reject_streak}, threshold {old_thr:.3f} -> {new_thr:.3f}, sim={best_sim:.3f}"
+                                )
+                            self._effective_threshold = new_thr
+                            # Re-evaluate duplicate after adaptive drop
+                            if best_sim <= self._effective_threshold:
+                                # Treat as not duplicate; proceed
+                                if os.getenv("PMM_TELEMETRY", "").lower() in (
+                                    "1",
+                                    "true",
+                                    "yes",
+                                    "on",
+                                ):
+                                    print(
+                                        f"[PMM_TELEMETRY] dedup_override: reason=post_drop_accept, sim={best_sim:.3f}, threshold={self._effective_threshold:.3f}, stage={_stage_for_logs}"
+                                    )
+                            else:
+                                # Still duplicate; reject
+                                print(
+                                    f"🔍 DEBUG: Insight rejected - embedding similarity {best_sim:.3f} > threshold {self._effective_threshold:.3f} (stage={_stage_for_logs})"
+                                )
+                                self._on_decision(accepted=False)
+                                return False
+                        else:
+                            # Regular rejection path
+                            print(
+                                f"🔍 DEBUG: Insight rejected - embedding similarity {best_sim:.3f} > threshold {self._effective_threshold:.3f} (stage={_stage_for_logs})"
+                            )
+                            # Adaptive: rejection event
+                            self._on_decision(accepted=False)
+                            return False
+                    except Exception:
+                        print(
+                            f"🔍 DEBUG: Insight rejected - embedding similarity {best_sim if best_sim is not None else -1:.3f} > threshold {self._effective_threshold:.3f} (stage={_stage_for_logs})"
+                        )
+                        self._on_decision(accepted=False)
+                        return False
 
             # Step 4: Epoch validation (ensure model hasn't changed)
             from pmm.llm_factory import get_llm_factory
@@ -129,7 +371,9 @@ class AtomicReflectionManager:
                 success = self._persist_insight(cleaned_content, model_config)
                 if success:
                     self._update_cache(cleaned_content)
-                    print("🔍 DEBUG: Insight successfully persisted")
+                    print(
+                        f"🔍 DEBUG: Insight successfully persisted (stage={_stage_for_logs})"
+                    )
                     # Adaptive: acceptance event
                     self._on_decision(accepted=True)
                     return True
@@ -198,6 +442,29 @@ class AtomicReflectionManager:
         if len(set(words)) < len(words) * 0.3:  # Too repetitive
             return False
 
+        # Hygiene: block coach-like meta-prescriptions that cause spammy commitments
+        # Examples to block: "ask a probing question every (turn|message)",
+        # "deepen conversations each turn", "i should ask a question every time"
+        try:
+            import re
+
+            banned_patterns = (
+                r"\bask (?:a|more) (?:probing|deeper) question(?:s)? (?:every|each) (?:turn|message|reply)\b",
+                r"\bdeepen (?:the )?conversation(?:s)? (?:every|each) (?:turn|message|reply)\b",
+                r"\bi should ask (?:a )?question (?:every|each) (?:turn|message|reply)\b",
+                r"\bi will ask (?:a )?question (?:every|each) (?:turn|message|reply)\b",
+                r"\balways ask (?:a )?question\b",
+                r"\bask more questions each (?:turn|message|reply)\b",
+            )
+
+            lowered = content.lower()
+            for pat in banned_patterns:
+                if re.search(pat, lowered):
+                    return False
+        except Exception:
+            # On regex failure, don't block
+            pass
+
         return True
 
     def _is_duplicate_text(self, content: str) -> bool:
@@ -250,13 +517,8 @@ class AtomicReflectionManager:
                     return (False, -1.0) if return_best_sim else False
 
                 client = OpenAI()
-                new_embedding = (
-                    client.embeddings.create(
-                        input=content.strip(), model="text-embedding-ada-002"
-                    )
-                    .data[0]
-                    .embedding
-                )
+                # Use cached/modern embedding model
+                new_embedding = self._get_embedding(client, content)
 
                 # Compute similarity against recent insights and pick the best match
                 import numpy as np
@@ -267,14 +529,15 @@ class AtomicReflectionManager:
                     if not insight.content:
                         continue
 
-                    existing_embedding = (
-                        client.embeddings.create(
-                            input=insight.content.strip(),
-                            model="text-embedding-ada-002",
-                        )
-                        .data[0]
-                        .embedding
-                    )
+                    # Fast exact-text equivalence short-circuit to avoid confusing 1.000 embedding sims
+                    cand_norm = content.strip().lower()
+                    exist_norm = insight.content.strip().lower()
+                    if cand_norm == exist_norm:
+                        best_sim = 1.0
+                        best_insight = insight
+                        break
+
+                    existing_embedding = self._get_embedding(client, insight.content)
 
                     sim = np.dot(new_embedding, existing_embedding) / (
                         np.linalg.norm(new_embedding)
@@ -285,7 +548,9 @@ class AtomicReflectionManager:
                         best_sim = sim
                         best_insight = insight
 
-                if best_sim > self._effective_threshold and best_insight is not None:
+                if best_insight is not None and (
+                    best_sim >= 0.999 or best_sim > self._effective_threshold
+                ):
                     print(f"🔍 DEBUG: High embedding similarity: {best_sim:.3f}")
 
                     # Structured override: allow near-duplicates if they reference NEW IDs
@@ -301,6 +566,10 @@ class AtomicReflectionManager:
                     )
 
                     if new_refs:
+                        # Always emit a plain stdout line so tests can capture it reliably
+                        print(
+                            f"dedup_override: reason=new_references, sim={best_sim:.3f}, threshold={self._effective_threshold:.3f}, added_refs={sorted(list(new_refs))}"
+                        )
                         if telemetry:
                             print(
                                 f"[PMM_TELEMETRY] dedup_override: reason=new_references, sim={best_sim:.3f}, threshold={self._effective_threshold:.3f}, added_refs={sorted(list(new_refs))}"
@@ -308,7 +577,20 @@ class AtomicReflectionManager:
                         # Bypass duplicate rejection since candidate adds new references
                         return (False, best_sim) if return_best_sim else False
 
-                    # No new references; treat as duplicate
+                    # No new references; check identity/evidence anchors before treating as duplicate
+                    if self._should_accept_insight(
+                        content, best_sim, candidate_refs=candidate_refs
+                    ):
+                        print(
+                            f"dedup_override: reason=anchor_terms_or_evidence, sim={best_sim:.3f}, threshold={self._effective_threshold:.3f}"
+                        )
+                        if telemetry:
+                            print(
+                                f"[PMM_TELEMETRY] dedup_override: reason=anchor_terms_or_evidence, sim={best_sim:.3f}, threshold={self._effective_threshold:.3f}"
+                            )
+                        return (False, best_sim) if return_best_sim else False
+
+                    # Still no anchors; treat as duplicate
                     if telemetry:
                         print(
                             f"[PMM_TELEMETRY] dedup_reject: reason=high_similarity, sim={best_sim:.3f}, threshold={self._effective_threshold:.3f}, gates=embedding"
@@ -333,16 +615,9 @@ class AtomicReflectionManager:
             from pmm.model import Insight
 
             insight = Insight(
+                id=str(uuid.uuid4()),
+                t=datetime.now(timezone.utc).isoformat(),
                 content=content,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                confidence=0.8,  # Default confidence
-                source="reflection",
-                tags=["atomic_reflection"],
-                metadata={
-                    "model_provider": model_config.get("provider", "unknown"),
-                    "model_name": model_config.get("name", "unknown"),
-                    "temperature": model_config.get("temperature", 0.3),
-                },
             )
 
             # Add to PMM model
@@ -409,47 +684,111 @@ class AtomicReflectionManager:
 
             return refs
         except Exception:
+            # On any failure, do not block acceptance
             return set()
 
     def _first_hit_pass_allowed(self, best_sim: float | None) -> bool:
-        """Allow one borderline acceptance when no recent insight was accepted.
+        """Decide if a borderline near-duplicate can pass once.
 
         Policy:
-        - If there have been zero insights in the last 10 minutes, allow a pass when
-          similarity is within a narrow band above the threshold (<= threshold + 0.02).
-        - Otherwise, do not allow.
+        - Only consider when we have a similarity value and it's within a small
+          margin above the current effective threshold.
+        - Never allow exact/near-exact duplicates (>= 0.999) via this path;
+          those are handled by structured-reference override earlier.
+        - Only allow when there have been no recent accepted insights
+          (based on `_accept_streak == 0`).
         """
         try:
-            # Require borderline range if best_sim provided
-            if best_sim is not None and best_sim > (self._effective_threshold + 0.02):
+            if best_sim is None:
                 return False
 
-            insights = self.pmm.model.self_knowledge.insights
-            if not insights:
-                return True  # cold start
+            # Block exact/near-exact duplicates
+            if best_sim >= 0.999:
+                return False
 
-            from datetime import datetime, timezone
-            import dateutil.parser as dp  # lightweight, typically available; if not, fallback below
+            # Allow only if within a small margin above the threshold
+            margin = 0.01
+            if not (
+                self._effective_threshold
+                <= best_sim
+                <= self._effective_threshold + margin
+            ):
+                return False
 
-            now = datetime.now(timezone.utc)
-            last_ts = (
-                insights[-1].timestamp
-                if getattr(insights[-1], "timestamp", None)
-                else None
-            )
-            if last_ts:
-                try:
-                    last_dt = dp.isoparse(last_ts)
-                except Exception:
-                    # naive parse: assume UTC
-                    last_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-                delta = (now - last_dt).total_seconds()
-                return delta >= 600.0  # 10 minutes
-            # If no timestamp, be permissive
-            return True
+            # Only if no recent acceptances
+            return self._accept_streak == 0
         except Exception:
-            # On any failure, do not block acceptance
-            return True
+            return False
+
+    def _should_accept_insight(
+        self,
+        content: str,
+        best_sim: float | None,
+        *,
+        candidate_refs: set[str] | None = None,
+    ) -> bool:
+        """Allow useful near-duplicates when they cite evidence or PMM anchor terms.
+
+        Rules:
+        - Never accept exact/near-exact duplicates (>= 0.999).
+        - Consider only within a narrow band above the effective threshold (<= +0.02).
+        - Accept if content mentions PMM anchor terms OR cites enough evidence IDs/hashes.
+        """
+        try:
+            if best_sim is None:
+                return False
+
+            # Hard cap: do not allow exact/near-exact duplicates here
+            if best_sim >= 0.999:
+                return False
+
+            # Only consider near-threshold band to avoid flooding
+            margin = 0.02
+            upper_cap = min(self._effective_threshold + margin, 0.97)
+            if not (self._effective_threshold <= best_sim <= upper_cap):
+                return False
+
+            text = (content or "").lower()
+            # PMM anchor terms that improve identity/momentum signals
+            anchor_terms = (
+                "commitment",
+                "commitments",
+                "evidence",
+                "memory",
+                "memories",
+                "identity",
+                "drift",
+                "emergence",
+                "pmm",
+            )
+
+            mentions_anchor = any(term in text for term in anchor_terms)
+
+            # Evidence citation: enough referenced IDs/hashes even if not NEW compared to prior
+            refs = (
+                candidate_refs
+                if candidate_refs is not None
+                else self._extract_referenced_ids(text)
+            )
+            cites_evidence = len(refs) >= 2 or (
+                len(refs) == 1
+                and (
+                    "ev" in next(iter(refs), "")
+                    or any(c.isdigit() for c in next(iter(refs), ""))
+                )
+            )
+
+            decision = bool(mentions_anchor or cites_evidence)
+            try:
+                pmm_tlog(
+                    f"[INSIGHT] sim={best_sim:.3f} refs={len(refs)} pmm={(1 if mentions_anchor else 0)} decision={'ACCEPT' if decision else 'REJECT'}"
+                )
+            except Exception:
+                pass
+            return decision
+        except Exception:
+            # Be conservative on any failure
+            return False
 
     # --- Adaptive threshold helpers ---
     def _on_decision(self, accepted: bool) -> None:
@@ -491,3 +830,91 @@ class AtomicReflectionManager:
                     print(
                         f"[PMM_TELEMETRY] dedup_adapt: rejected streak={self._reject_streak}, threshold {old:.3f} -> {self._effective_threshold:.3f}, cooldown={self._cooldown_turns}"
                     )
+
+    def _get_embedding(self, client, text: str) -> List[float]:
+        """Get embedding for text using an LRU cache and modern model.
+
+        Use a lowercased cache key, but pass the original-cased text to the client
+        to preserve deterministic behavior with tests/mocks that map exact strings.
+        """
+        original = (text or "").strip()
+        cache_key = original.lower()
+        if cache_key in self._embedding_cache:
+            # Move to end (most recently used)
+            self._embedding_cache.move_to_end(cache_key)
+            return self._embedding_cache[cache_key]
+
+        emb = (
+            client.embeddings.create(input=original, model="text-embedding-3-small")
+            .data[0]
+            .embedding
+        )
+        # Insert and trim LRU
+        self._embedding_cache[cache_key] = emb
+        if len(self._embedding_cache) > self._embedding_cache_max:
+            self._embedding_cache.popitem(last=False)
+        return emb
+
+    # --- Stage-adaptive dedup thresholding ---
+    def _apply_stage_adaptation(self) -> None:
+        """Blend a stage-targeted threshold into the current effective threshold.
+
+        - Uses current S0–S4 stage from `compute_emergence_scores()`.
+        - Early stages (S0/S1) get lenient thresholds to allow more acceptance.
+        - Later stages (S3/S4) get stricter thresholds.
+        - Respects min/max caps and emits telemetry when enabled.
+        """
+        if not self._stage_adaptive_enabled:
+            return
+
+        try:
+            from pmm.emergence import compute_emergence_scores
+
+            scores = compute_emergence_scores(
+                window=5, storage_manager=getattr(self, "storage_manager", None)
+            )
+            stage_str = str(scores.get("stage", "")).strip()
+            ias = float(scores.get("ias", scores.get("IAS", 0.0)) or 0.0)
+            gas = float(scores.get("gas", scores.get("GAS", 0.0)) or 0.0)
+
+            # Map S0–S4 to target thresholds (higher = more lenient)
+            # Updated mapping per spec: S0/S1=0.88, S2=0.90, else=0.94
+            # Bound everything to [min_thresh, max_thresh]
+            def target_for(stage_label: str) -> float:
+                s = stage_label.lower()
+                if s.startswith("s0"):
+                    return 0.88
+                if s.startswith("s1"):
+                    return 0.88
+                if s.startswith("s2"):
+                    return 0.90
+                if s.startswith("s3"):
+                    return 0.94
+                if s.startswith("s4"):
+                    return 0.94
+                # Unknown/default
+                return self._effective_threshold
+
+            target = max(self._min_thresh, min(self._max_thresh, target_for(stage_str)))
+
+            # Blend toward target softly to avoid oscillation
+            old = self._effective_threshold
+            alpha = 0.3  # 30% toward stage target each call
+            blended = (1 - alpha) * old + alpha * target
+            # Respect bounds and round
+            self._effective_threshold = max(
+                self._min_thresh, min(self._max_thresh, round(blended, 4))
+            )
+
+            if os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on"):
+                print(
+                    f"[PMM_TELEMETRY] stage_dedup_adapt: stage={stage_str} ias={ias:.3f} gas={gas:.3f} target={target:.3f} threshold {old:.3f} -> {self._effective_threshold:.3f}"
+                )
+        except Exception:
+            # Silent fail; dedup continues with existing threshold
+            return
+
+
+# Backward compatibility alias for older imports
+# Allows: from pmm.atomic_reflection import AtomicReflection
+AtomicReflection = AtomicReflectionManager

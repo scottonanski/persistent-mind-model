@@ -147,6 +147,32 @@ class AutonomyLoop:
         self._last_scores: Tuple[Optional[float], Optional[float]] = (None, None)
         self._snapshot = AutonomySnapshot()
 
+        # Plateau detection and dynamic drift tuning state
+        try:
+            self._plateau_eps = float(os.getenv("PMM_PLATEAU_EPS", "0.02"))
+        except Exception:
+            self._plateau_eps = 0.02
+        try:
+            self._plateau_ticks_req = int(os.getenv("PMM_PLATEAU_TICKS", "4"))
+        except Exception:
+            self._plateau_ticks_req = 4
+        try:
+            self._booster_cooldown_min = int(
+                os.getenv("PMM_BOOSTER_COOLDOWN_MIN", "30")
+            )
+        except Exception:
+            self._booster_cooldown_min = 30
+        # Bounds and steps for drift adjustments
+        self._inertia_min = 0.5
+        self._inertia_max = 0.95
+        self._inertia_step = 0.05
+        self._max_delta_min = 0.01
+        self._max_delta_max = 0.08
+        self._max_delta_step = 0.01
+
+        self._plateau_counter = 0
+        self._last_booster_at: Optional[datetime] = None
+
     # ---------- public API ----------
 
     def status(self) -> AutonomySnapshot:
@@ -235,13 +261,24 @@ class AutonomyLoop:
 
         # record emergence baseline at acceptance
         try:
-            ctx = self.pmm.get_emergence_context() or {}
-            ias = float(ctx.get("ias", 0.0) or 0.0)
-            gas = float(ctx.get("gas", 0.0) or 0.0)
-            self.baselines.add_scores(cfg.get("name", "unknown"), ias, gas)
-            profile = self.stages.calculate_emergence_profile(
-                cfg.get("name", "unknown"), ias, gas
-            )
+            # Compute current IAS/GAS using EmergenceAnalyzer (safe fallback)
+            analyzer = EmergenceAnalyzer(storage_manager=self.db)
+            recent = _load_recent_events_for_emergence(self.db, limit=15)
+            if recent:
+                analyzer.get_recent_events = lambda kind="response", limit=15: recent[
+                    -limit:
+                ]
+                scores = analyzer.compute_scores(window=min(15, len(recent)))
+            else:
+                scores = analyzer.compute_scores(window=15)
+
+            ias = float(scores.get("IAS", 0.0) or 0.0)
+            gas = float(scores.get("GAS", 0.0) or 0.0)
+
+            model_name = cfg.get("name", "unknown")
+            self.baselines.add_scores(model_name, ias, gas)
+            profile = self.stages.calculate_emergence_profile(model_name, ias, gas)
+
             # soft log
             self.pmm.add_event(
                 summary=f"Emergence stage now {profile.stage.value} (conf {profile.confidence:.2f})",
@@ -251,9 +288,13 @@ class AutonomyLoop:
         except Exception:
             pass
 
-        # auto-close + drift
+        # auto-close + provisional hints + drift
         try:
             self.pmm.auto_close_commitments_from_reflection(content)
+        except Exception:
+            pass
+        try:
+            self.pmm.provisional_close_commitments_from_reflection(content)
         except Exception:
             pass
         try:
@@ -273,6 +314,119 @@ class AutonomyLoop:
 
         return content
 
+    def _reflect_booster(self, reason: str) -> Optional[str]:
+        """Run a booster reflection that bypasses cooldown/novelty gates.
+
+        This uses ReflectionCooldownManager.force_reasons and can optionally
+        one-shot force-accept the next insight via env flag.
+        """
+        # Respect active LLM config
+        llm_factory = get_llm_factory()
+        cfg = llm_factory.get_active_config()
+        if not cfg or not cfg.get("name") or not cfg.get("provider"):
+            return None
+
+        # Prepare minimal current context window
+        try:
+            recent_dicts = self.db.recent_events(limit=8)
+            window_texts = []
+            for e in recent_dicts:
+                kind = e.get("kind", "")
+                content = e.get("content", "") or e.get("summary", "")
+                if kind in ("prompt", "response", "event", "reflection"):
+                    window_texts.append(str(content))
+            current_ctx = " ".join(window_texts[-6:])
+        except Exception:
+            current_ctx = ""
+
+        # Bypass cooldown with force reason
+        ok, _reason = self.cooldown.should_reflect(
+            current_ctx, force_reasons=["plateau_booster", reason]
+        )
+        if not ok:
+            return None
+
+        # One-shot dedup bypass for the booster to ensure progress
+        prev_flag = os.getenv("PMM_FORCE_ACCEPT_NEXT_INSIGHT")
+        os.environ["PMM_FORCE_ACCEPT_NEXT_INSIGHT"] = "1"
+        try:
+            insight_obj = reflect_once(self.pmm, None, cfg)
+        finally:
+            # Restore previous state
+            if prev_flag is None:
+                os.environ.pop("PMM_FORCE_ACCEPT_NEXT_INSIGHT", None)
+            else:
+                os.environ["PMM_FORCE_ACCEPT_NEXT_INSIGHT"] = prev_flag
+
+        if not insight_obj or not getattr(insight_obj, "content", "").strip():
+            return None
+
+        content = insight_obj.content.strip()
+
+        # Style hygiene
+        filtered, _replacements = self.ngram_ban.postprocess_style(
+            content, cfg.get("name", "unknown")
+        )
+        content = filtered
+
+        # Persist insight atomically (AtomicReflectionManager handles validation/persist)
+        accepted = self.atomic_reflection.add_insight(
+            content,
+            cfg,
+            cfg.get("epoch", 0),
+        )
+        if not accepted:
+            return None
+
+        # Record emergence snapshot and apply drift as in regular reflection
+        try:
+            analyzer = EmergenceAnalyzer(storage_manager=self.db)
+            recent = _load_recent_events_for_emergence(self.db, limit=15)
+            if recent:
+                analyzer.get_recent_events = lambda kind="response", limit=15: recent[
+                    -limit:
+                ]
+                scores = analyzer.compute_scores(window=min(15, len(recent)))
+            else:
+                scores = analyzer.compute_scores(window=15)
+
+            ias = float(scores.get("IAS", 0.0) or 0.0)
+            gas = float(scores.get("GAS", 0.0) or 0.0)
+            model_name = cfg.get("name", "unknown")
+            self.baselines.add_scores(model_name, ias, gas)
+            profile = self.stages.calculate_emergence_profile(model_name, ias, gas)
+            self.pmm.add_event(
+                summary=f"Booster reflection applied. Emergence stage {profile.stage.value} (conf {profile.confidence:.2f})",
+                etype="emergence_stage",
+                effects=[],
+            )
+        except Exception:
+            pass
+
+        # Auto-close + provisional hints + drift
+        try:
+            self.pmm.auto_close_commitments_from_reflection(content)
+        except Exception:
+            pass
+        try:
+            self.pmm.provisional_close_commitments_from_reflection(content)
+        except Exception:
+            pass
+        try:
+            self.pmm.apply_drift_and_save()
+        except Exception:
+            pass
+
+        now = _utcnow()
+        self.pmm.model.self_knowledge.last_reflection_ts = _to_iso(now)
+        self.pmm.model.self_knowledge.events_since_reflection = 0
+        try:
+            self.directive_system.trigger_evolution_if_needed()
+        except Exception:
+            pass
+
+        return content
+
     def _tick_inner(self) -> None:
         now = _utcnow()
         scores = self._compute_emergence()
@@ -284,8 +438,18 @@ class AutonomyLoop:
             getattr(self.pmm.model.self_knowledge, "events_since_reflection", 0) or 0
         )
 
-        # Decide cadence
+        # Decide cadence from AdaptiveTrigger (emergent autonomy)
         should, reason = self.trigger.decide(now, ias, gas, events_since)
+
+        # Soft user override: suppress only if the last user explicitly blocked reflection
+        try:
+            last_user_text = self._get_last_user_prompt()
+            if self._user_blocked_reflection(last_user_text):
+                should = False
+                reason = "suppressed:user-opt-out"
+        except Exception:
+            # If we can't read prompts, proceed with emergent decision
+            pass
         reflected = False
         reflection_id = None
 
@@ -301,6 +465,25 @@ class AutonomyLoop:
                     reflection_id = int(row[0]) if row else None
                 except Exception:
                     reflection_id = None
+                # Extract directives/commitments from the reflection content
+                try:
+                    detected = self.directive_system.process_response(
+                        user_message="",
+                        ai_response=insight,
+                        event_id="autonomy_reflection",
+                    )
+                    for directive in detected or []:
+                        dcontent = getattr(directive, "content", None)
+                        if dcontent:
+                            try:
+                                self.pmm.add_commitment(
+                                    text=dcontent[:200],
+                                    source_insight_id="autonomy_reflection",
+                                )
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
             else:
                 # even if rejected, count an “attempt” via events_since_reflection++
                 try:
@@ -320,10 +503,101 @@ class AutonomyLoop:
         dg = (gas - prev_gas) if (prev_gas is not None and gas is not None) else None
         self._last_scores = (ias, gas)
 
+        # Plateau detection: increment counter if both deltas are tiny
+        try:
+            if di is not None and dg is not None:
+                if abs(di) < self._plateau_eps and abs(dg) < self._plateau_eps:
+                    self._plateau_counter += 1
+                else:
+                    self._plateau_counter = 0
+        except Exception:
+            pass
+
+        # Dynamic drift tuning based on momentum vs plateau
+        try:
+            cfg = self.pmm.model.drift_config
+            # Initialize safe values if missing
+            inertia = float(getattr(cfg, "inertia", 0.9) or 0.9)
+            max_step = float(getattr(cfg, "max_delta_per_reflection", 0.02) or 0.02)
+
+            if di is not None and dg is not None:
+                total_delta = abs(di) + abs(dg)
+                # Plateau: reduce inertia (more responsive), increase max step (more change)
+                if self._plateau_counter >= self._plateau_ticks_req:
+                    new_inertia = max(
+                        self._inertia_min, round(inertia - self._inertia_step, 3)
+                    )
+                    new_step = min(
+                        self._max_delta_max, round(max_step + self._max_delta_step, 3)
+                    )
+                    if new_inertia != inertia or new_step != max_step:
+                        self.pmm.model.drift_config.inertia = new_inertia
+                        self.pmm.model.drift_config.max_delta_per_reflection = new_step
+                        self.pmm.save_model()
+                        try:
+                            self.pmm.add_event(
+                                summary=f"Drift tuned (plateau): inertia {inertia:.2f}->{new_inertia:.2f}, max_step {max_step:.3f}->{new_step:.3f}",
+                                etype="drift_tuning",
+                                effects=[],
+                            )
+                        except Exception:
+                            pass
+                # Momentum: if strong movement, gently restore inertia up and reduce max step
+                elif total_delta > (self._plateau_eps * 4):
+                    new_inertia = min(
+                        self._inertia_max, round(inertia + self._inertia_step, 3)
+                    )
+                    new_step = max(
+                        self._max_delta_min, round(max_step - self._max_delta_step, 3)
+                    )
+                    if new_inertia != inertia or new_step != max_step:
+                        self.pmm.model.drift_config.inertia = new_inertia
+                        self.pmm.model.drift_config.max_delta_per_reflection = new_step
+                        self.pmm.save_model()
+                        try:
+                            self.pmm.add_event(
+                                summary=f"Drift tuned (momentum): inertia {inertia:.2f}->{new_inertia:.2f}, max_step {max_step:.3f}->{new_step:.3f}",
+                                etype="drift_tuning",
+                                effects=[],
+                            )
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # Booster reflection trigger on plateau with cooldown
+        booster_triggered = False
+        try:
+            can_trigger = self._plateau_counter >= self._plateau_ticks_req
+            if can_trigger:
+                # Check booster cooldown
+                if self._last_booster_at is None:
+                    cooldown_passed = True
+                else:
+                    elapsed = (now - self._last_booster_at).total_seconds() / 60.0
+                    cooldown_passed = elapsed >= self._booster_cooldown_min
+
+                if cooldown_passed:
+                    insight = self._reflect_booster("plateau")
+                    booster_triggered = bool(insight)
+                    if booster_triggered:
+                        self._last_booster_at = now
+                        self._plateau_counter = 0
+                        try:
+                            self.pmm.add_event(
+                                summary="Booster reflection triggered due to emergence plateau",
+                                etype="autonomy_booster",
+                                effects=[],
+                            )
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
         # Persist audit event
         meta = {
             "reason": reason,
-            "reflected": reflected,
+            "reflected": reflected or booster_triggered,
             "reflection_id": reflection_id,
             "ias": ias,
             "gas": gas,
@@ -331,6 +605,8 @@ class AutonomyLoop:
             "gas_delta": dg,
             "events_analyzed": scores.get("events_analyzed", 0),
             "stage": scores.get("stage", "Unknown"),
+            "plateau_counter": self._plateau_counter,
+            "booster": booster_triggered,
         }
         try:
             self.pmm.add_event(
@@ -372,3 +648,32 @@ class AutonomyLoop:
             self.pmm.save_model()
         except Exception:
             pass
+
+    # -------- minimal helpers: last user prompt + intent detection --------
+    def _get_last_user_prompt(self) -> str:
+        """Return content of the most recent 'prompt' event (user input)."""
+        try:
+            row = self.db.conn.execute(
+                "SELECT content FROM events WHERE kind='prompt' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            return str(row[0]) if row and row[0] else ""
+        except Exception:
+            return ""
+
+    def _user_blocked_reflection(self, text: str) -> bool:
+        """Heuristic for explicit user opt-out of background reflection."""
+        try:
+            s = (text or "").lower()
+            import re
+
+            patterns = [
+                r"\bdo not reflect\b",
+                r"\bdon't reflect\b",
+                r"\bno reflection\b",
+                r"\bstop reflecting\b",
+                r"\bstop reflection\b",
+                r"\bdisable reflection\b",
+            ]
+            return any(re.search(p, s) for p in patterns)
+        except Exception:
+            return False

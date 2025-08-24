@@ -98,18 +98,68 @@ class BridgeManager:
         # Get adapter for current family
         adapter = get_adapter(curr.family, self.adapters)
 
-        # Render through family adapter
-        styled = adapter.render(canonical_text)
+        # Compute stage once for this rendering path
+        stage_label = None
+        try:
+            from pmm.emergence import compute_emergence_scores
+
+            scores = compute_emergence_scores(
+                window=5, storage_manager=getattr(self, "storage", None)
+            )
+            ias = float(scores.get("IAS", 0.0) or 0.0)
+            gas = float(scores.get("GAS", 0.0) or 0.0)
+            profile = self.stages.calculate_emergence_profile(curr.name, ias, gas)
+            stage_label = getattr(profile.stage, "value", None) or str(profile.stage)
+        except Exception:
+            stage_label = None
+
+        # Render through family adapter (stage-aware)
+        styled = adapter.render(canonical_text, stage=stage_label)
 
         # Apply stance filter after styling
-        styled = self._apply_stance_filter(styled)
+        styled = self._apply_stance_filter(styled, stage=stage_label)
 
         return styled
 
-    def _apply_stance_filter(self, text: str) -> str:
+    def _apply_stance_filter(self, text: str, stage: Optional[str] = None) -> str:
         """Apply anthropomorphic stance filtering."""
         try:
-            filtered_text, _ = self.stance_filter.filter_response(text)
+            # Determine stage label for stage-aware filtering
+            stage_label = stage
+            if stage_label is None:
+                try:
+                    curr = None
+                    try:
+                        curr = self.factory.get_active_config()
+                    except Exception:
+                        curr = None
+                    model_name = (
+                        curr.name if curr and hasattr(curr, "name") else "unknown"
+                    )
+
+                    from pmm.emergence import compute_emergence_scores
+
+                    scores = compute_emergence_scores(
+                        window=5, storage_manager=getattr(self, "storage", None)
+                    )
+                    ias = float(scores.get("IAS", 0.0) or 0.0)
+                    gas = float(scores.get("GAS", 0.0) or 0.0)
+                    profile = self.stages.calculate_emergence_profile(
+                        model_name, ias, gas
+                    )
+                    stage_label = getattr(profile.stage, "value", None) or str(
+                        profile.stage
+                    )
+                except Exception:
+                    stage_label = None
+
+            filtered_text, applied = self.stance_filter.filter_response(
+                text, stage=stage_label
+            )
+            if applied:
+                print(
+                    f"🔍 DEBUG: Bridge stance filter applied {len(applied)} changes (stage={stage_label or 'auto'})"
+                )
             return filtered_text
         except Exception:
             # Fallback if stance filter fails
