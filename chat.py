@@ -213,7 +213,7 @@ def main():
         "on",
     )
     EMBEDDINGS_ENABLED = os.getenv(
-        "PMM_ENABLE_EMBEDDINGS", "false"
+        "PMM_ENABLE_EMBEDDINGS", "true"
     ).strip().lower() in ("1", "true", "yes", "on")
 
     # Model selection
