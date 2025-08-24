@@ -68,6 +68,7 @@ AGENT_RENAME_PATTERN = re.compile(
         from\s+now\s+on,?\s+you\s+are|
         your\s+name\s+shall\s+be
     )\s+
+    (?!not\b)
     ["'""]?
     ([A-ZÀ-ÖØ-Ý][\w''\-]{0,62}(?:\s+[A-ZÀ-ÖØ-Ý][\w''\-]{1,30})?)
     ["'""]?
@@ -259,19 +260,32 @@ def extract_agent_name_command(text: str, speaker: str) -> Optional[str]:
         name_parts.pop()
     name = " ".join(name_parts)
 
-    # Filter out stopwords and invalid names
-    if name.lower() in _STOPWORDS:
+    # Token-level validation and normalization
+    tokens = [t for t in name.split() if t]
+    if not (1 <= len(tokens) <= 3):
         return None
 
-    # Additional validation
-    if len(name) < 2 or len(name) > 63:
+    # Reject leading negations like "not Scott" or "no Echo"
+    if tokens and tokens[0].lower() in {"not", "no"}:
         return None
 
-    # Must start with letter
-    if not name[0].isalpha():
+    # All tokens must be alphabetic and not stopwords by themselves
+    for t in tokens:
+        if not t.isalpha():
+            return None
+        if t.lower() in _STOPWORDS:
+            return None
+
+    # Preserve original casing while normalizing whitespace
+    normalized = " ".join(tokens)
+
+    # Length and starting letter checks on normalized form
+    if len(normalized) < 2 or len(normalized) > 63:
+        return None
+    if not normalized[0].isalpha():
         return None
 
-    return name
+    return normalized
 
 
 def _utcnow_str():

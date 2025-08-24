@@ -1,7 +1,14 @@
 # pmm/stance_filter.py
 from __future__ import annotations
 import re
-from typing import List, Tuple, Dict
+import os
+from typing import List, Tuple, Dict, Optional
+
+# Lazy import to avoid heavy deps in cold paths
+try:
+    from .emergence import compute_emergence_scores
+except Exception:  # pragma: no cover
+    compute_emergence_scores = None  # type: ignore
 
 
 class StanceFilter:
@@ -85,8 +92,53 @@ class StanceFilter:
                 return True
         return False
 
-    def filter_response(self, text: str) -> Tuple[str, List[str]]:
-        """Filter anthropomorphic language from response text, preserving quotes and code."""
+    def _resolve_stage(self, stage: Optional[str]) -> Optional[str]:
+        """Resolve a stage label from explicit arg, env override, or emergence scores."""
+        if stage:
+            return stage
+        try:
+            hard = str(os.getenv("PMM_HARD_STAGE", "")).strip().upper()
+            if hard in ("S0", "S1", "S2", "S3", "S4", "SS4"):
+                if hard == "SS4":
+                    return "SS4"
+                return {
+                    "S0": "S0: Substrate",
+                    "S1": "S1: Resistance",
+                    "S2": "S2: Adoption",
+                    "S3": "S3: Self-Model",
+                    "S4": "S4: Growth-Seeking",
+                }[hard]
+        except Exception:
+            pass
+        try:
+            if compute_emergence_scores:
+                scores = compute_emergence_scores()
+                return scores.get("stage")
+        except Exception:
+            return None
+        return None
+
+    def _strictness(self, stage_label: Optional[str]) -> str:
+        """Map stage label to filtering strictness."""
+        if not stage_label:
+            return "normal"
+        s = stage_label.lower()
+        if s.startswith("s0") or s.startswith("s1"):
+            return "strict"
+        if s.startswith("s3") or s.startswith("s4") or s == "ss4":
+            return "relaxed"
+        return "normal"
+
+    def filter_response(
+        self, text: str, stage: Optional[str] = None
+    ) -> Tuple[str, List[str]]:
+        """Filter anthropomorphic language from response text, preserving quotes and code.
+
+        Stage-aware behavior:
+        - S0/S1: strict (apply replacements aggressively)
+        - S2: normal (current defaults)
+        - S3/S4: relaxed (only minimal, egregious replacements unless rewrite is triggered)
+        """
         if not text or not text.strip():
             return text, []
 
@@ -97,13 +149,18 @@ class StanceFilter:
         filtered_text = text
         applied_filters = []
 
+        # Determine strictness based on stage
+        stage_label = self._resolve_stage(stage)
+        mode = self._strictness(stage_label)
+
         # Check if complete rewrite is needed
         if self.needs_rewrite(text):
             applied_filters.append("complete_rewrite_needed")
             # For now, just apply standard filters - could implement LLM-based rewrite
 
         # Apply pattern-based filters (safer, more targeted set)
-        safe_replacements = {
+        # Adjust replacement set by strictness
+        base_replacements = {
             r"\bI feel\b": "I observe",
             r"\bI\'m grateful\b": "I acknowledge",
             r"\bpoignant\b": "notable",
@@ -113,6 +170,14 @@ class StanceFilter:
             r"\bextraordinary\b": "notable",
             r"\bremarkable\b": "significant",
         }
+        if mode == "relaxed":
+            # Minimal replacements only; keep style latitude in later stages
+            safe_replacements = {
+                r"\bI feel\b": "I observe",
+                r"\bI\'m grateful\b": "I acknowledge",
+            }
+        else:
+            safe_replacements = base_replacements
 
         for pattern, replacement in safe_replacements.items():
             compiled_pattern = re.compile(pattern, re.IGNORECASE)
@@ -121,6 +186,15 @@ class StanceFilter:
                 filtered_text = compiled_pattern.sub(replacement, filtered_text)
                 if old_text != filtered_text:
                     applied_filters.append(f"replaced: {pattern}")
+
+        # In relaxed mode, if we didn't actually apply any replacements and no rewrite was needed,
+        # keep original text to minimize unnecessary style impact.
+        if (
+            mode == "relaxed"
+            and not applied_filters
+            and "complete_rewrite_needed" not in applied_filters
+        ):
+            return text, ["relaxed_stage_noop"]
 
         # Clean up extra spaces and punctuation
         filtered_text = re.sub(r"\s+", " ", filtered_text)  # Multiple spaces

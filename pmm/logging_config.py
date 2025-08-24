@@ -5,6 +5,7 @@ Centralized logging configuration for Persistent Mind Model.
 
 import logging
 import sys
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -60,3 +61,27 @@ reflection_logger = get_logger("reflection")
 drift_logger = get_logger("drift")
 validation_logger = get_logger("validation")
 llm_logger = get_logger("llm")
+
+
+# Minimal telemetry print helper (stderr) guarded by PMM_TELEMETRY
+def pmm_tlog(*args, **kwargs):
+    """Minimal telemetry print when PMM_TELEMETRY is truthy."""
+    try:
+        flag = os.getenv("PMM_TELEMETRY", "")
+        if flag:
+            print(*args, **kwargs, file=sys.stderr, flush=True)
+    except Exception:
+        # Never let telemetry printing crash runtime
+        pass
+
+
+# Minimal debug print helper (stderr) guarded by PMM_DEBUG
+def pmm_dlog(*args, **kwargs):
+    """Minimal debug print when PMM_DEBUG is truthy."""
+    try:
+        flag = os.getenv("PMM_DEBUG", "")
+        if flag:
+            print(*args, **kwargs, file=sys.stderr, flush=True)
+    except Exception:
+        # Never let debug printing crash runtime
+        pass

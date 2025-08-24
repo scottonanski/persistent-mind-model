@@ -2,7 +2,7 @@
 """Embodiment-aware bridges for PMM: one mind, multiple bodies."""
 
 from __future__ import annotations
-from typing import Protocol, Dict
+from typing import Protocol, Dict, Optional
 import re
 from .ngram_ban import NGramBanSystem
 
@@ -10,7 +10,7 @@ from .ngram_ban import NGramBanSystem
 class RenderAdapter(Protocol):
     """Protocol for per-family embodiment adapters."""
 
-    def render(self, canonical_text: str) -> str:
+    def render(self, canonical_text: str, stage: Optional[str] = None) -> str:
         """Render canonical text for this model family."""
         ...
 
@@ -21,13 +21,13 @@ class GPTAdapter:
     def __init__(self, ngram_ban: NGramBanSystem):
         self.ngram_ban = ngram_ban
 
-    def render(self, text: str) -> str:
+    def render(self, text: str, stage: Optional[str] = None) -> str:
         """Render for GPT family: moderate hedging, clean structure."""
         # Apply moderate hedging/softening
         text = self._soften_hedges(text, target="moderate")
 
         # Apply family-specific n-gram bans
-        text, _ = self.ngram_ban.postprocess_style(text, "gpt")
+        text, _ = self.ngram_ban.postprocess_style(text, "gpt", stage=stage)
 
         return text
 
@@ -46,13 +46,13 @@ class GemmaAdapter:
     def __init__(self, ngram_ban: NGramBanSystem):
         self.ngram_ban = ngram_ban
 
-    def render(self, text: str) -> str:
+    def render(self, text: str, stage: Optional[str] = None) -> str:
         """Render for Gemma family: shorter sentences, direct style."""
         # Shorten sentences for Gemma's style
         text = self._shorten_sentences(text, avg_len=16)
 
         # Apply family-specific n-gram bans
-        text, _ = self.ngram_ban.postprocess_style(text, "gemma")
+        text, _ = self.ngram_ban.postprocess_style(text, "gemma", stage=stage)
 
         return text
 
@@ -77,13 +77,13 @@ class LlamaAdapter:
     def __init__(self, ngram_ban: NGramBanSystem):
         self.ngram_ban = ngram_ban
 
-    def render(self, text: str) -> str:
+    def render(self, text: str, stage: Optional[str] = None) -> str:
         """Render for Llama family: balanced style similar to Gemma."""
         # Use similar approach to Gemma for now
         text = self._shorten_sentences(text, avg_len=18)
 
         # Apply family-specific n-gram bans
-        text, _ = self.ngram_ban.postprocess_style(text, "llama")
+        text, _ = self.ngram_ban.postprocess_style(text, "llama", stage=stage)
 
         return text
 
@@ -107,13 +107,13 @@ class QwenAdapter:
     def __init__(self, ngram_ban: NGramBanSystem):
         self.ngram_ban = ngram_ban
 
-    def render(self, text: str) -> str:
+    def render(self, text: str, stage: Optional[str] = None) -> str:
         """Render for Qwen family: placeholder using GPT-like style."""
         # Use GPT-like approach until tuned
         text = self._soften_hedges(text, target="moderate")
 
         # Apply family-specific n-gram bans
-        text, _ = self.ngram_ban.postprocess_style(text, "qwen")
+        text, _ = self.ngram_ban.postprocess_style(text, "qwen", stage=stage)
 
         return text
 

@@ -4,6 +4,7 @@ import threading
 import os
 import hashlib
 from dataclasses import asdict
+import re
 from datetime import datetime, timezone
 from typing import Optional, List
 
@@ -488,6 +489,98 @@ class SelfModelManager:
             if pattern in reflection_text.lower():
                 # This is a simple heuristic; could be more sophisticated
                 break
+
+    def provisional_close_commitments_from_reflection(self, reflection_text: str):
+        """Emit non-evidence closure hints for commitments mentioned as completed in reflections.
+
+        This does NOT mark commitments as closed. Instead, it writes lightweight
+        'closure_hint' events to SQLite with a commit_ref meta field for the
+        referenced commitment hash. Emergence GAS can use these hints to
+        provisionally boost growth-seeking without violating evidence-only
+        permanent closure rules.
+
+        Returns: list of commitment hashes hinted.
+        """
+        try:
+            text = (reflection_text or "").lower()
+            if not text:
+                return []
+
+            # Only trigger when completion phrasing appears
+            completion_markers = [
+                "completed",
+                "finished",
+                "done with",
+                "accomplished",
+                "wrapped up",
+                "i did",
+                "i have done",
+            ]
+            if not any(m in text for m in completion_markers):
+                return []
+
+            # Collect open commitments and look for either short-hash or simple text overlap
+            hinted: list[str] = []
+            try:
+                open_commitments = self.get_open_commitments() or []
+            except Exception:
+                open_commitments = []
+
+            for c in open_commitments:
+                try:
+                    chash = (c.get("hash") or "").lower()
+                    ctext = (c.get("text") or c.get("title") or "").lower()
+                except Exception:
+                    chash, ctext = "", ""
+                if not chash and not ctext:
+                    continue
+
+                short = chash[:8] if chash else ""
+                # Heuristics: mention of short-hash OR 2+ shared keywords
+                hash_hit = bool(short and short in text)
+                keyword_hit = False
+                if not hash_hit and ctext:
+                    # Tokenize on whitespace, keep words >=4 chars to reduce noise
+                    words = [w for w in re.split(r"\W+", ctext) if len(w) >= 4]
+                    if words:
+                        shared = sum(1 for w in words if w in text)
+                        keyword_hit = shared >= 2
+
+                if hash_hit or keyword_hit:
+                    # Write a non-evidence hint row for audit without affecting permanent closure
+                    meta = {
+                        "commit_ref": chash,
+                        "source": "reflection",
+                        "hint_type": "provisional_completion",
+                    }
+                    try:
+                        prev = self.sqlite_store.latest_hash()
+                        payload = {
+                            "ts": datetime.now(timezone.utc).strftime(
+                                "%Y-%m-%dT%H:%M:%SZ"
+                            ),
+                            "kind": "closure_hint",
+                            "commit_ref": chash,
+                            "prev_hash": prev,
+                        }
+                        # Minimal deterministic hash for chaining
+                        data = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+                        hsh = hashlib.sha256(data.encode()).hexdigest()
+
+                        self.sqlite_store.append_event(
+                            kind="closure_hint",
+                            content=f"Provisional closure hint for {chash[:8]}",
+                            meta=meta,
+                            hsh=hsh,
+                            prev=prev,
+                        )
+                    except Exception:
+                        pass
+                    hinted.append(chash)
+
+            return hinted
+        except Exception:
+            return []
 
     def _sync_commitments_from_model(self):
         """Load commitments from model into tracker."""

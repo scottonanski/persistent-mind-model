@@ -1,8 +1,15 @@
 # pmm/ngram_ban.py
 from __future__ import annotations
-from typing import Dict, List
+from typing import Dict, List, Optional
 import re
 import random
+import os
+
+# Lazy import to avoid heavy deps
+try:
+    from .emergence import compute_emergence_scores
+except Exception:  # pragma: no cover
+    compute_emergence_scores = None  # type: ignore
 
 
 class NGramBanSystem:
@@ -70,6 +77,58 @@ class NGramBanSystem:
                 re.compile(re.escape(ngram), re.IGNORECASE) for ngram in ngrams
             ]
 
+        # Core phrases to keep even in relaxed mode (small, stable subset)
+        self.core_banned: Dict[str, List[str]] = {
+            "gemma": [
+                "that's extraordinary scott",
+                "fascinating scott",
+                "remarkable development",
+            ],
+            "gpt": [
+                "i'm happy to help",
+                "that's a great point",
+            ],
+            "claude": [
+                "that's a thoughtful question",
+                "from my perspective",
+            ],
+        }
+
+    def _resolve_stage(self, stage: Optional[str]) -> Optional[str]:
+        if stage:
+            return stage
+        try:
+            hard = str(os.getenv("PMM_HARD_STAGE", "")).strip().upper()
+            if hard in ("S0", "S1", "S2", "S3", "S4", "SS4"):
+                if hard == "SS4":
+                    return "SS4"
+                return {
+                    "S0": "S0: Substrate",
+                    "S1": "S1: Resistance",
+                    "S2": "S2: Adoption",
+                    "S3": "S3: Self-Model",
+                    "S4": "S4: Growth-Seeking",
+                }[hard]
+        except Exception:
+            pass
+        try:
+            if compute_emergence_scores:
+                scores = compute_emergence_scores()
+                return scores.get("stage")
+        except Exception:
+            return None
+        return None
+
+    def _strictness(self, stage_label: Optional[str]) -> str:
+        if not stage_label:
+            return "normal"
+        s = stage_label.lower()
+        if s.startswith("s0") or s.startswith("s1"):
+            return "strict"
+        if s.startswith("s3") or s.startswith("s4") or s == "ss4":
+            return "relaxed"
+        return "normal"
+
     def get_model_family(self, model_name: str) -> str:
         """Extract model family from full model name."""
         model_lower = model_name.lower()
@@ -83,7 +142,7 @@ class NGramBanSystem:
             return "unknown"
 
     def check_banned_ngrams(
-        self, text: str, model_name: str, n: int = 4
+        self, text: str, model_name: str, n: int = 4, stage: Optional[str] = None
     ) -> tuple[bool, List[str]]:
         """
         Check if text contains banned n-grams for the given model.
@@ -97,6 +156,8 @@ class NGramBanSystem:
             (has_banned_ngrams: bool, banned_phrases: List[str])
         """
         model_family = self.get_model_family(model_name)
+        stage_label = self._resolve_stage(stage)
+        mode = self._strictness(stage_label)
 
         if model_family not in self._compiled_patterns:
             return False, []
@@ -104,12 +165,27 @@ class NGramBanSystem:
         banned_phrases = []
 
         # Check against model-specific banned patterns
-        for pattern in self._compiled_patterns[model_family]:
-            if pattern.search(text):
-                banned_phrases.append(pattern.pattern.replace("\\", ""))
+        if mode == "relaxed":
+            # Only enforce a minimal, core subset
+            core_set = set([c.lower() for c in self.core_banned.get(model_family, [])])
+            for pattern in self._compiled_patterns[model_family]:
+                literal = pattern.pattern.replace("\\", "").lower()
+                if literal in core_set and pattern.search(text):
+                    banned_phrases.append(pattern.pattern.replace("\\", ""))
+        else:
+            for pattern in self._compiled_patterns[model_family]:
+                if pattern.search(text):
+                    banned_phrases.append(pattern.pattern.replace("\\", ""))
 
-        # Also check n-gram extraction
-        banned_phrases.extend(self._extract_banned_ngrams(text, model_family, n))
+        # Also check n-gram extraction (skip in relaxed mode)
+        if mode == "strict":
+            # Try multiple sizes for stricter matching
+            for size in (3, n, 5):
+                banned_phrases.extend(
+                    self._extract_banned_ngrams(text, model_family, size)
+                )
+        elif mode == "normal":
+            banned_phrases.extend(self._extract_banned_ngrams(text, model_family, n))
 
         return len(banned_phrases) > 0, banned_phrases
 
@@ -132,7 +208,9 @@ class NGramBanSystem:
 
         return banned_found
 
-    def postprocess_style(self, text: str, model_name: str) -> tuple[str, List[str]]:
+    def postprocess_style(
+        self, text: str, model_name: str, stage: Optional[str] = None
+    ) -> tuple[str, List[str]]:
         """
         Post-process text to remove banned n-grams and replace with neutral variants.
 
@@ -143,7 +221,9 @@ class NGramBanSystem:
         Returns:
             (processed_text: str, replacements_made: List[str])
         """
-        has_banned, banned_phrases = self.check_banned_ngrams(text, model_name)
+        has_banned, banned_phrases = self.check_banned_ngrams(
+            text, model_name, stage=stage
+        )
 
         if not has_banned:
             return text, []
@@ -152,18 +232,35 @@ class NGramBanSystem:
         replacements_made = []
 
         model_family = self.get_model_family(model_name)
+        stage_label = self._resolve_stage(stage)
+        mode = self._strictness(stage_label)
 
         # Replace banned patterns with neutral variants
         if model_family in self._compiled_patterns:
-            for pattern in self._compiled_patterns[model_family]:
-                if pattern.search(processed_text):
-                    replacement = random.choice(self.neutral_variants)
-                    old_text = processed_text
-                    processed_text = pattern.sub(replacement, processed_text)
-                    if old_text != processed_text:
-                        replacements_made.append(
-                            f"banned_ngram: {pattern.pattern} → {replacement}"
-                        )
+            if mode == "relaxed":
+                core_set = set(
+                    [c.lower() for c in self.core_banned.get(model_family, [])]
+                )
+                for pattern in self._compiled_patterns[model_family]:
+                    literal = pattern.pattern.replace("\\", "").lower()
+                    if literal in core_set and pattern.search(processed_text):
+                        replacement = random.choice(self.neutral_variants)
+                        old_text = processed_text
+                        processed_text = pattern.sub(replacement, processed_text)
+                        if old_text != processed_text:
+                            replacements_made.append(
+                                f"banned_ngram: {pattern.pattern} → {replacement}"
+                            )
+            else:
+                for pattern in self._compiled_patterns[model_family]:
+                    if pattern.search(processed_text):
+                        replacement = random.choice(self.neutral_variants)
+                        old_text = processed_text
+                        processed_text = pattern.sub(replacement, processed_text)
+                        if old_text != processed_text:
+                            replacements_made.append(
+                                f"banned_ngram: {pattern.pattern} → {replacement}"
+                            )
 
         return processed_text, replacements_made
 

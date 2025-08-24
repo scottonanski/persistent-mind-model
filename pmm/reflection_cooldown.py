@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 import threading
 import os
+import re
 
 
 @dataclass
@@ -26,29 +27,34 @@ class ReflectionCooldownManager:
 
     def __init__(
         self,
-        min_turns: int = 0,
-        min_wall_time_seconds: int = 20,
+        min_turns: int = 2,
+        min_wall_time_seconds: int = 30,
         novelty_threshold: float = 0.78,
         context_window: int = 6,
+        *,
+        time_gate: int | None = None,
+        turns_gate: int | None = None,
     ):
-        # Allow env var overrides for experimentation without code changes
-        env_turns = os.getenv("PMM_REFLECTION_MIN_TURNS")
-        env_time = os.getenv("PMM_REFLECTION_MIN_TIME_SECONDS")
+        # Allow env var overrides for experimentation without code changes for non-critical gates.
+        # IMPORTANT: Explicit constructor parameters ALWAYS take precedence for turns/time gates.
+        # We DO NOT read env for turns/time because tests and production require determinism.
         env_novelty = os.getenv("PMM_REFLECTION_NOVELTY_THRESHOLD")
         env_ctx = os.getenv("PMM_REFLECTION_CONTEXT_WINDOW")
 
-        # Fallback to provided defaults if env not set or malformed
+        # Deterministic gate configuration: use explicit parameters or gate-specific overrides only
         try:
-            self.min_turns = int(env_turns) if env_turns is not None else min_turns
-        except ValueError:
-            self.min_turns = min_turns
+            self.min_turns = (
+                int(turns_gate) if turns_gate is not None else int(min_turns)
+            )
+        except (TypeError, ValueError):
+            self.min_turns = int(min_turns)
 
         try:
             self.min_wall_time_seconds = (
-                int(env_time) if env_time is not None else min_wall_time_seconds
+                int(time_gate) if time_gate is not None else int(min_wall_time_seconds)
             )
-        except ValueError:
-            self.min_wall_time_seconds = min_wall_time_seconds
+        except (TypeError, ValueError):
+            self.min_wall_time_seconds = int(min_wall_time_seconds)
 
         try:
             self.novelty_threshold = (
@@ -63,6 +69,10 @@ class ReflectionCooldownManager:
             )
         except ValueError:
             self.context_window = context_window
+
+        # Expose explicit gate names for telemetry/inspection parity
+        self.time_gate = self.min_wall_time_seconds
+        self.turns_gate = self.min_turns
 
         self.state = CooldownState()
         self._lock = threading.Lock()
@@ -175,23 +185,36 @@ class ReflectionCooldownManager:
         if not self.state.recent_contexts:
             return True
 
-        # Check similarity against recent contexts
-        current_tokens = set(current_context.lower().split())
+        # Normalize and tokenize
+        def _norm_tokens(text: str) -> set[str]:
+            if not text:
+                return set()
+            # Lowercase and keep alphanumeric words of length >= 2
+            tokens = re.split(r"\W+", text.lower())
+            return {t for t in tokens if len(t) >= 2}
+
+        current_tokens = _norm_tokens(current_context)
 
         for recent_context in self.state.recent_contexts[-self.context_window :]:
-            recent_tokens = set(recent_context.lower().split())
+            recent_tokens = _norm_tokens(recent_context)
 
             if not recent_tokens:
                 continue
 
-            # Jaccard similarity
+            # Token overlap metrics
             intersection = len(current_tokens & recent_tokens)
             union = len(current_tokens | recent_tokens)
+            a = len(current_tokens)
+            b = len(recent_tokens)
 
-            if union > 0:
-                similarity = intersection / union
-                if similarity > self.novelty_threshold:
-                    return False
+            jaccard = (intersection / union) if union > 0 else 0.0
+            dice = (2 * intersection / (a + b)) if (a + b) > 0 else 0.0
+            overlap = (intersection / min(a, b)) if min(a, b) > 0 else 0.0
+
+            # Use the most conservative (highest) similarity metric for gating
+            similarity = max(jaccard, dice, overlap)
+            if similarity > self.novelty_threshold:
+                return False
 
         return True
 

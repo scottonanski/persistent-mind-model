@@ -4,6 +4,7 @@ from typing import Dict
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
+import os
 
 
 class EmergenceStage(Enum):
@@ -101,6 +102,66 @@ class EmergenceStageManager:
         # Calculate combined z-score (weighted average)
         # IAS weight: 0.6, GAS weight: 0.4 (identity slightly more important)
         combined_zscore = (ias_zscore * 0.6) + (gas_zscore * 0.4)
+
+        # Hard stage override via environment (aligns S0–S4,SS4 to local enum)
+        try:
+            _hard = str(os.getenv("PMM_HARD_STAGE", "")).strip().upper()
+            mapping = {
+                "S0": EmergenceStage.DORMANT,
+                "S1": EmergenceStage.AWAKENING,
+                "S2": EmergenceStage.DEVELOPING,
+                "S3": EmergenceStage.MATURING,
+                "S4": EmergenceStage.TRANSCENDENT,
+            }
+            if _hard == "SS4":
+                forced_stage = EmergenceStage.TRANSCENDENT
+                metadata = {
+                    "model_name": model_name,
+                    "raw_ias": ias_score,
+                    "raw_gas": gas_score,
+                    "stage_behaviors": self.stage_behaviors[forced_stage].copy(),
+                    "baseline_stats": self.baselines.get_model_stats(model_name),
+                    "override": "PMM_HARD_STAGE",
+                    "override_value": _hard,
+                    "stage_label": "SS4",
+                }
+                return EmergenceProfile(
+                    ias_zscore=ias_zscore,
+                    gas_zscore=gas_zscore,
+                    combined_zscore=combined_zscore,
+                    stage=forced_stage,
+                    confidence=1.0,
+                    stage_progression=1.0,
+                    next_stage_distance=0.0,
+                    metadata=metadata,
+                )
+            if _hard in mapping:
+                forced_stage = mapping[_hard]
+                # Confident forced profile; mark metadata for transparency
+                metadata = {
+                    "model_name": model_name,
+                    "raw_ias": ias_score,
+                    "raw_gas": gas_score,
+                    "stage_behaviors": self.stage_behaviors[forced_stage].copy(),
+                    "baseline_stats": self.baselines.get_model_stats(model_name),
+                    "override": "PMM_HARD_STAGE",
+                    "override_value": _hard,
+                }
+                return EmergenceProfile(
+                    ias_zscore=ias_zscore,
+                    gas_zscore=gas_zscore,
+                    combined_zscore=combined_zscore,
+                    stage=forced_stage,
+                    confidence=1.0,
+                    stage_progression=(
+                        1.0 if forced_stage == EmergenceStage.TRANSCENDENT else 0.99
+                    ),
+                    next_stage_distance=0.0,
+                    metadata=metadata,
+                )
+        except Exception:
+            # Fall through to computed path on any failure
+            pass
 
         # Determine stage
         stage = self._classify_stage(combined_zscore)
