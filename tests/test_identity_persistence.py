@@ -13,7 +13,7 @@ import sys
 import requests
 
 # Add PMM to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pmm.self_model_manager import SelfModelManager
 

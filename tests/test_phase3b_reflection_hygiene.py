@@ -13,7 +13,7 @@ import sys
 from unittest.mock import Mock
 
 # Add PMM to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pmm.self_model_manager import SelfModelManager
 from pmm.reflection import reflect_once, _validate_insight_references

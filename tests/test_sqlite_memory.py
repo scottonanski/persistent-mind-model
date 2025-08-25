@@ -6,7 +6,7 @@ Simple test to check SQLite memory loading without LangChain dependencies.
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pmm.storage.sqlite_store import SQLiteStore
 
@@ -26,7 +26,11 @@ def test_sqlite_memory():
         # Look for Scott's name
         scott_events = []
         for event in recent_events:
-            event_id, ts, kind, content, meta, prev_hash, hash_val = event
+            # SQLite returns Row objects, access by column name
+            event_id = event['id']
+            ts = event['ts']
+            kind = event['kind']
+            content = event['content']
             if "scott" in content.lower():
                 scott_events.append((event_id, ts, kind, content))
 
@@ -40,7 +44,11 @@ def test_sqlite_memory():
         key_facts = []
 
         for event in reversed(recent_events):  # Reverse to get chronological order
-            event_id, ts, kind, content, meta, prev_hash, hash_val = event
+            # SQLite returns Row objects, access by column name
+            event_id = event['id']
+            ts = event['ts']
+            kind = event['kind']
+            content = event['content']
             if kind in ["event", "response", "prompt"]:
                 # Format for LLM context
                 if "User said:" in content:
