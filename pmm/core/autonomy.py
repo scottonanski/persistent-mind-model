@@ -103,7 +103,11 @@ class AutonomyLoop:
             storage_manager=self.db
         )
         self.atomic_reflection = AtomicReflectionManager(self.pmm)
-        self.cooldown = ReflectionCooldownManager()
+        self.cooldown = ReflectionCooldownManager(
+            min_turns=2,
+            min_wall_time_seconds=120,
+            novelty_threshold=0.85,
+        )
         self.baselines = ModelBaselineManager()
         self.stages = EmergenceStageManager(self.baselines)
         self.ngram_ban = NGramBanSystem()

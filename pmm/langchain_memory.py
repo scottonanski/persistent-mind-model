@@ -154,10 +154,14 @@ class PersistentMindMemory(BaseChatMemory):
         self.model_baselines = ModelBaselineManager()
         self.atomic_reflection = AtomicReflectionManager(self.pmm)
         # Configure stricter default cooldown gates to reduce reflection frequency
+        # Adaptive cooldown: longer for S0 consolidation, shorter for active development
+        cooldown_seconds = (
+            120  # Compromise: longer than 90s but not as restrictive as 180s
+        )
         self.reflection_cooldown = ReflectionCooldownManager(
             min_turns=2,
-            min_wall_time_seconds=90,
-            novelty_threshold=0.82,
+            min_wall_time_seconds=cooldown_seconds,
+            novelty_threshold=0.85,
         )
         self.commitment_ttl = CommitmentTTLManager()
         self.ngram_ban = NGramBanSystem()
@@ -1236,14 +1240,14 @@ class PersistentMindMemory(BaseChatMemory):
                 # 1. Semantic search for relevant context (if we have input)
                 if current_input and self.enable_embeddings:
                     semantic_memories = self._get_semantic_context(
-                        current_input, max_results=6
+                        current_input, max_results=8
                     )
                     if semantic_memories:
                         conversation_history.extend(semantic_memories)
                         conversation_history.append("---")  # Separator
 
-                # 2. Recent chronological events for immediate context
-                recent_events = self.pmm.sqlite_store.recent_events(limit=30)
+                # 2. Recent chronological events for immediate context (increased for better pattern recognition)
+                recent_events = self.pmm.sqlite_store.recent_events(limit=45)
                 if recent_events:
                     for event in reversed(recent_events):  # chronological order
                         # Extract fields from dictionary (recent_events returns dicts via _row_to_dict)

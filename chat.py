@@ -213,9 +213,12 @@ def main():
         "yes",
         "on",
     )
-    EMBEDDINGS_ENABLED = os.getenv(
-        "PMM_ENABLE_EMBEDDINGS", "true"
-    ).strip().lower() in ("1", "true", "yes", "on")
+    EMBEDDINGS_ENABLED = os.getenv("PMM_ENABLE_EMBEDDINGS", "true").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
     # Model selection
     if args.model:
@@ -387,17 +390,37 @@ def main():
         """Detect when to use focused reasoning mode automatically."""
         t = (text or "").lower()
         long = len(text) > 350
-        codey = "```" in text or re.search(r"[{};]|traceback|exception|at \w+\(", text, re.I)
-        keywords = any(k in t for k in ["prove", "analyze", "diagnose", "precise", "step-by-step", "walk me through", "explain how", "technical"])
+        codey = "```" in text or re.search(
+            r"[{};]|traceback|exception|at \w+\(", text, re.I
+        )
+        keywords = any(
+            k in t
+            for k in [
+                "prove",
+                "analyze",
+                "diagnose",
+                "precise",
+                "step-by-step",
+                "walk me through",
+                "explain how",
+                "technical",
+            ]
+        )
         # use emergence snapshot from this turn if available
         stage = (scores or {}).get("stage", "")
         ias = float((scores or {}).get("ias", 0.0) or 0.0)
         gas = float((scores or {}).get("gas", 0.0) or 0.0)
-        low_emergence = stage.startswith("S0") or stage.startswith("S1") or ias < 0.25 or gas < 0.50
+        low_emergence = (
+            stage.startswith("S0") or stage.startswith("S1") or ias < 0.25 or gas < 0.50
+        )
         return long or codey or keywords or low_emergence
 
     # Create enhanced system prompt with PMM context
-    def get_pmm_system_prompt(identity_nudge: bool = False, last_user_text: str | None = None, memory_chars: int = 1800):
+    def get_pmm_system_prompt(
+        identity_nudge: bool = False,
+        last_user_text: str | None = None,
+        memory_chars: int = 1800,
+    ):
         # Always pull fresh memory right before each call
         raw_context = pmm_memory.load_memory_variables({}).get("history", "")
 
@@ -421,7 +444,10 @@ def main():
         try:
             if last_user_text and getattr(pmm_memory, "enable_embeddings", False):
                 # uses the same analyzer you already have
-                semantic_bits = pmm_memory._get_semantic_context(last_user_text, max_results=6) or []
+                semantic_bits = (
+                    pmm_memory._get_semantic_context(last_user_text, max_results=6)
+                    or []
+                )
         except Exception:
             semantic_bits = []
 
@@ -495,38 +521,58 @@ def main():
         # --- ADAPTIVE BUDGETING ---
         # Reserve tokens for the model's reply + the live conversation turns
         cfg = get_model_config(model_name)
-        max_ctx = max(4096, getattr(cfg, "max_tokens", 4096))  # be conservative if unknown
+        max_ctx = max(
+            4096, getattr(cfg, "max_tokens", 4096)
+        )  # be conservative if unknown
         reserve_for_reply = 512
         reserve_for_header = 400  # mind policy + persona + scaffolding
         reserve_for_history = 900  # running chat thread (messages list)
 
-        available_for_memory = max(0, max_ctx - reserve_for_reply - reserve_for_header - reserve_for_history)
+        available_for_memory = max(
+            0, max_ctx - reserve_for_reply - reserve_for_header - reserve_for_history
+        )
 
         # Synthesize a memory section, preferring relevant first, then the legacy blob
         memory_section = ""
         if semantic_bits:
-            memory_section += "RELEVANT LONG-TERM CONTEXT:\n" + "\n".join(semantic_bits) + "\n\n"
+            memory_section += (
+                "RELEVANT LONG-TERM CONTEXT:\n" + "\n".join(semantic_bits) + "\n\n"
+            )
         memory_section += "CROSS‑SESSION MEMORY (condensed):\n" + pmm_context
 
         # Apply memory_chars limit before token trimming for deep mode expansion
         if semantic_bits:
-            memory_section = "RELEVANT LONG-TERM CONTEXT:\n" + "\n".join(semantic_bits) + "\n\n"
-        memory_section += "CROSS‑SESSION MEMORY (condensed):\n" + pmm_context[:memory_chars]
-        
+            memory_section = (
+                "RELEVANT LONG-TERM CONTEXT:\n" + "\n".join(semantic_bits) + "\n\n"
+            )
+        memory_section += (
+            "CROSS‑SESSION MEMORY (condensed):\n" + pmm_context[:memory_chars]
+        )
+
         memory_section = _trim_to_tokens(memory_section, max(256, available_for_memory))
 
         # Dynamic header trimming when token pressure is high
         trim_ratio = 1.0
         try:
-            original_memory = "RELEVANT LONG-TERM CONTEXT:\n" + "\n".join(semantic_bits) + "\n\nCROSS‑SESSION MEMORY (condensed):\n" + pmm_context
-            trim_ratio = _approx_tokens(memory_section) / max(1, _approx_tokens(original_memory))
+            original_memory = (
+                "RELEVANT LONG-TERM CONTEXT:\n"
+                + "\n".join(semantic_bits)
+                + "\n\nCROSS‑SESSION MEMORY (condensed):\n"
+                + pmm_context
+            )
+            trim_ratio = _approx_tokens(memory_section) / max(
+                1, _approx_tokens(original_memory)
+            )
         except Exception:
             pass
 
         # If we're trimming >25% of memory, shorten the header to preserve content
         if trim_ratio < 0.75:
             # Collapse commitments to top 2 and drop Top Patterns for this turn
-            open_commitments_str = "\n".join([f"- {c['text']}" for c in (opens[:2] if opens else [])]) or "none"
+            open_commitments_str = (
+                "\n".join([f"- {c['text']}" for c in (opens[:2] if opens else [])])
+                or "none"
+            )
             mind_policy_lines = [
                 "MIND POLICY",
                 f"Identity: {agent_name}",
@@ -555,7 +601,9 @@ def main():
     print(
         "💡 Commands: 'quit' to exit, 'personality' for traits, 'memory' for context, 'models' to switch, 'status' for PMM status"
     )
-    print("🧪 Auto deep mode: activates automatically for analysis, code, long inputs, or low emergence")
+    print(
+        "🧪 Auto deep mode: activates automatically for analysis, code, long inputs, or low emergence"
+    )
     print("Start chatting...")
 
     # Initialize conversation history with PMM system prompt
@@ -567,7 +615,7 @@ def main():
         """Invoke model with proper format based on provider type."""
         current_config = get_model_config(model_name)  # Get current model config
         llm_active = llm_deep if use_deep_mode else llm_normal
-        
+
         if current_config.provider == "ollama":
             # Ollama expects a single string, so format the conversation
             formatted_prompt = ""
@@ -692,7 +740,9 @@ def main():
                         llm_normal = OllamaLLM(model=model_config.name, temperature=0.7)
                         llm_deep = OllamaLLM(model=model_config.name, temperature=0.2)
                     else:  # openai
-                        llm_normal = ChatOpenAI(model=model_config.name, temperature=0.7)
+                        llm_normal = ChatOpenAI(
+                            model=model_config.name, temperature=0.7
+                        )
                         llm_deep = ChatOpenAI(model=model_config.name, temperature=0.2)
 
                     # Update active config in LLM factory for reflection system
@@ -837,10 +887,12 @@ def main():
             # Auto-detect deep mode and adjust memory allocation
             deep_now = should_deep_mode(user_input, scores)
             mem_chars = 2600 if deep_now else 1800
-            
+
             # Pass the latest user text for semantic retrieval
             last_user_text = user_input
-            system_prompt = get_pmm_system_prompt(identity_nudge_flag, last_user_text, mem_chars)
+            system_prompt = get_pmm_system_prompt(
+                identity_nudge_flag, last_user_text, mem_chars
+            )
             if add_identity_anchor:
                 system_prompt = (system_prompt or "") + identity_anchor_text
                 if debug_on:
@@ -862,11 +914,11 @@ def main():
                 print(
                     f"🤖 PMM: [API] Calling {provider_name} with prompt: {user_input[:50]}..."
                 )
-            
+
             # Show deep mode notification when active
             if deep_now:
                 print("[PMM] deep mode: temp=0.2, memory+ ≈+40%")
-            
+
             response = invoke_model(conversation_history, use_deep_mode=deep_now)
 
             # Handle response format differences

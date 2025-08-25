@@ -28,8 +28,8 @@ class ReflectionCooldownManager:
     def __init__(
         self,
         min_turns: int = 2,
-        min_wall_time_seconds: int = 30,
-        novelty_threshold: float = 0.78,
+        min_wall_time_seconds: int = 180,
+        novelty_threshold: float = 0.85,
         context_window: int = 6,
         *,
         time_gate: int | None = None,

@@ -170,7 +170,7 @@ class MetaReflectionAnalyzer:
         return min(1.0, score)
 
     def _calculate_duplicate_rate(
-        self, novelty_scores: List[float], threshold: float = 0.2
+        self, novelty_scores: List[float], threshold: float = 0.15
     ) -> float:
         """Calculate rate of low-novelty (duplicate) reflections."""
         if not novelty_scores:
