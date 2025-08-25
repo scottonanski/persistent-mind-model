@@ -21,8 +21,8 @@ class EmergenceStage(Enum):
 class StageThresholds:
     """Z-score thresholds for emergence stages."""
 
-    dormant_max: float = -1.0  # Below -1.0 std dev
-    awakening_max: float = -0.5  # -1.0 to -0.5 std dev
+    dormant_max: float = -0.8  # Relaxed from -1.0 for easier S0 exit
+    awakening_max: float = -0.3  # Relaxed from -0.5 for easier S1 entry
     developing_max: float = 0.5  # -0.5 to 0.5 std dev
     maturing_max: float = 1.5  # 0.5 to 1.5 std dev
     # transcendent: above 1.5 std dev
@@ -54,13 +54,13 @@ class EmergenceStageManager:
             EmergenceStage.DORMANT: {
                 "reflection_frequency": 0.1,  # Very rare reflections
                 "commitment_ttl_multiplier": 0.5,  # Shorter commitments
-                "novelty_threshold": 0.9,  # High novelty required
+                "novelty_threshold": 0.8,  # Reduced for easier S0 exit
                 "description": "Minimal self-awareness, basic responses",
             },
             EmergenceStage.AWAKENING: {
                 "reflection_frequency": 0.3,
                 "commitment_ttl_multiplier": 0.7,
-                "novelty_threshold": 0.8,
+                "novelty_threshold": 0.7,  # Reduced for S1 pattern formation
                 "description": "Beginning self-recognition, simple patterns",
             },
             EmergenceStage.DEVELOPING: {

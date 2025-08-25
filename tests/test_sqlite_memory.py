@@ -27,10 +27,10 @@ def test_sqlite_memory():
         scott_events = []
         for event in recent_events:
             # SQLite returns Row objects, access by column name
-            event_id = event['id']
-            ts = event['ts']
-            kind = event['kind']
-            content = event['content']
+            event_id = event["id"]
+            ts = event["ts"]
+            kind = event["kind"]
+            content = event["content"]
             if "scott" in content.lower():
                 scott_events.append((event_id, ts, kind, content))
 
@@ -45,10 +45,10 @@ def test_sqlite_memory():
 
         for event in reversed(recent_events):  # Reverse to get chronological order
             # SQLite returns Row objects, access by column name
-            event_id = event['id']
-            ts = event['ts']
-            kind = event['kind']
-            content = event['content']
+            event_id = event["id"]
+            ts = event["ts"]
+            kind = event["kind"]
+            content = event["content"]
             if kind in ["event", "response", "prompt"]:
                 # Format for LLM context
                 if "User said:" in content:
