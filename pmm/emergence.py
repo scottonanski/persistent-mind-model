@@ -12,6 +12,15 @@ from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
+# Import adaptive emergence systems
+try:
+    from .adaptive_emergence import AdaptiveEmergenceDetector
+    from .semantic_growth import SemanticGrowthDetector
+except ImportError:
+    # Fallback for environments where these modules aren't available
+    AdaptiveEmergenceDetector = None
+    SemanticGrowthDetector = None
+
 # New stage manager + baselines integration
 try:
     from .model_baselines import ModelBaselineManager
@@ -106,6 +115,14 @@ class EmergenceAnalyzer:
         self._last_stage: Optional[str] = None
         self._promote_streak: int = 0
         self._demote_streak: int = 0
+
+        # Initialize adaptive systems if available
+        self._adaptive_detector = None
+        self._semantic_detector = None
+        if AdaptiveEmergenceDetector is not None:
+            self._adaptive_detector = AdaptiveEmergenceDetector(storage_manager)
+        if SemanticGrowthDetector is not None:
+            self._semantic_detector = SemanticGrowthDetector()
 
     def _apply_hysteresis(self, candidate: str) -> str:
         """Stabilize stage transitions: 2 ticks to promote, 3 to demote."""
@@ -456,6 +473,113 @@ class EmergenceAnalyzer:
                 "kinds_considered": kinds,
             }
 
+        # Use adaptive emergence detection if available
+        if self._adaptive_detector is not None and self._semantic_detector is not None:
+            return self._compute_adaptive_scores(
+                events, all_events, window_env, kinds, telemetry_on
+            )
+
+        # Fallback to legacy hardcoded system
+        return self._compute_legacy_scores(
+            events, all_events, window_env, kinds, telemetry_on
+        )
+
+    def _compute_adaptive_scores(
+        self, events, all_events, window_env, kinds, telemetry_on
+    ):
+        """Compute scores using adaptive emergence detection."""
+        # Get latest event content for analysis
+        latest_content = events[-1].content if events else ""
+
+        # Semantic analysis of growth patterns
+        semantic_metrics = self._semantic_detector.analyze_growth_content(
+            latest_content
+        )
+
+        # Calculate adaptive metrics
+        content_complexity = self._semantic_detector.calculate_content_complexity(
+            latest_content
+        )
+        behavioral_change = self._semantic_detector.detect_behavioral_change(
+            semantic_metrics
+        )
+        commitment_progress = self.commitment_close_rate(window_env)
+        semantic_novelty = self._semantic_detector.calculate_semantic_novelty(
+            latest_content
+        )
+
+        # Calculate adaptive GAS
+        GAS = self._adaptive_detector.calculate_adaptive_gas(
+            content_complexity=content_complexity,
+            behavioral_change=behavioral_change,
+            commitment_progress=commitment_progress,
+            semantic_novelty=semantic_novelty,
+        )
+
+        # Calculate adaptive IAS using semantic metrics
+        pmmspec_vals = [self.pmmspec_match(e.content) for e in events]
+        selfref_vals = [self.self_ref_rate(e.content) for e in events]
+
+        pmmspec_avg = sum(pmmspec_vals) / len(pmmspec_vals)
+        selfref_avg = sum(selfref_vals) / len(selfref_vals)
+
+        # Adaptive IAS weighting based on content quality
+        growth_score = semantic_metrics.get("overall_growth_score", 0.0)
+        if growth_score > 0.3:
+            # High growth content - weight self-reference more heavily
+            IAS = 0.4 * pmmspec_avg + 0.6 * selfref_avg
+        else:
+            # Standard weighting
+            IAS = 0.6 * pmmspec_avg + 0.4 * selfref_avg
+
+        # Detect stage using adaptive thresholds
+        stage, stage_confidence = self._adaptive_detector.detect_stage_transition(
+            ias_score=IAS, gas_score=GAS, content_metrics=semantic_metrics
+        )
+
+        result = {
+            "IAS": round(IAS, 3),
+            "GAS": round(GAS, 3),
+            "pmmspec_avg": round(pmmspec_avg, 3),
+            "selfref_avg": round(selfref_avg, 3),
+            "experience_detect": growth_score > 0.2,  # Semantic growth detection
+            "novelty": round(semantic_novelty, 3),
+            "commit_close_rate": round(commitment_progress, 3),
+            "stage": stage,
+            "stage_confidence": round(stage_confidence, 3),
+            "timestamp": datetime.now().isoformat(),
+            "events_analyzed": len(events),
+            "kinds_considered": kinds,
+            "adaptive_metrics": {
+                "content_complexity": round(content_complexity, 3),
+                "behavioral_change": round(behavioral_change, 3),
+                "semantic_growth": round(growth_score, 3),
+                "growth_orientation": round(
+                    semantic_metrics.get("growth_orientation", 0.0), 3
+                ),
+                "self_reflection": round(
+                    semantic_metrics.get("self_reflection", 0.0), 3
+                ),
+                "commitment_strength": round(
+                    semantic_metrics.get("commitment_strength", 0.0), 3
+                ),
+                "emotional_depth": round(
+                    semantic_metrics.get("emotional_depth", 0.0), 3
+                ),
+            },
+        }
+
+        if telemetry_on:
+            print(
+                f"[PMM][ADAPTIVE] IAS={result['IAS']:.3f} GAS={result['GAS']:.3f} stage={stage} confidence={stage_confidence:.3f} growth={growth_score:.3f}"
+            )
+
+        return result
+
+    def _compute_legacy_scores(
+        self, events, all_events, window_env, kinds, telemetry_on
+    ):
+        """Fallback to legacy hardcoded scoring system."""
         # Compute individual metrics
         pmmspec_vals = [self.pmmspec_match(e.content) for e in events]
         selfref_vals = [self.self_ref_rate(e.content) for e in events]
@@ -512,65 +636,9 @@ class EmergenceAnalyzer:
             + w_hint * hint_rate
         )
 
-        # Detect emergence stage via EmergenceStageManager if available
-        stage_profile = None
-        stage_candidate = None  # pre-hysteresis candidate
-        mgr = self._get_stage_manager()
-        if mgr is not None:
-            try:
-                model_name = (
-                    str(os.getenv("PMM_MODEL_NAME", "unknown")).strip() or "unknown"
-                )
-                profile = mgr.calculate_emergence_profile(
-                    model_name=model_name, ias_score=IAS, gas_score=GAS
-                )
-                stage_profile = {
-                    "ias_z": round(profile.ias_zscore, 3),
-                    "gas_z": round(profile.gas_zscore, 3),
-                    "combined_z": round(profile.combined_zscore, 3),
-                    "confidence": round(profile.confidence, 3),
-                    "progression": round(profile.stage_progression, 3),
-                    "next_stage_distance": round(profile.next_stage_distance, 3),
-                    "metadata": profile.metadata,
-                }
-                # Map emergent enum to S0–S4 label space
-                stage_map = {
-                    "dormant": "S0: Substrate",
-                    "awakening": "S1: Resistance",
-                    "developing": "S2: Adoption",
-                    "maturing": "S3: Self-Model",
-                    "transcendent": "S4: Growth-Seeking",
-                }
-                enum_val = getattr(profile.stage, "value", str(profile.stage)).lower()
-                stage_candidate = stage_map.get(enum_val, None)
-            except Exception:
-                stage_profile = None
-                stage_candidate = None
+        # Detect stage using legacy hardcoded thresholds
+        stage = self.detect_stage(IAS, GAS)
 
-        # Fallback to local gates when stage manager is unavailable
-        if not stage_candidate:
-            stage_candidate = self.detect_stage(
-                IAS, GAS, any(exp_detects), pmmspec_avg, selfref_avg
-            )
-
-        # Apply hysteresis before env overrides
-        stage_sticky = self._apply_hysteresis(stage_candidate)
-
-        # Hard stage override via env (e.g., PMM_HARD_STAGE=SS4)
-        try:
-            _hard = str(os.getenv("PMM_HARD_STAGE", "")).strip().upper()
-            if _hard == "SS4":
-                stage_sticky = "SS4"
-            elif _hard in ("S0", "S1", "S2", "S3", "S4"):
-                stage_sticky = {
-                    "S0": "S0: Substrate",
-                    "S1": "S1: Resistance",
-                    "S2": "S2: Adoption",
-                    "S3": "S3: Self-Model",
-                    "S4": "S4: Growth-Seeking",
-                }[_hard]
-        except Exception:
-            pass
         result = {
             "IAS": round(IAS, 3),
             "GAS": round(GAS, 3),
@@ -579,45 +647,16 @@ class EmergenceAnalyzer:
             "experience_detect": any(exp_detects),
             "novelty": round(novelty, 3),
             "commit_close_rate": round(commit_rate, 3),
-            "provisional_hint_rate": round(hint_rate, 3),
-            # Prefer sticky stage for downstream
-            "stage": stage_sticky,
-            # Keep raw candidate for debugging/audit
-            "stage_raw": stage_candidate,
+            "stage": stage,
             "timestamp": datetime.now().isoformat(),
             "events_analyzed": len(events),
             "kinds_considered": kinds,
         }
-        if stage_profile:
-            result["stage_profile"] = stage_profile
 
-        # Telemetry dump
         if telemetry_on:
-            try:
-                # Per-kind counts from all_events (telemetry only)
-                per_kind_counts: Dict[str, int] = {}
-                for ev in all_events:
-                    per_kind_counts[ev.kind] = per_kind_counts.get(ev.kind, 0) + 1
-                print(
-                    "[PMM][EMERGENCE] window=%d kinds=%s counts=%s | IAS=%.3f GAS=%.3f pmmspec=%.3f selfref=%.3f exp=%s nov=%.3f commit_rate=%.3f stage_raw=%s stage=%s"
-                    % (
-                        window_env,
-                        ",".join(kinds),
-                        json.dumps(per_kind_counts, separators=(",", ":")),
-                        result["IAS"],
-                        result["GAS"],
-                        result["pmmspec_avg"],
-                        result["selfref_avg"],
-                        str(result["experience_detect"]),
-                        result["novelty"],
-                        result["commit_close_rate"],
-                        result.get("stage_raw"),
-                        result["stage"],
-                    )
-                )
-            except Exception as _e:
-                # Never crash on telemetry
-                print(f"[PMM][EMERGENCE] telemetry error: {_e}")
+            print(
+                f"[PMM][LEGACY] IAS={result['IAS']:.3f} GAS={result['GAS']:.3f} stage={stage}"
+            )
 
         return result
 
