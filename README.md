@@ -106,6 +106,50 @@ PMM_TELEMETRY=true python chat.py
 - `status` - Show PMM status (feature toggles, DB size, event counts)
 - `quit`/`exit`/`bye` - Exit and save state
 
+## Quick Start (Makefile)
+
+If you prefer make targets, the repo includes a Makefile with convenient aliases.
+
+Setup once:
+```bash
+make install
+cp .env.example .env && $EDITOR .env
+```
+
+Start the backend (FastAPI probe API):
+```bash
+# Uses uvicorn with auto-reload on http://0.0.0.0:8000
+make pmm
+
+# Echo mode (no LLM needed), optionally change port
+PORT=8001 make pmm-echo
+```
+
+Run the Flutter UI:
+```bash
+# Web (Chrome)
+make ui-web
+
+# macOS desktop
+make ui-macos
+
+# Linux desktop
+make ui-linux
+
+# Diagnostics
+make ui-doctor
+```
+
+Optional: override the API base used by the UI (passed via --dart-define when provided):
+```bash
+PMM_API_BASE=http://localhost:8001 make ui-web
+```
+
+Notes:
+- Set OPENAI_API_KEY in `.env` (or your shell) to use OpenAI; otherwise Ollama is used if available.
+- The backend auto-loads `.env`; you can also export vars inline, e.g. `PMM_CHAT_MODE=echo make pmm`.
+- If port 8000 is busy, run with `PORT=8001 make pmm` or stop the conflicting process.
+
 
 ## Monitoring API
 

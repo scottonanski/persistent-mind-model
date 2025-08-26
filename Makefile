@@ -23,7 +23,7 @@ OPENAI_API_KEY ?=
 PMM_API_BASE ?=
 
 # --- Helpers ----------------------------------------------------------------
-.PHONY: help venv install pmm pmm-echo ui:web ui:linux ui:macos ui:doctor clean
+.PHONY: help venv install pmm pmm-echo ui-web ui-linux ui-macos ui-doctor clean
 
 ## help: Show this help message
 help:
@@ -63,26 +63,26 @@ define require_flutter
 	fi
 endef
 
-## ui:web: Run the Flutter UI in Chrome (web)
-ui:web:
+## ui-web: Run the Flutter UI in Chrome (web)
+ui-web:
 	$(call require_flutter)
 	@echo "Launching Flutter UI for web (Chrome)…"
 	cd ui && flutter run -d chrome $${PMM_API_BASE:+--dart-define=PMM_API_BASE=$$PMM_API_BASE}
 
-## ui:linux: Run the Flutter UI as a Linux desktop app
-ui:linux:
+## ui-linux: Run the Flutter UI as a Linux desktop app
+ui-linux:
 	$(call require_flutter)
 	@echo "Launching Flutter UI for Linux…"
 	cd ui && flutter run -d linux $${PMM_API_BASE:+--dart-define=PMM_API_BASE=$$PMM_API_BASE}
 
-## ui:macos: Run the Flutter UI as a macOS desktop app
-ui:macos:
+## ui-macos: Run the Flutter UI as a macOS desktop app
+ui-macos:
 	$(call require_flutter)
 	@echo "Launching Flutter UI for macOS…"
 	cd ui && flutter run -d macos $${PMM_API_BASE:+--dart-define=PMM_API_BASE=$$PMM_API_BASE}
 
-## ui:doctor: Run flutter doctor (diagnostics)
-ui:doctor:
+## ui-doctor: Run flutter doctor (diagnostics)
+ui-doctor:
 	$(call require_flutter)
 	cd ui && flutter doctor -v
 

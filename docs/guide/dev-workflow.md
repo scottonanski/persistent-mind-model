@@ -1,6 +1,6 @@
 # Development Workflow
 
-- Use VS Code tasks to launch API + UI
+- Use the [Makefile targets](/guide/makefile) or VS Code tasks to launch API + UI
 - Hot reload: both uvicorn and Flutter support reload for fast iteration
 - Tests: run with `pytest` (configured to discover in both `tests/` and project root)
 

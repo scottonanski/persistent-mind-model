@@ -9,7 +9,11 @@
 - Flutter deps: `cd ui && flutter pub get`
 
 ## Run dev (API + UI)
-See `DEV.md` or VS Code tasks:
+Use the Makefile or VS Code tasks.
+
+Makefile quickstart: see [Makefile Targets](/guide/makefile).
+
+VS Code tasks:
 - `dev:ui:web+api`
 - `dev:ui:macos+api`
 

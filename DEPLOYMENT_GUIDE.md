@@ -4,6 +4,8 @@
 
 The Persistent Mind Model (PMM) system is now production-ready with comprehensive hardening features. This guide covers deployment, configuration, and operational considerations.
 
+For local development and quick runs, see the "Quick Start (Makefile)" section in `README.md` for `make pmm`, `make pmm-echo`, and UI runner targets.
+
 ## Pre-Deployment Checklist
 
 ### ✅ Core Features Validated

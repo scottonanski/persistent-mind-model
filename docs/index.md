@@ -19,4 +19,7 @@ features:
     details: Inspect health, traits, commitments, emergence, and more
   - title: Flutter UI
     details: Cross-platform client for monitoring and interaction
+  - title: Makefile Quickstart
+    details: One-liners to run API and UI for local development
+    link: /guide/makefile
 ---
