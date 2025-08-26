@@ -10,11 +10,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ui/main.dart';
 
 void main() {
-  testWidgets('App renders chat screen', (WidgetTester tester) async {
+  testWidgets('PMMApp renders chat screen', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const ProviderScope(child: App()));
+    await tester.pumpWidget(const ProviderScope(child: PMMApp()));
 
     // Verify chat title exists.
-    expect(find.text('Chat'), findsOneWidget);
+    expect(find.text('PMM Chat'), findsOneWidget);
   });
 }

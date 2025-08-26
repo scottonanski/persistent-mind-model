@@ -72,7 +72,11 @@ python -m venv .venv
 source .venv/bin/activate  # Linux/Mac
 # .venv\Scripts\activate   # Windows
 pip install -r requirements.txt
-export OPENAI_API_KEY='sk-your-key-here'
+# 1) Create a .env with your keys (preferred)
+cp .env.example .env
+$EDITOR .env   # set OPENAI_API_KEY or PMM_OLLAMA_MODEL
+# (Alternatively) export in your shell for this session only:
+# export OPENAI_API_KEY='sk-your-key-here'
 ```
 
 **Start the main chat interface:**
@@ -107,7 +111,8 @@ PMM_TELEMETRY=true python chat.py
 
 **Start the monitoring server:**
 ```bash
-uvicorn pmm.api.probe:app --port 8000
+# For UI integrations, start the probe API:
+uvicorn pmm.api.probe:app --host 127.0.0.1 --port 8000
 ```
 
 **Available endpoints:**

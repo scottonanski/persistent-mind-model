@@ -1,16 +1,20 @@
-# ui
+# PMM UI (Flutter)
 
-A new Flutter project.
+Minimal chat UI that talks to the PMM Probe API.
 
-## Getting Started
+## Run
 
-This project is a starting point for a Flutter application.
+- macOS: from this folder
+	- flutter run -d macos
+- Web:
+	- flutter run -d chrome
 
-A few resources to get you started if this is your first Flutter project:
+The app defaults to http://127.0.0.1:8000 for the API base. Tap the gear icon to change.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+You can also set at compile time:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+PMM_API_BASE=http://localhost:8000 flutter run -d chrome --dart-define=PMM_API_BASE=$PMM_API_BASE
+
+## Test
+
+flutter test

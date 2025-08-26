@@ -1,4 +1,4 @@
-"""
+R"""
 Adaptive Emergence System - Natural, self-calibrating emergence detection.
 
 Replaces hardcoded thresholds with dynamic systems that learn from the agent's

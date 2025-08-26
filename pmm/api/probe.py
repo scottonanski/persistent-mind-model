@@ -1,7 +1,8 @@
 from __future__ import annotations
 import json
 from typing import List, Optional
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from pmm.storage.sqlite_store import SQLiteStore
@@ -9,11 +10,35 @@ from pmm.storage.integrity import verify_chain
 from pmm.emergence import EmergenceAnalyzer, EmergenceEvent
 from pmm.semantic_analysis import get_semantic_analyzer
 from pmm.meta_reflection import get_meta_reflection_analyzer
+from pmm.langchain_memory import PersistentMindMemory
+import os
+import httpx
+try:
+    from langchain_openai import ChatOpenAI
+except Exception:
+    ChatOpenAI = None
+try:
+    from langchain_ollama import OllamaLLM
+except Exception:
+    OllamaLLM = None
+try:
+    from openai import OpenAI as OpenAIClient
+except Exception:
+    OpenAIClient = None
 
 # Load environment variables from .env file
 load_dotenv()
 
 app = FastAPI(title="PMM Probe API", version="0.1.0")
+
+# CORS for local UI (web/macOS)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---- Pydantic Models ------------------------------------------------------
 
@@ -24,6 +49,21 @@ class EvidenceEvent(BaseModel):
     text: str
     source: str
     meta: dict = {}
+
+
+class ChatRequest(BaseModel):
+    input: str
+    provider: Optional[str] = None  # "openai" | "ollama"
+    model: Optional[str] = None
+    temperature: Optional[float] = 0.7
+
+
+class ChatResponse(BaseModel):
+    response: str
+    provider: str
+    model: str
+    saved: bool
+    error: Optional[str] = None
 
 
 # ---- Helpers --------------------------------------------------------------
@@ -125,6 +165,48 @@ def _get_emergence_events(
         )
         events.append(event)
     return events
+
+
+# ---- Chat Helpers ----------------------------------------------------------
+_pmm_memory_instance: Optional[PersistentMindMemory] = None
+
+
+def _get_memory() -> PersistentMindMemory:
+    global _pmm_memory_instance
+    if _pmm_memory_instance is None:
+        _pmm_memory_instance = PersistentMindMemory(
+            agent_path="persistent_self_model.json",
+            personality_config={
+                "openness": 0.7,
+                "conscientiousness": 0.6,
+                "extraversion": 0.8,
+                "agreeableness": 0.9,
+                "neuroticism": 0.3,
+            },
+            enable_summary=(os.getenv("PMM_ENABLE_SUMMARY", "false").lower() in ("1", "true", "yes", "on")),
+            enable_embeddings=(os.getenv("PMM_ENABLE_EMBEDDINGS", "true").lower() in ("1", "true", "yes", "on")),
+        )
+    return _pmm_memory_instance
+
+
+def _choose_provider_and_model(provider: Optional[str], model: Optional[str]):
+    if provider == "openai" or (provider is None and os.getenv("OPENAI_API_KEY")):
+        if not os.getenv("OPENAI_API_KEY"):
+            raise HTTPException(status_code=400, detail="OPENAI_API_KEY not set")
+        return "openai", (model or os.getenv("PMM_OPENAI_MODEL", "gpt-4o-mini"))
+    return "ollama", (model or os.getenv("PMM_OLLAMA_MODEL", "llama3.3:latest"))
+
+
+def _build_system_prompt(mem: PersistentMindMemory) -> str:
+    try:
+        agent_name = mem.pmm.model.core_identity.name
+    except Exception:
+        agent_name = "Agent"
+    history = mem.load_memory_variables({}).get("history", "")
+    return (
+        f"You are {agent_name}. Be direct and concise. If unsure, say so briefly and answer your best.\n\n"
+        f"CROSS-SESSION MEMORY (condensed):\n{history[:1600]}"
+    )
 
 
 # ---- Routes ---------------------------------------------------------------
@@ -256,6 +338,183 @@ def commitments(
         filtered_items = projected_items
 
     return {"items": filtered_items}
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat_endpoint(payload: ChatRequest, request: Request):
+    try:
+        # Dev shortcut: allow echo mode for quick UI testing without an LLM
+        chat_mode = (os.getenv("PMM_CHAT_MODE", "auto") or "auto").lower()
+        if chat_mode == "echo":
+            return ChatResponse(
+                response=payload.input,
+                provider="echo",
+                model="dev",
+                saved=False,
+            )
+
+        mem = _get_memory()
+        provider, model = _choose_provider_and_model(payload.provider, payload.model)
+
+        # Prepare conversation messages
+        system_prompt = _build_system_prompt(mem)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": payload.input},
+        ]
+
+        # Create LLM
+        if provider == "openai":
+            if ChatOpenAI is None:
+                raise HTTPException(status_code=500, detail="ChatOpenAI not available")
+            # Allow per-request OpenAI API key override via header
+            header_key = request.headers.get("x-openai-key") or request.headers.get("x-api-key")
+            kwargs = {"model": model, "temperature": payload.temperature or 0.7}
+            if header_key:
+                kwargs["api_key"] = header_key
+            llm = ChatOpenAI(**kwargs)
+            result = llm.invoke(messages)
+            response_text = getattr(result, "content", str(result))
+        else:
+            if OllamaLLM is None:
+                raise HTTPException(status_code=500, detail="OllamaLLM not available")
+            # Format as a simple prompt for Ollama
+            prompt = f"System: {system_prompt}\n\nUser: {payload.input}\nAssistant: "
+            response_text = OllamaLLM(model=model, temperature=payload.temperature or 0.7).invoke(prompt)
+
+        # Save to PMM memory
+        saved = True
+        try:
+            mem.save_context({"input": payload.input}, {"response": response_text})
+        except Exception:
+            saved = False
+
+        return ChatResponse(
+            response=response_text,
+            provider=provider,
+            model=model,
+            saved=saved,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return ChatResponse(
+            response="",
+            provider=payload.provider or "auto",
+            model=payload.model or "auto",
+            saved=False,
+            error=str(e),
+        )
+
+
+# ---- Provider Utilities ---------------------------------------------------
+
+
+@app.get("/providers/ollama/health")
+def ollama_health(url: Optional[str] = Query(None, description="Override Ollama base URL")):
+    """Check if Ollama is reachable and list models. URL can be overridden via query param."""
+    base = url or os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+    try:
+        with httpx.Client(timeout=2.0) as client:
+            r = client.get(f"{base}/api/tags")
+            r.raise_for_status()
+            data = r.json()
+            models = data.get("models", [])
+            names = []
+            for m in models:
+                name = m.get("name") or m.get("model")
+                if name:
+                    names.append(name)
+            return {"ok": True, "url": base, "models": names, "count": len(names)}
+    except Exception as e:
+        return {"ok": False, "url": base, "error": str(e)}
+
+
+@app.get("/providers/ollama/models")
+def ollama_models(url: Optional[str] = Query(None, description="Override Ollama base URL")):
+    base = url or os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+    try:
+        with httpx.Client(timeout=2.0) as client:
+            r = client.get(f"{base}/api/tags")
+            r.raise_for_status()
+            data = r.json()
+            models = data.get("models", [])
+            names = []
+            for m in models:
+                name = m.get("name") or m.get("model")
+                if name:
+                    names.append(name)
+            return {"items": names}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Ollama not reachable: {e}")
+
+
+class OpenAIValidateRequest(BaseModel):
+    api_key: str
+
+
+@app.post("/providers/openai/validate")
+def openai_validate(payload: OpenAIValidateRequest):
+    if OpenAIClient is None:
+        raise HTTPException(status_code=500, detail="OpenAI client not available")
+    try:
+        client = OpenAIClient(api_key=payload.api_key)
+        # Listing models is a cheap way to verify key without token usage
+        _ = client.models.list()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+@app.get("/providers/openai/models")
+def openai_models(request: Request):
+    if OpenAIClient is None:
+        raise HTTPException(status_code=500, detail="OpenAI client not available")
+    key = request.headers.get("x-openai-key") or request.headers.get("x-api-key") or os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(status_code=400, detail="OpenAI API key not provided")
+    try:
+        client = OpenAIClient(api_key=key)
+        models = client.models.list()
+        # Prefer a curated subset
+        preferred = ["gpt-4o-mini", "gpt-4o", "o3-mini", "o4-mini"]
+        items = []
+        server_items = [m.id for m in getattr(models, "data", []) if hasattr(m, "id")]
+        # Put preferred first if available
+        for p in preferred:
+            if p in server_items:
+                items.append(p)
+        # Append the rest (filter noisy embeddings or non-chat)
+        for mid in server_items:
+            if mid not in items and not ("embedding" in mid or mid.startswith("text-embedding")):
+                items.append(mid)
+        return {"items": items[:50]}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ---- Feature Toggles ------------------------------------------------------
+
+
+class FeatureToggleRequest(BaseModel):
+    enable_summary: Optional[bool] = None
+    enable_embeddings: Optional[bool] = None
+
+
+@app.post("/features")
+def set_features(payload: FeatureToggleRequest):
+    """Set feature toggles and reset memory so new settings apply."""
+    global _pmm_memory_instance
+    changed = False
+    if payload.enable_summary is not None:
+        os.environ["PMM_ENABLE_SUMMARY"] = "true" if payload.enable_summary else "false"
+        changed = True
+    if payload.enable_embeddings is not None:
+        os.environ["PMM_ENABLE_EMBEDDINGS"] = "true" if payload.enable_embeddings else "false"
+        changed = True
+    if changed:
+        _pmm_memory_instance = None  # Re-create on next use with new flags
+    return {"ok": True, "changed": changed}
 
 
 # PHASE 3B+: Identity endpoint to verify current agent name
@@ -1280,6 +1539,192 @@ def meta_cognition(
 
     except Exception as e:
         return {"error": str(e), "meta_insight": None, "self_awareness_score": 0.0}
+
+
+
+# ---- Visualization & Query Endpoints --------------------------------------
+
+from typing import Tuple
+
+
+def _query_events(
+    db_path: str,
+    kinds: Optional[List[str]] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> List[dict]:
+    """Flexible event query for UI search/table/timeline views.
+
+    Notes:
+      - `ts` is stored as ISO timestamp; string comparison works for ISO-8601.
+      - `q` does a simple LIKE on content/meta (debug-friendly; replace with FTS5 later).
+    """
+    store = SQLiteStore(db_path)
+    sql = "SELECT id,ts,kind,content,meta,prev_hash,hash FROM events"
+    conds = []
+    args: List[object] = []
+
+    if kinds:
+        placeholders = ",".join(["?"] * len(kinds))
+        conds.append(f"kind IN ({placeholders})")
+        args.extend(kinds)
+    if start:
+        conds.append("ts >= ?")
+        args.append(start)
+    if end:
+        conds.append("ts <= ?")
+        args.append(end)
+    if q:
+        conds.append("(content LIKE ? OR meta LIKE ?)")
+        like = f"%{q}%"
+        args.extend([like, like])
+
+    if conds:
+        sql += " WHERE " + " AND ".join(conds)
+    sql += " ORDER BY ts DESC LIMIT ? OFFSET ?"
+    args.extend([limit, offset])
+
+    rows = list(store.conn.execute(sql, args))
+    return [_row_to_dict(r) for r in rows]
+
+
+@app.get("/events/search")
+def events_search(
+    db: str = Query("pmm.db"),
+    kinds: Optional[str] = Query(
+        None, description="Comma-separated kinds: prompt,response,reflection,commitment,evidence,identity_update"
+    ),
+    start: Optional[str] = Query(None, description="ISO timestamp start (inclusive)"),
+    end: Optional[str] = Query(None, description="ISO timestamp end (inclusive)"),
+    q: Optional[str] = Query(None, description="Full-text LIKE filter over content/meta"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    kinds_list = [k.strip() for k in kinds.split(",")] if kinds else None
+    items = _query_events(db, kinds_list, start, end, q, limit, offset)
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/events/{event_id}")
+def event_by_id(event_id: int, db: str = Query("pmm.db")):
+    store = SQLiteStore(db)
+    row = store.conn.execute(
+        "SELECT id,ts,kind,content,meta,prev_hash,hash FROM events WHERE id=? LIMIT 1",
+        (event_id,),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return _row_to_dict(row)
+
+
+@app.get("/events/range")
+def events_range(
+    db: str = Query("pmm.db"),
+    start: Optional[str] = Query(None, description="ISO timestamp start (inclusive)"),
+    end: Optional[str] = Query(None, description="ISO timestamp end (inclusive)"),
+    limit: int = Query(500, ge=1, le=2000),
+    kinds: Optional[str] = Query(None, description="Comma-separated kinds"),
+):
+    kinds_list = [k.strip() for k in kinds.split(",")] if kinds else None
+    items = _query_events(db, kinds_list, start, end, None, limit, 0)
+    return {"items": items}
+
+
+@app.get("/graph/memory")
+def memory_graph(
+    db: str = Query("pmm.db"),
+    limit: int = Query(200, ge=10, le=1000, description="Max events to include"),
+    kinds: Optional[str] = Query(
+        None, description="Comma-separated kinds to include; defaults to response,reflection,evidence,commitment"
+    ),
+    cluster_threshold: float = Query(0.7, ge=0.0, le=1.0, description="Semantic clustering threshold"),
+):
+    """Return a lightweight graph for UI viz with nodes and edges.
+
+    Nodes:
+      { id, ts, kind, hash, label, meta }
+    Edges (typed):
+      - time: chronological adjacency (id_i -> id_{i-1})
+      - evidence: evidence -> commitment (via meta.commit_ref hash)
+      - cluster: semantic cluster membership (star topology per cluster)
+    """
+    default_kinds = ["response", "reflection", "evidence", "commitment"]
+    kinds_list = [k.strip() for k in kinds.split(",")] if kinds else default_kinds
+
+    # Pull events (newest first), then cap to limit
+    events = _query_events(db, kinds_list, None, None, None, limit=limit, offset=0)
+    if not events:
+        return {"nodes": [], "edges": []}
+
+    # Build nodes
+    nodes = []
+    id_index: dict[int, dict] = {}
+    for e in events:
+        node = {
+            "id": e["id"],
+            "ts": e["ts"],
+            "kind": e["kind"],
+            "hash": e.get("hash"),
+            "label": (e.get("content", "")[:120] + ("…" if len(e.get("content", "")) > 120 else "")),
+            "meta": e.get("meta", {}),
+        }
+        nodes.append(node)
+        id_index[e["id"]] = node
+
+    edges: List[dict] = []
+
+    # 1) Time edges (oldest->newest chain within this slice)
+    events_sorted = sorted(events, key=lambda x: x["ts"])  # ascending
+    for i in range(1, len(events_sorted)):
+        a = events_sorted[i - 1]["id"]
+        b = events_sorted[i]["id"]
+        edges.append({"source": a, "target": b, "type": "time"})
+
+    # 2) Evidence -> Commitment edges via commit_ref hash
+    hash_to_id = {e.get("hash"): e["id"] for e in events if e.get("hash")}
+    for e in events:
+        if e["kind"] == "evidence":
+            commit_ref = (e.get("meta", {}) or {}).get("commit_ref")
+            if commit_ref and commit_ref in hash_to_id:
+                edges.append({
+                    "source": e["id"],
+                    "target": hash_to_id[commit_ref],
+                    "type": "evidence",
+                })
+
+    # 3) Semantic clusters (star topology per cluster to limit edge count)
+    try:
+        semantic_analyzer = get_semantic_analyzer()
+        texts = [e.get("content", "") for e in events]
+        clusters = semantic_analyzer.cluster_similar_texts(texts, cluster_threshold)
+        # Expect clusters as list[list[int]] of indices; be robust if dict-like
+        if isinstance(clusters, dict):
+            cluster_groups = clusters.values()
+        else:
+            cluster_groups = clusters
+        for group in cluster_groups:
+            idxs = list(group)
+            if len(idxs) < 2:
+                continue
+            hub_idx = idxs[0]
+            hub_id = events[hub_idx]["id"] if hub_idx < len(events) else None
+            if not hub_id:
+                continue
+            for i in idxs[1:]:
+                if i < len(events):
+                    edges.append({
+                        "source": hub_id,
+                        "target": events[i]["id"],
+                        "type": "cluster",
+                    })
+    except Exception:
+        # If semantic analyzer unavailable, omit cluster edges gracefully
+        pass
+
+    return {"nodes": nodes, "edges": edges, "count": len(nodes)}
 
 
 def create_probe_app(db_path: str = "pmm.db") -> FastAPI:
