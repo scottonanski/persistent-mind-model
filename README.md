@@ -25,8 +25,8 @@ Plain-English overview of key concepts:
 Technical analysis (ChatGPT-5):
 - [📊 Technical Analysis: PMM Architecture & Innovation](TECHNICAL_ANALYSIS.md)
 
-- For a deeper architectural overview and roadmap-style notes, (A little outdated here and there, need to clean it up...):
-   [Persistent Mind Model (PMM) Project Considerations — Moving Forward](Persistent%20Mind%20Model%20(PMM)%20Project%20Considerations%20-%20Moving%20Forward.md)
+- For a architectural overview:
+   [Persistent Mind Model (PMM) – Analysis](Persistent%20Mind%20Model%20(PMM)%20–%20Analysis.md)
 
 ---
 
