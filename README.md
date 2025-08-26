@@ -2,7 +2,7 @@
 
 # Persistent Mind Model (PMM)
 
-[![Tests](https://img.shields.io/badge/tests-79%2F79%20passing-green)](https://github.com/scottonanski/persistent-mind-model)
+[![Tests](https://img.shields.io/badge/tests-118%2F118%20passing-green)](https://github.com/scottonanski/persistent-mind-model)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://github.com/scottonanski/persistent-mind-model)
 [![License](https://img.shields.io/badge/license-dual-orange)](https://github.com/scottonanski/persistent-mind-model)
 
@@ -25,7 +25,7 @@ Plain-English overview of key concepts:
 Technical analysis (ChatGPT-5):
 - [📊 Technical Analysis: PMM Architecture & Innovation](TECHNICAL_ANALYSIS.md)
 
-- For a architectural overview:
+- General analysis / Current Project State (ChatGPT-5):
    [Persistent Mind Model (PMM) – Analysis](Persistent%20Mind%20Model%20(PMM)%20–%20Analysis.md)
 
 ---
@@ -143,14 +143,14 @@ pmm/
 examples/
 └── (removed - use chat.py instead)
 
-tests/                    # Test suite (79 tests)
+tests/                    # Test suite (118 tests)
 ```
 
 ## Development
 
 **Run tests:**
 ```bash
-pytest  # 79/79 tests should pass
+pytest  # 118/118 tests should pass
 ```
 
 **Code quality:**
