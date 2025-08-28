@@ -6,16 +6,17 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://github.com/scottonanski/persistent-mind-model)
 [![License](https://img.shields.io/badge/license-dual-orange)](https://github.com/scottonanski/persistent-mind-model)
 
-PMM is a Python system for maintaining persistent AI personality traits, memory, and behavioral patterns across conversations and models. It stores conversation events, tracks commitments, and applies personality drift based on interaction patterns.
+PMM is a Python framework that gives an AI assistant a durable identity, memory, and behavior that persist across sessions, devices, and model backends. It logs interactions as structured events, tracks commitments, and applies controlled behavioral “drift” based on real usage.
 
-Think of PMM as a personal, persistent AI assistant that maintains a consistent identity and behavior, adapting and extending itself over time across diverse operational contexts. Users can connect external API endpoints or local LLMs as substrate engines to feed persistence, while PMM develops a customized persona free from vendor lock-in.
+Think of it as a persistent layer, or better yet a Ai "mind" that the user owns, running on top of any LLM. You can swap between local models or remote APIs without losing the mind’s state—PMM keeps the identity and memory intact while the underlying model can change, avoiding vendor lock‑in.
 
-In simple terms, it addresses key challenges in LLM applications, such as maintaining consistent personality, memory, and commitments across different models, sessions, and devices.
+PMM isn’t just about recall—it’s about gradual identity formation. Each interaction is recorded, reflected on, and woven into a self‑model. Traits, habits, and commitments evolve slowly and deliberately, so behavior stays consistent while improving over time.
 
-That said, lower-end LLMs—such as Gemma3:1b-qat—often struggle to keep pace with the "mind." Their outputs can contaminate the database by introducing hallucinations. Interestingly, switching to more capable models—such as gpt-4-nano—appears to restore memory fidelity.
+Model quality matters: very small models can introduce noise that degrades memory; more capable models generally improve fidelity. Regardless of substrate, the mind remains consistent.
 
-And here’s the part worth stressing: the “evolution” of the mind is intentionally a slow burn 🔥. This is by design. The persistent mind-model reinforces steady, deliberate growth that evolves in sync with the user’s interactions, ensuring stability over speed.
+By design, evolution is a slow burn—steady, evidence‑driven, and anchored in your interactions. It aims for stability over speed, so the assistant feels like a companion that grows with you rather than a tool that resets every session.
 
+In simple terms: PMM is an AI that remembers, stays consistent, and gradually becomes itself.
 
 ---
 
