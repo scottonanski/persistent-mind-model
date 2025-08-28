@@ -23,6 +23,25 @@ In simple terms: PMM is an AI that remembers, stays consistent, and gradually be
 I'm currently working on a branch that allows the PMM to see its own code and analyze it. This is a work in progress and is not yet ready for release.
 [self-code-analysis branch](https://github.com/scottonanski/persistent-mind-model/tree/self-code-analysis)
 
+Here's how it works (sort of... Still working on it):
+
+1. The PMM has a self-model that it uses to see snippet of itself (code).
+2. The PMM uses this self-model to analyze itself (code).
+3. The PMM uses this analysis to improve itself (code).
+
+```markdown
+> reflect... code SelfModelManager.add_commitment
+
+Snipped function:
+def add_commitment(...):
+    ...
+
+> How could this be improved?
+
+PMM: This function appends commitments but doesn’t check for duplicates at the DB level.
+I suggest adding a unique constraint or reinforcement event path.
+
+```
 ---
 
 Plain-English overview of key concepts:
