@@ -1234,16 +1234,25 @@ def main():
                     sub = parts[1] if len(parts) > 1 else None
                     if sub in {None, "list", "help"}:
                         print("\n📘 --@tasks options")
-                        print("  • --@tasks list             Show open tasks (from task_* events)")
+                        print(
+                            "  • --@tasks list             Show open tasks (from task_* events)"
+                        )
                         print("  • --@tasks open KIND TITLE  Open a dev task (ttl 8h)")
-                        print("  • --@tasks close ID         Close a task by id (e.g., dt1)")
+                        print(
+                            "  • --@tasks close ID         Close a task by id (e.g., dt1)"
+                        )
                         continue
                     if sub == "open" and len(parts) >= 4:
                         kind = parts[2]
                         title = at_cmd.split(" ", 3)[3]
                         try:
                             dtm = DevTaskManager(pmm_memory.pmm.sqlite_store)
-                            tid = dtm.open_task(kind=kind, title=title, ttl_hours=8, policy={"source": "chat"})
+                            tid = dtm.open_task(
+                                kind=kind,
+                                title=title,
+                                ttl_hours=8,
+                                policy={"source": "chat"},
+                            )
                             print(f"\n✅ Opened task {tid}: {title}")
                         except Exception as e:
                             print(f"\n❌ Failed to open task: {e}")
@@ -1251,7 +1260,9 @@ def main():
                     if sub == "close" and len(parts) >= 3:
                         tid = parts[2]
                         try:
-                            DevTaskManager(pmm_memory.pmm.sqlite_store).close_task(tid, reason="manual_close")
+                            DevTaskManager(pmm_memory.pmm.sqlite_store).close_task(
+                                tid, reason="manual_close"
+                            )
                             print(f"\n✅ Closed task {tid}")
                         except Exception as e:
                             print(f"\n❌ Failed to close task {tid}: {e}")
@@ -1262,28 +1273,48 @@ def main():
                             "SELECT id,ts,kind,content,meta FROM events WHERE kind IN ('task_created','task_progress','task_closed') ORDER BY id"
                         ).fetchall()
                         import json as _json
+
                         tasks = {}
                         for rid, ts, kind, content, meta in rows:
                             try:
-                                m = _json.loads(meta) if isinstance(meta, str) else (meta or {})
+                                m = (
+                                    _json.loads(meta)
+                                    if isinstance(meta, str)
+                                    else (meta or {})
+                                )
                             except Exception:
                                 m = {}
-                            tid = str(m.get('task_id', ''))
+                            tid = str(m.get("task_id", ""))
                             if not tid:
                                 continue
-                            rec = tasks.setdefault(tid, {'task_id': tid, 'status': 'open', 'title': None, 'kind': None, 'progress': []})
-                            if kind == 'task_created':
+                            rec = tasks.setdefault(
+                                tid,
+                                {
+                                    "task_id": tid,
+                                    "status": "open",
+                                    "title": None,
+                                    "kind": None,
+                                    "progress": [],
+                                },
+                            )
+                            if kind == "task_created":
                                 try:
-                                    c = _json.loads(content) if isinstance(content, str) else (content or {})
+                                    c = (
+                                        _json.loads(content)
+                                        if isinstance(content, str)
+                                        else (content or {})
+                                    )
                                 except Exception:
                                     c = {}
-                                rec['title'] = c.get('title')
-                                rec['kind'] = c.get('kind')
-                            elif kind == 'task_progress':
-                                rec['progress'].append({'ts': ts, 'content': content})
-                            elif kind == 'task_closed':
-                                rec['status'] = 'closed'
-                        open_tasks = [t for t in tasks.values() if t['status']=='open']
+                                rec["title"] = c.get("title")
+                                rec["kind"] = c.get("kind")
+                            elif kind == "task_progress":
+                                rec["progress"].append({"ts": ts, "content": content})
+                            elif kind == "task_closed":
+                                rec["status"] = "closed"
+                        open_tasks = [
+                            t for t in tasks.values() if t["status"] == "open"
+                        ]
                         if not open_tasks:
                             print("\n🗂️  No open tasks.")
                         else:

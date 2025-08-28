@@ -205,12 +205,14 @@ def _fold_tasks(store: SQLiteStore, limit: int = 200) -> dict:
                 c = json.loads(content) if isinstance(content, str) else (content or {})
             except Exception:
                 c = {}
-            rec.update({
-                "kind": c.get("kind"),
-                "title": c.get("title"),
-                "policy": c.get("policy"),
-                "ttl": c.get("ttl"),
-            })
+            rec.update(
+                {
+                    "kind": c.get("kind"),
+                    "title": c.get("title"),
+                    "policy": c.get("policy"),
+                    "ttl": c.get("ttl"),
+                }
+            )
         elif kind == "task_progress":
             rec["progress"].append({"ts": ts, "content": content})
         elif kind == "task_closed":

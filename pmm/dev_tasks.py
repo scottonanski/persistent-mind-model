@@ -55,6 +55,7 @@ class DevTaskManager:
             created_at=self._now(),
         )
         import json
+
         self.store.append_event(
             kind="task_created",
             content=json.dumps(asdict(task), ensure_ascii=False),
@@ -62,8 +63,15 @@ class DevTaskManager:
         )
         return tid
 
-    def update_task(self, task_id: str, *, note: Optional[str] = None, percent: Optional[float] = None) -> None:
+    def update_task(
+        self,
+        task_id: str,
+        *,
+        note: Optional[str] = None,
+        percent: Optional[float] = None,
+    ) -> None:
         import json
+
         payload = {"note": note, "percent": percent}
         self.store.append_event(
             kind="task_progress",
@@ -71,8 +79,15 @@ class DevTaskManager:
             meta={"task_id": task_id},
         )
 
-    def close_task(self, task_id: str, *, reason: Optional[str] = None, evidence: Optional[str] = None) -> None:
+    def close_task(
+        self,
+        task_id: str,
+        *,
+        reason: Optional[str] = None,
+        evidence: Optional[str] = None,
+    ) -> None:
         import json
+
         # 1) Emit an evidence:done row if any evidence string is provided
         if evidence:
             ev_content = {
