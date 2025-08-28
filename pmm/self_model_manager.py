@@ -80,6 +80,20 @@ class SelfModelManager:
                 # Save without acquiring lock again (we already have it)
                 self._save_model_unlocked(model)
                 return model
+            except json.JSONDecodeError:
+                # Corrupt JSON — back up and start fresh to preserve availability
+                try:
+                    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                    backup_path = f"{self.model_path}.corrupt.{ts}.bak"
+                    try:
+                        os.replace(self.model_path, backup_path)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                model = PersistentMindModel()
+                self._save_model_unlocked(model)
+                return model
 
             # --- hydrate dict -> dataclasses (defaults first, then overlay) ---
             model = PersistentMindModel()
@@ -181,6 +195,17 @@ class SelfModelManager:
                 )
                 model.meta_cognition.identity_evolution.append(ch)
 
+            # bandit persistence fields (optional)
+            try:
+                bc = meta.get("bandit_counts")
+                br = meta.get("bandit_rewards")
+                if isinstance(bc, list):
+                    model.meta_cognition.bandit_counts = bc
+                if isinstance(br, list):
+                    model.meta_cognition.bandit_rewards = br
+            except Exception:
+                pass
+
             # behavioral_patterns
             patterns = sk.get("behavioral_patterns", {})
             for k, v in patterns.items():
@@ -255,6 +280,27 @@ class SelfModelManager:
         evidence: Optional[dict] = None,
     ):
         """Add an autobiographical event with optional trait effects."""
+
+        # Sanitize non-JSON types in evidence/tags to avoid model JSON corruption
+        def _sanitize(obj):
+            try:
+                if obj is None:
+                    return None
+                if isinstance(obj, (str, int, float, bool)):
+                    return obj
+                if isinstance(obj, (list, tuple)):
+                    return [_sanitize(x) for x in obj]
+                if isinstance(obj, dict):
+                    return {str(k): _sanitize(v) for k, v in obj.items()}
+                # Fallback: stringify
+                return str(obj)
+            except Exception:
+                return "<non-serializable>"
+
+        if evidence is not None:
+            evidence = _sanitize(evidence)
+        if tags is not None:
+            tags = _sanitize(tags)
         with self.lock:
             # FIXED: Generate ID atomically inside lock
             ev_id = f"ev{len(self.model.self_knowledge.autobiographical_events)+1}"
@@ -401,17 +447,77 @@ class SelfModelManager:
     ):
         """Add a new commitment and return its ID."""
         cid = self.commitment_tracker.add_commitment(text, source_insight_id, due)
-        if cid:
-            # Sync to model's self_knowledge for persistence
-            commitment = self.commitment_tracker.commitments[cid]
-            self.model.self_knowledge.commitments[cid] = {
-                "text": commitment.text,
-                "created_at": commitment.created_at,
-                "status": commitment.status,
-                "source_insight_id": commitment.source_insight_id,
-                "due": commitment.due,
-            }
+        if not cid:
+            return ""
+
+        # Sync to model's self_knowledge for persistence
+        commitment = self.commitment_tracker.commitments[cid]
+
+        # Reinforcement path: duplicate intent recorded -> log reinforcement instead of new commitment
+        if getattr(commitment, "_just_reinforced", False):
+            try:
+                meta = {
+                    "cid": cid,
+                    "source_insight_id": source_insight_id,
+                    "attempts": getattr(commitment, "attempts", 1),
+                    "reinforcements": getattr(commitment, "reinforcements", 0),
+                    "status": commitment.status,
+                }
+                self.sqlite_store.append_event(
+                    kind="commitment_reinforcement", content=commitment.text, meta=meta
+                )
+            except Exception:
+                pass
+            # Update self-model record if exists
+            rec = self.model.self_knowledge.commitments.get(cid, {})
+            rec["text"] = commitment.text
+            rec["status"] = commitment.status
+            rec["attempts"] = getattr(commitment, "attempts", 1)
+            rec["reinforcements"] = getattr(commitment, "reinforcements", 0)
+            rec["source_insight_id"] = source_insight_id
+            rec["due"] = commitment.due
+            self.model.self_knowledge.commitments[cid] = rec
+            commitment._just_reinforced = False
             self.save_model()
+            return cid
+
+        # Emit a canonical 'commitment' event to the SQLite chain for auditability
+        # and to enable evidence linkage by event hash.
+        try:
+            meta = {
+                "cid": cid,
+                "source_insight_id": source_insight_id,
+                "due": due,
+                "status": commitment.status,
+            }
+            res = self.sqlite_store.append_event(
+                kind="commitment", content=commitment.text, meta=meta
+            )
+            # Store the canonical event hash on the commitment for future evidence linking
+            try:
+                commitment.event_hash = res.get("hash")
+            except Exception:
+                pass
+        except Exception:
+            # Best-effort: continue even if DB append fails
+            res = None
+
+        # Persist commitment details to the JSON self-model (include event hash when available)
+        commit_record = {
+            "text": commitment.text,
+            "created_at": commitment.created_at,
+            "status": commitment.status,
+            "source_insight_id": commitment.source_insight_id,
+            "due": commitment.due,
+            "attempts": getattr(commitment, "attempts", 1),
+            "reinforcements": getattr(commitment, "reinforcements", 0),
+        }
+        if res and res.get("hash"):
+            commit_record["hash"] = res.get("hash")
+            commit_record["event_id"] = res.get("event_id")
+
+        self.model.self_knowledge.commitments[cid] = commit_record
+        self.save_model()
         return cid
 
     def mark_commitment(self, cid: str, status: str, note: Optional[str] = None):

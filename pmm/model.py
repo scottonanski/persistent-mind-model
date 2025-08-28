@@ -292,6 +292,9 @@ class MetaCognition:
     times_accessed_self: int = 0
     self_modification_count: int = 0
     identity_evolution: List[IdentityChange] = field(default_factory=list)
+    # Persistence for reflection bandit stats (template selector)
+    bandit_counts: List[int] = field(default_factory=list)
+    bandit_rewards: List[float] = field(default_factory=list)
 
 
 # ===== Top-level Model =====

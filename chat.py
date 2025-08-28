@@ -24,6 +24,12 @@ from pmm.config import (
     get_ollama_models,
 )
 from pmm.emergence import compute_emergence_scores
+from pmm.commitments import (
+    tick_turn_scoped_identity_commitments,
+    open_identity_commitment,
+    get_identity_turn_commitments,
+    close_identity_turn_commitments,
+)
 from pmm.reflection import reflect_once
 from pmm.logging_config import pmm_tlog
 
@@ -499,6 +505,9 @@ def main():
             "Be direct and concise. If uncertain, state uncertainty briefly and answer your best.",
             "You may propose next steps and form commitments when helpful. If the user opts out, stop.",
             "Ask clarifying questions only when necessary to proceed.",
+            "Evidence rule: In substantive answers, cite at least one recent event ID (e.g., ev123) or a commitment hash when relevant.",
+            "Action rule: When you propose an action, end with a single line starting with 'Next:' that includes a measurable token (a number, percent, timeframe, or threshold). Do not add more than one Next line.",
+            "Variation rule: Vary verbs, quantities, and timeframes to avoid generating duplicate commitments; do not restate identical 'I will …' lines across turns.",
             f"Top Patterns (awareness only): {top_patterns_str}",
             "Open Commitments:",
             f"{open_commitments_str}",
@@ -599,7 +608,7 @@ def main():
 
     print(f"\n🤖 PMM is ready! Using {model_name} ({model_config.provider})")
     print(
-        "💡 Commands: 'quit' to exit, 'personality' for traits, 'memory' for context, 'models' to switch, 'status' for PMM status"
+        "💡 Hint: type --@help for commands. Try: --@identity list | --@probe list | --@track on"
     )
     print(
         "🧪 Auto deep mode: activates automatically for analysis, code, long inputs, or low emergence"
@@ -610,6 +619,20 @@ def main():
     conversation_history = [
         {"role": "system", "content": get_pmm_system_prompt(identity_nudge_flag)}
     ]
+
+    # Optional feedback collection (interactive only when enabled)
+    FEEDBACK_ENABLE = os.getenv("PMM_FEEDBACK_ENABLE", "0").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    FEEDBACK_AUTOPROMPT = os.getenv("PMM_FEEDBACK_AUTOPROMPT", "0").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
     def invoke_model(messages, use_deep_mode=False):
         """Invoke model with proper format based on provider type."""
@@ -655,6 +678,141 @@ def main():
     # CLI-controlled logging toggles (off by default)
     debug_on = bool(getattr(args, "debug", False))
     telemetry_flag = bool(getattr(args, "telemetry", False))
+    # Unified runtime tracking toggle (seeded from CLI or env)
+    track_enabled = telemetry_flag or (
+        os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
+    )
+
+    # Pretty printer for TRACK lines
+    def _track_fmt(
+        scores: dict, cd_status: dict, s0c: int, s0thr: int, stage: str
+    ) -> list[str]:
+        def fnum(x, d=3):
+            try:
+                if x is None:
+                    return "-"
+                return f"{float(x):.{d}f}"
+            except Exception:
+                return str(x)
+
+        def hms(sec):
+            try:
+                if sec is None:
+                    return "-"
+                sec = int(float(sec))
+                m, s = divmod(sec, 60)
+                h, m = divmod(m, 60)
+                if h:
+                    return f"{h}h{m:02d}m"
+                if m:
+                    return f"{m}m{s:02d}s"
+                return f"{s}s"
+            except Exception:
+                return "-"
+
+        # Friendly labels
+        stage_full = stage or "?"
+        stage_short = (stage_full.split(":")[0] or stage_full).strip()
+
+        def band(x):
+            try:
+                x = float(x)
+                if x < 0.20:
+                    return "low"
+                if x < 0.50:
+                    return "moderate"
+                return "high"
+            except Exception:
+                return "-"
+
+        ias = scores.get("IAS")
+        gas = scores.get("GAS")
+        close_rate = scores.get("commit_close_rate")
+
+        # Color helpers
+        def c(text: str, lvl: str) -> str:
+            col = {"low": "31", "moderate": "33", "high": "32"}.get(lvl)
+            return f"\033[{col}m{text}\033[0m" if col else text
+
+        ident_band = band(ias)
+        growth_band = band(gas)
+        ident_label = f"identity {c(ident_band.upper(), ident_band)} {fnum(ias)}"
+        growth_label = f"growth {c(growth_band.upper(), growth_band)} {fnum(gas)}"
+        close_label = f"close {fnum(close_rate,2)}"
+
+        line1 = f"[TRACK] {stage_short} • {ident_label} • {growth_label} • {close_label} • s0={s0c}/{s0thr}"
+
+        # Cooldown / readiness line
+        cd = cd_status or {}
+        tg = cd.get("time_gate_passed")
+        ug = cd.get("turns_gate_passed")
+        tg_mark = "✓" if tg else "✗"
+        ug_mark = "✓" if ug else "✗"
+        tsl = cd.get("turns_since_last", cd.get("turns_since_last:", None))
+        tss = hms(cd.get("time_since_last_seconds"))
+
+        # Simple guidance
+        hint = None
+        try:
+            # Identity hint
+            if float(ias or 0) < 0.20:
+                hint = "Hint: --@identity open 3"
+            # Reflection readiness hint
+            if (tg and ug) and not hint:
+                hint = "Ready to reflect"
+            elif (not ug) and not hint:
+                # If we know a min_turns, estimate remaining
+                need = None
+                mt = cd.get("min_turns_required") or cd.get(
+                    "min_turns_required_seconds"
+                )
+                if isinstance(mt, int) and isinstance(tsl, int):
+                    need = max(0, int(mt) - int(tsl))
+                if need is not None and need > 0:
+                    hint = f"Need {need} more turn(s)"
+        except Exception:
+            pass
+        ready = "✓" if (tg and ug) else "✗"
+        hint_str = f" • {hint}" if hint else ""
+        turns_str = str(tsl) if tsl is not None else "-"
+        line2 = f"[TRACK] Reflection: since {tss} • turns {turns_str} • time {tg_mark} • turns {ug_mark} • ready {ready}{hint_str}"
+        return [line1, line2]
+
+    # Simple tag colorizer for chat diagnostics
+    def _tag(label: str, color: str | None = None) -> str:
+        # Always colorize in terminal (simple ANSI)
+        codes = {"green": "32", "cyan": "36", "yellow": "33", "magenta": "35"}
+        code = codes.get(color)
+        return f"\033[{code}m[{label}]\033[0m" if code else f"[{label}]"
+
+    def _print_track_legend():
+        print("\n🧭 TRACK quick guide")
+        print("  • Stage S0–S4: S0 stuck → S4 generative")
+        print(
+            "  • identity: how much it speaks as ‘I’ / cites its commitments (LOW/MODERATE/HIGH)"
+        )
+        print("      Fix LOW: --@identity open 3")
+        print("  • growth: novelty/experiments in replies (LOW/MODERATE/HIGH)")
+        print("  • close: fraction of commitments closed with evidence (0–1)")
+        print("  • Reflection line: since/turns/time/turns/ready + a hint when blocked")
+
+    def _print_track_explain():
+        print("\n🧒 TRACK explained (plain English)")
+        print("  • After every answer, TRACK is a tiny dashboard about the AI’s mind.")
+        print("  • Stage: where it is on a 0–4 scale. 0 = stuck, 4 = thriving.")
+        print("  • Identity: are we speaking as ‘I’ and remembering our promises?")
+        print("  • Growth: are we trying new things and not repeating ourselves?")
+        print("  • Close: are we finishing the things we promised to do?")
+        print("  • Reflection line: are we ready to do a quick self‑check now?")
+        print(
+            "      Two lights: time and turns. Both ✓ = ready. If not, it tells you what to do."
+        )
+        print(
+            "  • If Identity is LOW: type --@identity open 3 to nudge speaking as ‘I’."
+        )
+        print(
+            "  • If Growth is LOW: ask for a different style, new examples, or alternatives."
+        )
 
     while True:
         try:
@@ -668,6 +826,516 @@ def main():
             if user_input.lower() in ["quit", "exit", "bye"]:
                 print("👋 Goodbye! Your conversation is saved with persistent memory.")
                 break
+            # Unified --@ router for quick, discoverable UI commands
+            elif user_input.startswith("--@"):
+                at_cmd = user_input[3:].strip().lower()
+                # Registry of supported --@ things
+                AT_REG = {
+                    "identity": "Show identity. '--@identity list' for options",
+                    "commitments": "Show open commitments. '--@commitments list' for options",
+                    "traits": "Show Big Five trait snapshot",
+                    "emergence": "Show emergence stage (IAS/GAS)",
+                    "events": "Show recent events. '--@events list' for options",
+                    "find": "Search events, commitments, reflections (e.g., --@find text)",
+                    "status": "Show system status (events, last kind, stage)",
+                    "memory": "Show cross-session memory excerpt",
+                    "track": "Real-time telemetry. '--@track list' for options",
+                    "probe": "Probe API: --@probe list for more information",
+                }
+                if at_cmd in ("help", "h", "?", "list"):
+                    print("\n🧭 --@ commands")
+                    for k, v in AT_REG.items():
+                        print(f"  • --@{k:<12} {v}")
+                    # Highlight useful subcommands in plain language
+                    print("\n🔎 Tips (pasteable):")
+                    print(
+                        "  • --@identity open 3   Turn identity mode ON for 3 replies (speak as ‘I’)"
+                    )
+                    print("  • --@identity clear    Turn identity mode OFF")
+                    print("  • --@probe list        Show available status queries")
+                    print("  • --@probe start       Start the status server")
+                    print("  • --@probe identity    Show current identity via server")
+                    print("  • --@find something    Search everywhere for text")
+                    print("  • --@track on|off      Toggle real-time telemetry")
+                    continue
+                # Contextual help: --@help identity|probe
+                if at_cmd.startswith("help "):
+                    topic = at_cmd.split(None, 1)[1].strip()
+                    if topic == "identity":
+                        print("\n📘 --@identity help")
+                        print(
+                            "  • --@identity           Show your current identity and whether identity mode is ON"
+                        )
+                        print(
+                            "  • --@identity open N    Turn identity mode ON for N replies (default 3)"
+                        )
+                        print("  • --@identity clear     Turn identity mode OFF")
+                        continue
+                    if topic == "probe":
+                        print("\n📘 --@probe help")
+                        print(
+                            "  • --@probe list         Show available status queries with examples"
+                        )
+                        print(
+                            "  • --@probe start        Start the status server in the background"
+                        )
+                        print(
+                            "  • --@probe <path>       Run a query, e.g. --@probe commitments?limit=10"
+                        )
+                        continue
+                # --@probe [start|<path>]
+                if at_cmd.startswith("probe"):
+                    parts = at_cmd.split(None, 1)
+
+                    # Helper to parse base URL -> (host, port)
+                    def _parse_host_port(default=("127.0.0.1", 8000)):
+                        try:
+                            from urllib.parse import urlparse
+
+                            base = os.getenv("PMM_PROBE_URL", "http://127.0.0.1:8000")
+                            u = urlparse(base)
+                            host = u.hostname or default[0]
+                            port = u.port or default[1]
+                            return host, int(port)
+                        except Exception:
+                            return default
+
+                    if len(parts) > 1 and parts[1].strip().lower() in {
+                        "start",
+                        "on",
+                        "serve",
+                        "run",
+                    }:
+                        # Start probe server in the background (best-effort)
+                        host, port = _parse_host_port()
+                        try:
+                            import subprocess
+
+                            cmd = [
+                                sys.executable,
+                                "-m",
+                                "uvicorn",
+                                "pmm.api.probe:app",
+                                "--host",
+                                host,
+                                "--port",
+                                str(port),
+                            ]
+                            subprocess.Popen(
+                                cmd,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
+                            print(f"\n🚀 Probe started at http://{host}:{port}")
+                            print("   Tip: set PMM_PROBE_URL to change host/port")
+                        except Exception as e:
+                            print(f"\n❌ Failed to start probe: {e}")
+                        continue
+
+                    # Special discovery helper: --@probe list|endpoints
+                    if len(parts) > 1 and parts[1].strip().lower() in {
+                        "list",
+                        "endpoints",
+                    }:
+                        base = os.getenv("PMM_PROBE_URL", "http://127.0.0.1:8000")
+                        url = f"{base}/endpoints"
+                        try:
+                            import urllib.request
+                            import json as _json
+
+                            with urllib.request.urlopen(url, timeout=4) as resp:
+                                data = resp.read()
+                                obj = _json.loads(data.decode("utf-8", "ignore"))
+                            items = (
+                                obj.get("items", []) if isinstance(obj, dict) else []
+                            )
+                            print("\n📚 Probe endpoints:")
+                            for it in items:
+                                print(
+                                    f"  • {it.get('path'):<24} {it.get('desc')}\n    e.g. --@probe {it.get('example')}"
+                                )
+                        except Exception as e:
+                            print(f"\n❌ Probe list error: {e} (url={url})")
+                        continue
+
+                    path = parts[1] if len(parts) > 1 else "identity"
+                    # Sanitize path
+                    path = path.lstrip("/")
+                    base = os.getenv("PMM_PROBE_URL", "http://127.0.0.1:8000")
+                    url = f"{base}/{path}"
+                    try:
+                        import urllib.request
+                        import json as _json
+
+                        with urllib.request.urlopen(url, timeout=4) as resp:
+                            data = resp.read()
+                            try:
+                                obj = _json.loads(data.decode("utf-8", "ignore"))
+                            except Exception:
+                                obj = {"raw": data.decode("utf-8", "ignore")}
+                        # Print compact summary for common endpoints
+                        if path.startswith("identity") and isinstance(obj, dict):
+                            print("\n👤 Probe /identity:")
+                            print(f"  name: {obj.get('name')}")
+                            items = obj.get("identity_commitments") or []
+                            if items:
+                                print("  identity commitments:")
+                                for it in items:
+                                    print(
+                                        f"    • {it.get('policy')} {it.get('remaining_turns')}/{it.get('ttl_turns')} id={it.get('id')}"
+                                    )
+                            else:
+                                print("  identity commitments: none")
+                            # If user invoked bare '--@probe', offer a tip
+                            if at_cmd.strip() == "probe":
+                                print("\n  Tip: --@probe list  (see more endpoints)")
+                        else:
+                            print(f"\n🔎 Probe {path}:\n{obj}")
+                    except Exception as e:
+                        print(f"\n❌ Probe error: {e} (url={url})")
+                    continue
+                elif at_cmd.startswith("identity"):
+                    # Subcommands: open [ttl], clear
+                    parts = at_cmd.split()
+                    sub = parts[1] if len(parts) > 1 else None
+                    if sub in {"list", "help"}:
+                        print("\n📘 --@identity options")
+                        print(
+                            "  • --@identity            Show your current identity and whether identity mode is ON"
+                        )
+                        print(
+                            "  • --@identity open N     Turn identity mode ON for N replies (default 3)"
+                        )
+                        print("  • --@identity clear      Turn identity mode OFF")
+                        continue
+                    if sub == "open":
+                        ttl = 3
+                        if len(parts) > 2 and parts[2].isdigit():
+                            ttl = max(1, min(10, int(parts[2])))
+                        try:
+                            h = open_identity_commitment(
+                                pmm_memory.pmm,
+                                policy="express_core_principles",
+                                ttl_turns=ttl,
+                                note="manual open via --@identity",
+                            )
+                            print(
+                                f"\n✅ Opened identity commitment for {ttl} turns (id={h[:8]})"
+                            )
+                        except Exception as e:
+                            print(f"\n❌ Failed to open identity commitment: {e}")
+                        continue
+                    if sub in {"clear", "close"}:
+                        try:
+                            n = close_identity_turn_commitments(pmm_memory.pmm)
+                            print(f"\n✅ Closed {n} identity commitment(s)")
+                        except Exception as e:
+                            print(f"\n❌ Failed to close identity commitments: {e}")
+                        continue
+                    # Default: show identity + active commitments
+                    try:
+                        name = pmm_memory.pmm.model.core_identity.name
+                    except Exception:
+                        name = "(unknown)"
+                    print(f"\n👤 Identity: {name}")
+                    try:
+                        items = get_identity_turn_commitments(pmm_memory.pmm)
+                    except Exception:
+                        items = []
+                    if not items:
+                        print("No active identity commitments.")
+                        print(
+                            "  Tip: --@identity open 3   Turn identity mode ON for 3 replies"
+                        )
+                        print("  Tip: --@identity list     Show available options")
+                    else:
+                        print("Active Identity Commitments:")
+                        for it in items:
+                            short = (it.get("event_hash", "") or "")[:8]
+                            print(
+                                f"  • policy={it.get('policy','')}, remaining={it.get('remaining_turns',0)}/{it.get('ttl_turns',0)}, id={short}"
+                            )
+                        print("  Tip: --@identity clear    Turn identity mode OFF")
+                        print("  Tip: --@identity list     Show available options")
+                    continue
+                elif at_cmd.startswith("commitments"):
+                    parts = at_cmd.split()
+                    sub = parts[1] if len(parts) > 1 else None
+                    if sub in {"list", "help"}:
+                        print("\n📘 --@commitments options")
+                        print(
+                            "  • --@commitments            Show open commitments (top 5)"
+                        )
+                        print(
+                            "  • --@commitments search X   Search recent commitment events for text X"
+                        )
+                        print(
+                            "  • --@commitments close CID  Close a commitment by ID (e.g., c12)"
+                        )
+                        print(
+                            "  • --@commitments clear      Close all open (legacy) commitments"
+                        )
+                        print(
+                            "  • Note: identity turn-scoped commitments are managed by --@identity"
+                        )
+                        continue
+                    if sub == "search" and len(parts) > 2:
+                        query = at_cmd.split(" ", 2)[2].strip()
+                        try:
+                            store = pmm_memory.pmm.sqlite_store
+                            rows = list(
+                                store.conn.execute(
+                                    "SELECT id,ts,content,hash FROM events WHERE kind='commitment' AND content LIKE ? ORDER BY id DESC LIMIT 10",
+                                    (f"%{query}%",),
+                                )
+                            )
+                            if not rows:
+                                print(f"\n🔎 No commitment events matching: {query}")
+                            else:
+                                print(f"\n🔎 Commitments matching '{query}':")
+                                for r in rows:
+                                    preview = (r[2] or "")[:80].replace("\n", " ")
+                                    print(
+                                        f"  • {r[0]:>4} {r[1]} #{str(r[3])[:8]} :: {preview}"
+                                    )
+                        except Exception as e:
+                            print(f"\n❌ Search error: {e}")
+                        continue
+                    if sub == "close" and len(parts) > 2:
+                        cid = parts[2]
+                        try:
+                            pmm_memory.pmm.mark_commitment(
+                                cid, "closed", "Closed via --@commitments"
+                            )
+                            print(f"\n✅ Closed commitment {cid}")
+                        except Exception as e:
+                            print(f"\n❌ Failed to close {cid}: {e}")
+                        continue
+                    if sub == "clear":
+                        try:
+                            open_list = pmm_memory.pmm.get_open_commitments() or []
+                            count = 0
+                            for c in open_list:
+                                cid = c.get("cid")
+                                if cid:
+                                    pmm_memory.pmm.mark_commitment(
+                                        cid,
+                                        "closed",
+                                        "Bulk close via --@commitments clear",
+                                    )
+                                    count += 1
+                            print(f"\n✅ Closed {count} commitment(s)")
+                        except Exception as e:
+                            print(f"\n❌ Failed to clear commitments: {e}")
+                        continue
+                    # Default: show open commitments + identity scoped
+                    try:
+                        open_list = pmm_memory.pmm.get_open_commitments() or []
+                    except Exception:
+                        open_list = []
+                    if not open_list:
+                        print("No open commitments.")
+                        print("  Tip: --@commitments list   Show available options")
+                    else:
+                        print("\n📌 Open Commitments:")
+                        for c in open_list[:5]:
+                            print(f"  • {c.get('text','')}")
+                    try:
+                        items = get_identity_turn_commitments(pmm_memory.pmm)
+                        if items:
+                            print("\n🎭 Identity (turn-scoped):")
+                            for it in items:
+                                short = (it.get("event_hash", "") or "")[:8]
+                                print(
+                                    f"  • {it.get('policy','')} {it.get('remaining_turns',0)}/{it.get('ttl_turns',0)} id={short}"
+                                )
+                    except Exception:
+                        pass
+                    continue
+                elif at_cmd in ("traits",):
+                    personality = pmm_memory.get_personality_summary()
+                    print("\n🎭 Current Personality State:")
+                    for trait, score in personality["personality_traits"].items():
+                        print(f"   • {trait.title():<15} : {score:>6.2f}")
+                    continue
+                elif at_cmd in ("emergence",):
+                    try:
+                        scores = compute_emergence_scores(
+                            window=15, storage_manager=pmm_memory.pmm.sqlite_store
+                        )
+                        stage = scores.get("stage", "Unknown")
+                        print(
+                            f"\n🌱 Emergence: stage={stage}, IAS={scores.get('IAS')}, GAS={scores.get('GAS')}"
+                        )
+                    except Exception as e:
+                        print(f"\n🌱 Emergence: error: {e}")
+                    continue
+                elif at_cmd.startswith("events"):
+                    parts = at_cmd.split()
+                    sub = parts[1] if len(parts) > 1 else None
+                    if sub in {"list", "help"}:
+                        print("\n📘 --@events options")
+                        print("  • --@events              Show last 5 events")
+                        print("  • --@events recent N     Show last N events")
+                        print(
+                            "  • --@events kind K N     Show last N events of kind K (e.g., response, reflection)"
+                        )
+                        print(
+                            "  • --@events search X     Search content for text X in recent events"
+                        )
+                        continue
+                    try:
+                        store = pmm_memory.pmm.sqlite_store
+                        if sub == "recent" and len(parts) > 2 and parts[2].isdigit():
+                            limit = max(1, min(50, int(parts[2])))
+                            rows = store.recent_events(limit=limit)
+                        elif sub == "kind" and len(parts) > 3 and parts[3].isdigit():
+                            kind = parts[2]
+                            limit = max(1, min(50, int(parts[3])))
+                            rows = list(
+                                store.conn.execute(
+                                    "SELECT id,ts,kind,content,meta,prev_hash,hash FROM events WHERE kind=? ORDER BY id DESC LIMIT ?",
+                                    (kind, limit),
+                                )
+                            )
+                            # Normalize to dicts like recent_events
+                            rows = [store._row_to_dict(r) for r in rows]
+                        elif sub == "search" and len(parts) > 2:
+                            query = at_cmd.split(" ", 2)[2].strip()
+                            rows = list(
+                                store.conn.execute(
+                                    "SELECT id,ts,kind,content FROM events WHERE content LIKE ? ORDER BY id DESC LIMIT 10",
+                                    (f"%{query}%",),
+                                )
+                            )
+                            print(f"\n🗂️  Events matching '{query}':")
+                            if not rows:
+                                print("  (none)")
+                                continue
+                            for r in rows:
+                                preview = (r[3] or "")[:80].replace("\n", " ")
+                                print(f"  • {r[0]:>4} {r[2]:<16} {r[1]} :: {preview}")
+                            continue
+                        else:
+                            rows = store.recent_events(limit=5)
+                        print("\n🗂️  Recent Events:")
+                        for r in rows:
+                            preview = (r.get("content") or "")[:80].replace("\n", " ")
+                            print(
+                                f"  • {r['id']:>4} {r['kind']:<16} {r['ts']} :: {preview}"
+                            )
+                    except Exception as e:
+                        print(f"\n🗂️  Events error: {e}")
+                    continue
+                elif at_cmd.startswith("find"):
+                    # Unified search across events (content/summary), commitment events, and open commitments
+                    if len(at_cmd.split(None, 1)) < 2:
+                        print("\n📘 --@find usage: --@find <text>")
+                        continue
+                    query = at_cmd.split(" ", 2)[1].strip().strip("\"'")
+                    try:
+                        store = pmm_memory.pmm.sqlite_store
+                        # Events search (content or summary)
+                        ev_rows = list(
+                            store.conn.execute(
+                                "SELECT id,ts,kind,COALESCE(summary, content) AS c FROM events WHERE (content LIKE ? OR summary LIKE ?) ORDER BY id DESC LIMIT 15",
+                                (f"%{query}%", f"%{query}%"),
+                            )
+                        )
+                        # Open commitments (JSON model)
+                        try:
+                            open_list = pmm_memory.pmm.get_open_commitments() or []
+                        except Exception:
+                            open_list = []
+                        oc_hits = [
+                            c
+                            for c in open_list
+                            if query.lower() in (c.get("text", "").lower())
+                        ]
+
+                        print(f"\n🔎 Results for '{query}':")
+                        # Print commitment hits first
+                        if oc_hits:
+                            print("  • Open Commitments:")
+                            for c in oc_hits[:5]:
+                                txt = (c.get("text", "") or "")[:100].replace("\n", " ")
+                                print(f"    - {txt}")
+                        # Then events
+                        if ev_rows:
+                            print("  • Events:")
+                            for r in ev_rows:
+                                preview = (r[3] or "")[:100].replace("\n", " ")
+                                print(f"    - {r[0]:>4} {r[2]:<12} {r[1]} :: {preview}")
+                        if not oc_hits and not ev_rows:
+                            print("  (no matches)")
+                    except Exception as e:
+                        print(f"\n❌ Find error: {e}")
+                    continue
+                elif at_cmd.startswith("track"):
+                    parts = at_cmd.split()
+                    sub = parts[1] if len(parts) > 1 else None
+                    if sub in {None, "list", "help"}:
+                        print("\n📘 --@track options")
+                        print(
+                            "  • --@track on        Turn real-time telemetry ON (prints after each reply)"
+                        )
+                        print("  • --@track off       Turn real-time telemetry OFF")
+                        print(
+                            "  • --@track status    Show whether telemetry is ON or OFF"
+                        )
+                        print("  • --@track legend    Quick guide to the fields")
+                        print(
+                            "  • --@track explain   Plain-English explanation with what to do"
+                        )
+                        continue
+                    if sub == "on":
+                        track_enabled = True
+                        print(
+                            "\n✅ Tracking ON — you will see a [TRACK] line after each reply"
+                        )
+                        _print_track_legend()
+                        continue
+                    if sub == "off":
+                        track_enabled = False
+                        print("\n✅ Tracking OFF")
+                        continue
+                    if sub == "status":
+                        print(f"\n🧭 Tracking: {'ON' if track_enabled else 'OFF'}")
+                        continue
+                    if sub == "legend":
+                        _print_track_legend()
+                        continue
+                    if sub == "explain":
+                        _print_track_explain()
+                        continue
+                elif at_cmd in ("status",):
+                    # Minimal status snapshot
+                    try:
+                        rows = pmm_memory.pmm.sqlite_store.all_events()
+                        total = len(rows)
+                        last = rows[-1]["kind"] if rows else None
+                    except Exception:
+                        total, last = 0, None
+                    try:
+                        scores = compute_emergence_scores(
+                            window=15, storage_manager=pmm_memory.pmm.sqlite_store
+                        )
+                        stage = scores.get("stage", "Unknown")
+                    except Exception:
+                        stage = "Unknown"
+                    print(f"\n🧩 Status: events={total}, last={last}, stage={stage}")
+                    continue
+                elif at_cmd in ("memory",):
+                    pmm_context = pmm_memory.load_memory_variables({}).get(
+                        "history", ""
+                    )
+                    print("\n🧠 Cross-Session Memory Context:")
+                    print(
+                        pmm_context[:500]
+                        if pmm_context
+                        else "No cross-session memory yet"
+                    )
+                    continue
             elif user_input.lower() == "personality":
                 personality = pmm_memory.get_personality_summary()
                 print("\n🎭 Current Personality State:")
@@ -683,6 +1351,27 @@ def main():
                 print(
                     pmm_context[:500] if pmm_context else "No cross-session memory yet"
                 )
+                continue
+            elif user_input.lower() in ("identity", "commitments"):
+                # Show current identity and active identity turn-scoped commitments
+                try:
+                    name = pmm_memory.pmm.model.core_identity.name
+                except Exception:
+                    name = "(unknown)"
+                print(f"\n👤 Identity: {name}")
+                try:
+                    items = get_identity_turn_commitments(pmm_memory.pmm)
+                except Exception:
+                    items = []
+                if not items:
+                    print("No active identity commitments.")
+                else:
+                    print("Active Identity Commitments:")
+                    for it in items:
+                        short = (it.get("event_hash", "") or "")[:8]
+                        print(
+                            f"  • policy={it.get('policy','')}, remaining={it.get('remaining_turns',0)}/{it.get('ttl_turns',0)}, id={short}"
+                        )
                 continue
             elif user_input.lower() == "models":
                 print("\n" + "=" * 50)
@@ -912,12 +1601,35 @@ def main():
             provider_name = current_config.provider.upper()
             if debug_on:
                 print(
-                    f"🤖 PMM: [API] Calling {provider_name} with prompt: {user_input[:50]}..."
+                    f"🤖 PMM: {_tag('API','cyan')} Calling {provider_name} with prompt: {user_input[:50]}..."
                 )
 
             # Show deep mode notification when active
             if deep_now:
                 print("[PMM] deep mode: temp=0.2, memory+ ≈+40%")
+
+            # Token telemetry: estimate prompt token usage
+            try:
+                sys_tokens = _approx_tokens(conversation_history[0]["content"])
+                msg_count = len(conversation_history)
+                token_meta = {
+                    "system_tokens": sys_tokens,
+                    "messages": msg_count,
+                    "deep_mode": deep_now,
+                    "stage": scores.get("stage"),
+                    "ias": scores.get("IAS"),
+                    "gas": scores.get("GAS"),
+                }
+                try:
+                    pmm_memory.pmm.add_event(
+                        summary=f"Token telemetry: sys={sys_tokens} msgs={msg_count}",
+                        etype="telemetry",
+                        evidence=token_meta,
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
             response = invoke_model(conversation_history, use_deep_mode=deep_now)
 
@@ -928,7 +1640,40 @@ def main():
                 response_text = response.content  # OpenAI returns message object
 
             if debug_on:
-                print(f"[API] Response received: {len(response_text)} chars")
+                print(
+                    f"{_tag('API','cyan')} Response received: {len(response_text)} chars"
+                )
+            # Guard: if reply includes a malformed Next: line, rewrite only that line
+            try:
+                import re as _re
+
+                if "Next:" in (response_text or ""):
+                    # simple measurable check consistent with reflection
+                    MEASURABLE = _re.compile(
+                        r"(\b\d+(?:\.\d+)?\s*(minutes?|minute|hours?|days?|weeks?)\b|\b\d+\s*%|\bpercent\b|\bthreshold\b|\bcount\b)",
+                        _re.IGNORECASE,
+                    )
+                    BARE_BAD = _re.compile(
+                        r"^\s*\+?\d+(?:\.\d+)?\s*(minutes?|minute|hours?|days?|weeks?)?\s*$",
+                        _re.IGNORECASE,
+                    )
+                    lines = response_text.splitlines()
+                    fixed = False
+                    for i, ln in enumerate(lines):
+                        if ln.strip().lower().startswith("next:"):
+                            nl = ln[5:].strip()
+                            if (not MEASURABLE.search(nl)) or BARE_BAD.match(nl):
+                                # rewrite with a generic safe fallback
+                                lines[i] = (
+                                    "Next: I will provide an update within 15 minutes"
+                                )
+                                fixed = True
+                                break
+                    if fixed:
+                        response_text = "\n".join(lines)
+            except Exception:
+                pass
+
             print(response_text)
 
             # Add AI response to conversation history
@@ -941,6 +1686,71 @@ def main():
                 )
             except Exception as _e:
                 print(f"[warn] save_context failed: {_e}")
+
+            # Auto-tick turn-scoped identity commitments and close when TTL hits 0
+            try:
+                tick_turn_scoped_identity_commitments(pmm_memory.pmm, response_text)
+                # Show concise status for any active identity turn commitments
+                try:
+                    _items = get_identity_turn_commitments(pmm_memory.pmm)
+                    if _items:
+                        parts = []
+                        for it in _items[:2]:
+                            short = (it.get("event_hash", "") or "")[:8]
+                            parts.append(
+                                f"{it.get('policy','')} {it.get('remaining_turns',0)}/{it.get('ttl_turns',0)}#{short}"
+                            )
+                        more = "" if len(_items) <= 2 else f" (+{len(_items)-2} more)"
+                        print("[PMM] identity commitments: " + ", ".join(parts) + more)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            # Optional feedback collection and event logging
+            try:
+                if FEEDBACK_ENABLE:
+                    # Attempt to capture feedback from user when interactive autoprompt is on
+                    rating = None
+                    note = None
+                    if FEEDBACK_AUTOPROMPT and sys.stdin.isatty():
+                        try:
+                            raw = input(
+                                "[PMM] Rate clarity 1-5 (ENTER to skip): "
+                            ).strip()
+                            if raw:
+                                rating = int(raw)
+                        except Exception:
+                            rating = None
+                        try:
+                            if rating is not None:
+                                note = input("[PMM] Optional note: ").strip() or None
+                        except Exception:
+                            note = None
+
+                    # If we have feedback, or if autoprompt is off but environment provided defaults, log it
+                    if rating is not None or note is not None:
+                        # Look up the most recent response event id to reference
+                        try:
+                            store = pmm_memory.pmm.sqlite_store
+                            row = store.conn.execute(
+                                "SELECT id, ts, content FROM events WHERE kind='response' ORDER BY id DESC LIMIT 1"
+                            ).fetchone()
+                            resp_id = int(row[0]) if row else None
+                        except Exception:
+                            resp_id = None
+
+                        meta = {"rating": rating, "response_ref": resp_id}
+                        if note:
+                            meta["note"] = note
+                        try:
+                            pmm_memory.pmm.sqlite_store.append_event(
+                                kind="feedback", content=(note or ""), meta=meta
+                            )
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
             # --- Autonomous S0 Recovery & Telemetry ---
             try:
@@ -957,18 +1767,29 @@ def main():
                 else:
                     s0_consecutive = 0
 
-                # Telemetry snapshot (uses the same precomputed scores)
-                telemetry_on = telemetry_flag or (
-                    os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
+                # Real-time telemetry snapshot (pretty)
+                telemetry_env = os.getenv("PMM_TELEMETRY", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
                 )
+                telemetry_on = track_enabled or telemetry_env
                 if telemetry_on:
                     try:
                         cd_status = pmm_memory.reflection_cooldown.get_status()
                     except Exception:
                         cd_status = {}
-                    print(
-                        f"[PMM_TELEMETRY] emergence: stage={stage}, IAS={scores.get('IAS')}, GAS={scores.get('GAS')}, pmmspec={scores.get('pmmspec_avg')}, selfref={scores.get('selfref_avg')}, novelty={scores.get('novelty')}, commit_close_rate={scores.get('commit_close_rate')}, s0_streak={s0_consecutive}/{s0_streak_threshold}, cooldown={cd_status}"
+                    lines = _track_fmt(
+                        scores, cd_status, s0_consecutive, s0_streak_threshold, stage
                     )
+                    if track_enabled:
+                        for ln in lines:
+                            print(ln)
+                    else:
+                        # Legacy label
+                        for ln in lines:
+                            print(ln.replace("[TRACK]", "[PMM_TELEMETRY]", 1))
 
                 # Decide on recovery actions when stuck in S0
                 if s0_consecutive >= s0_streak_threshold:
@@ -989,13 +1810,25 @@ def main():
                                 source_insight_id="system:emergence_s0_recovery",
                                 due=None,
                             )
+                            # Also open a turn-scoped identity commitment (deduped by policy/scope/ttl)
+                            try:
+                                open_identity_commitment(
+                                    pmm_memory.pmm,
+                                    policy="express_core_principles",
+                                    ttl_turns=3,
+                                    note="S0 recovery identity anchoring",
+                                )
+                            except Exception:
+                                pass
                             if telemetry_on:
+                                msg = "commitment: opened identity anchoring commitment"
                                 print(
-                                    "[PMM_TELEMETRY] commitment: opened identity anchoring commitment"
+                                    f"{'[TRACK]' if track_enabled else '[PMM_TELEMETRY]'} {msg}"
                                 )
                     except Exception as _e:
                         if telemetry_on:
-                            print(f"[PMM_TELEMETRY] commitment_error: {str(_e)}")
+                            lbl = "[TRACK]" if track_enabled else "[PMM_TELEMETRY]"
+                            print(f"{lbl} commitment_error: {str(_e)}")
 
                     # Force a reflection to break substrate inertia
                     try:
@@ -1013,12 +1846,14 @@ def main():
                                 pmm_memory.pmm, active_model_config=active_cfg
                             )
                             if telemetry_on:
+                                lbl = "[TRACK]" if track_enabled else "[PMM_TELEMETRY]"
                                 print(
-                                    f"[PMM_TELEMETRY] reflection: forced reason=emergence_s0_stuck, accepted={getattr(_ins, 'meta', {}).get('accepted') if _ins else None}"
+                                    f"{lbl} reflection: forced reason=emergence_s0_stuck, accepted={getattr(_ins, 'meta', {}).get('accepted') if _ins else None}"
                                 )
                     except Exception as _e:
                         if telemetry_on:
-                            print(f"[PMM_TELEMETRY] reflection_error: {str(_e)}")
+                            lbl = "[TRACK]" if track_enabled else "[PMM_TELEMETRY]"
+                            print(f"{lbl} reflection_error: {str(_e)}")
 
                 else:
                     # When not stuck, disable nudge to avoid oversteer
@@ -1026,10 +1861,9 @@ def main():
 
             except Exception as _e:
                 # Never let recovery logic break the chat loop
-                if os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on"):
-                    print(
-                        f"[PMM_TELEMETRY] s0_recovery_error: {type(_e).__name__}: {_e}"
-                    )
+                if telemetry_on:
+                    lbl = "[TRACK]" if track_enabled else "[PMM_TELEMETRY]"
+                    print(f"{lbl} s0_recovery_error: {type(_e).__name__}: {_e}")
 
         except KeyboardInterrupt:
             print("\n\n👋 Chat interrupted. Your conversation is saved!")

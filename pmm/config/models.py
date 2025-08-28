@@ -171,6 +171,16 @@ def _get_env_bool(name: str, default: bool) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+# --- Identity Commitment Defaults (package-scoped for easy import) ---
+@dataclass(frozen=True)
+class IdentityCommitmentDefaults:
+    ttl_turns: int = 3
+    min_confidence: float = 0.60
+
+
+IDENTITY_COMMIT = IdentityCommitmentDefaults()
+
+
 def get_min_embedding_threshold() -> float:
     """Minimum cap for adaptive embedding dedup threshold.
 

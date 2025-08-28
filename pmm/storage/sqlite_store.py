@@ -94,7 +94,14 @@ class SQLiteStore:
         """
         import hashlib
 
-        kw_json = json.dumps(keywords or [], ensure_ascii=False)
+        def _json_default(obj):
+            try:
+                # Basic primitives pass through; fall back to string repr for others
+                return str(obj)
+            except Exception:
+                return "<non-serializable>"
+
+        kw_json = json.dumps(keywords or [], ensure_ascii=False, default=_json_default)
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         with self._lock:
@@ -123,7 +130,7 @@ class SQLiteStore:
 
             # Generate proper SHA-256 hash server-side
             canonical_json = json.dumps(
-                event_data, sort_keys=True, separators=(",", ":")
+                event_data, sort_keys=True, separators=(",", ":"), default=_json_default
             )
             computed_hash = hashlib.sha256(canonical_json.encode()).hexdigest()
 
@@ -139,7 +146,7 @@ class SQLiteStore:
                     ts,
                     kind,
                     content,
-                    json.dumps(meta, ensure_ascii=False),
+                    json.dumps(meta, ensure_ascii=False, default=_json_default),
                     prev,
                     final_hash,
                     summary,
@@ -249,7 +256,9 @@ class SQLiteStore:
                 else:
                     similarity = dot_product / (norm_query * norm_event)
 
-                similarities.append((similarity, self._row_to_dict(row)))
+                event_dict = self._row_to_dict(row)
+                event_dict["similarity"] = float(similarity)
+                similarities.append((similarity, event_dict))
 
             except Exception:
                 continue
@@ -271,6 +280,68 @@ class SQLiteStore:
                 )
             )
         return [self._row_to_dict(r) for r in rows]
+
+    def count_unembedded_events(self, kinds: Optional[List[str]] = None) -> int:
+        """Count events that do not yet have embeddings."""
+        with self._lock:
+            if kinds:
+                q = (
+                    "SELECT COUNT(*) FROM events WHERE embedding IS NULL AND kind IN ("
+                    + ",".join(["?"] * len(kinds))
+                    + ")"
+                )
+                row = self.conn.execute(q, kinds).fetchone()
+            else:
+                row = self.conn.execute(
+                    "SELECT COUNT(*) FROM events WHERE embedding IS NULL"
+                ).fetchone()
+        return int(row[0]) if row else 0
+
+    def get_unembedded_events(
+        self, limit: int = 100, kinds: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """Fetch recent events missing embeddings for backlog processing."""
+        with self._lock:
+            if kinds:
+                q = (
+                    "SELECT id,ts,kind,content,meta,prev_hash,hash,summary,keywords,embedding "
+                    "FROM events WHERE embedding IS NULL AND kind IN ("
+                    + ",".join(["?"] * len(kinds))
+                    + ") ORDER BY id DESC LIMIT ?"
+                )
+                rows = list(self.conn.execute(q, (*kinds, limit)))
+            else:
+                rows = list(
+                    self.conn.execute(
+                        "SELECT id,ts,kind,content,meta,prev_hash,hash,summary,keywords,embedding "
+                        "FROM events WHERE embedding IS NULL ORDER BY id DESC LIMIT ?",
+                        (limit,),
+                    )
+                )
+        return [self._row_to_dict(r) for r in rows]
+
+    def set_event_embedding(
+        self,
+        event_id: int,
+        embedding: Optional[bytes],
+        *,
+        summary: Optional[str] = None,
+        keywords: Optional[list] = None,
+    ) -> None:
+        """Persist embedding (and optional summary/keywords) for an existing event."""
+        kw_json = json.dumps(keywords or [], ensure_ascii=False)
+        with self._lock:
+            if summary is not None:
+                self.conn.execute(
+                    "UPDATE events SET embedding=?, summary=?, keywords=? WHERE id=?",
+                    (embedding, summary, kw_json, event_id),
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE events SET embedding=? WHERE id=?",
+                    (embedding, event_id),
+                )
+            self.conn.commit()
 
     def verify_chain(self, rehasher) -> bool:
         """Recompute each row's hash with `rehasher(row_dict)` and verify linkage."""

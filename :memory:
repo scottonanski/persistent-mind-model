@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "inception_moment": "2025-08-26T19:24:39Z",
+  "inception_moment": "2025-08-28T00:13:25Z",
   "core_identity": {
     "id": "e9062655-73e3-4626-adfe-90d18eda13ad",
     "name": "Agent-5cbfe208",
@@ -120,7 +120,96 @@
   },
   "self_knowledge": {
     "behavioral_patterns": {},
-    "autobiographical_events": [],
+    "autobiographical_events": [
+      {
+        "id": "ev1",
+        "t": "2025-08-28T00:12:18Z",
+        "type": "autonomy_start",
+        "summary": "Autonomy loop started (interval=300s)",
+        "valence": 0.5,
+        "arousal": 0.5,
+        "salience": 0.5,
+        "tags": [],
+        "effects": [],
+        "effects_hypothesis": [],
+        "meta": {
+          "processed": false
+        },
+        "evidence": null
+      },
+      {
+        "id": "ev2",
+        "t": "2025-08-28T00:12:18Z",
+        "type": "autonomy_tick",
+        "summary": "Autonomy tick: time-gate | IAS=0.103 GAS=0.405",
+        "valence": 0.5,
+        "arousal": 0.5,
+        "salience": 0.5,
+        "tags": [],
+        "effects": [],
+        "effects_hypothesis": [],
+        "meta": {
+          "processed": false
+        },
+        "evidence": {
+          "reason": "time-gate",
+          "reflected": false,
+          "reflection_id": null,
+          "ias": 0.103,
+          "gas": 0.405,
+          "ias_delta": null,
+          "gas_delta": null,
+          "events_analyzed": 15,
+          "stage": "S2: Adoption",
+          "plateau_counter": 0,
+          "booster": false
+        }
+      },
+      {
+        "id": "ev3",
+        "t": "2025-08-28T00:13:25Z",
+        "type": "autonomy_start",
+        "summary": "Autonomy loop started (interval=300s)",
+        "valence": 0.5,
+        "arousal": 0.5,
+        "salience": 0.5,
+        "tags": [],
+        "effects": [],
+        "effects_hypothesis": [],
+        "meta": {
+          "processed": false
+        },
+        "evidence": null
+      },
+      {
+        "id": "ev4",
+        "t": "2025-08-28T00:13:25Z",
+        "type": "autonomy_tick",
+        "summary": "Autonomy tick: time-gate | IAS=0.244 GAS=0.372",
+        "valence": 0.5,
+        "arousal": 0.5,
+        "salience": 0.5,
+        "tags": [],
+        "effects": [],
+        "effects_hypothesis": [],
+        "meta": {
+          "processed": false
+        },
+        "evidence": {
+          "reason": "time-gate",
+          "reflected": false,
+          "reflection_id": null,
+          "ias": 0.244,
+          "gas": 0.372,
+          "ias_delta": null,
+          "gas_delta": null,
+          "events_analyzed": 15,
+          "stage": "S2: Adoption",
+          "plateau_counter": 0,
+          "booster": false
+        }
+      }
+    ],
     "thoughts": [],
     "insights": [],
     "commitments": {}
@@ -150,6 +239,8 @@
   "meta_cognition": {
     "times_accessed_self": 0,
     "self_modification_count": 0,
-    "identity_evolution": []
+    "identity_evolution": [],
+    "bandit_counts": [],
+    "bandit_rewards": []
   }
 }

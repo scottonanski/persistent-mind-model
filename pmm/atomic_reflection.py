@@ -630,6 +630,27 @@ class AtomicReflectionManager:
             # Save to disk
             self.pmm.save_model()
 
+            # Also append a 'reflection' event to SQLite for audit/analytics
+            try:
+                meta = {
+                    "model": (
+                        model_config.get("name")
+                        if isinstance(model_config, dict)
+                        else None
+                    ),
+                    "provider": (
+                        model_config.get("provider")
+                        if isinstance(model_config, dict)
+                        else None
+                    ),
+                }
+                store = getattr(self.pmm, "sqlite_store", None)
+                if store is not None:
+                    store.append_event(kind="reflection", content=content, meta=meta)
+            except Exception:
+                # Never fail persistence due to DB audit issues
+                pass
+
             return True
 
         except Exception as e:

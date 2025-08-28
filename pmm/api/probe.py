@@ -5,10 +5,10 @@ from fastapi import FastAPI, Query, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from pmm.storage.sqlite_store import SQLiteStore
-from pmm.storage.integrity import verify_chain
 from pmm.emergence import EmergenceAnalyzer, EmergenceEvent
 from pmm.semantic_analysis import get_semantic_analyzer
 from pmm.meta_reflection import get_meta_reflection_analyzer
+from pmm.commitments import get_identity_turn_commitments
 
 # Load environment variables from .env file
 load_dotenv()
@@ -97,6 +97,74 @@ def _commitments_with_status(db_path: str, limit: int):
     return out[::-1]  # return newest first
 
 
+@app.get("/identity")
+def identity(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    model_path: str = Query(
+        "persistent_self_model.json", description="Path to persistent self model JSON"
+    ),
+):
+    """Return current identity and active identity turn-scoped commitments.
+
+    Identity resolution:
+    1) JSON model core_identity (preferred)
+    2) Fallback: latest identity change/update event content
+    """
+    import re
+
+    # 1) Load name/id from JSON model
+    name = None
+    ident = None
+    try:
+        import json
+
+        with open(model_path, "r") as f:
+            data = json.load(f)
+        core = (data or {}).get("core_identity", {}) or {}
+        name = core.get("name")
+        ident = core.get("id")
+    except Exception:
+        pass
+
+    # 2) Fallback: try to parse from latest identity_change / identity_update
+    if not name:
+        try:
+            # Prefer current kind, then legacy
+            events = _load_events(db, limit=200, kind="identity_change") or []
+            if not events:
+                events = _load_events(db, limit=200, kind="identity_update") or []
+            if events:
+                content = events[0].get("content", "") or ""
+                m = re.search(
+                    r"Name changed from '([^']+)' to '([^']+)'\s*\(origin=.*\)|Name changed to '([^']+)'",
+                    content,
+                )
+                if m:
+                    name = m.group(2) or m.group(3)
+        except Exception:
+            pass
+
+    # List identity turn commitments via a transient SMM-like shim
+    class _Shim:
+        def __init__(self, path: str):
+            self.sqlite_store = SQLiteStore(path)
+
+    shim = _Shim(db)
+    items = get_identity_turn_commitments(shim)
+    # Project to clean shape (hide event_hash details except short id)
+    formatted = [
+        {
+            "policy": i.get("policy"),
+            "ttl_turns": i.get("ttl_turns"),
+            "remaining_turns": i.get("remaining_turns"),
+            "id": (i.get("event_hash", "") or "")[:8],
+        }
+        for i in items
+    ]
+
+    return {"name": name or "Agent", "id": ident, "identity_commitments": formatted}
+
+
 def _get_emergence_events(
     db_path: str, kinds: List[str] = None, limit: int = 15
 ) -> List[EmergenceEvent]:
@@ -133,19 +201,140 @@ def _get_emergence_events(
 @app.get("/health")
 def health(db: str = Query("pmm.db", description="Path to PMM SQLite DB")):
     rows = _all_rows(db)
+    ev_count = len(rows)
+    cold_start = ev_count == 0
     return {
         "ok": True,
         "db": db,
-        "events": len(rows),
+        "events": ev_count,
         "last_kind": rows[-1][2] if rows else None,
+        "cold_start": cold_start,
+        "event_count": ev_count,
     }
+
+
+@app.get("/endpoints")
+def endpoints() -> dict:
+    """Return a curated list of Probe API endpoints with short descriptions and examples.
+
+    This is a user-friendly directory intended for CLI discovery (e.g., --@probe list).
+    """
+    items = [
+        {
+            "path": "/identity",
+            "desc": "Agent name + active identity commitments",
+            "example": "/identity",
+        },
+        {
+            "path": "/commitments",
+            "desc": "Commitment rows with open/closed status",
+            "example": "/commitments?limit=20",
+        },
+        {
+            "path": "/events/recent",
+            "desc": "Recent events (id, ts, kind, content)",
+            "example": "/events/recent?limit=10&kind=response",
+        },
+        {
+            "path": "/health",
+            "desc": "Probe health and last event kind",
+            "example": "/health",
+        },
+        {
+            "path": "/emergence",
+            "desc": "Emergence snapshot (IAS/GAS/stage)",
+            "example": "/emergence",
+        },
+        {
+            "path": "/reflection/quality",
+            "desc": "Reflection hygiene analysis",
+            "example": "/reflection/quality?limit=20",
+        },
+        {
+            "path": "/introspection",
+            "desc": "Introspection results and triggers",
+            "example": "/introspection?limit=10",
+        },
+        {"path": "/traits", "desc": "Big Five scores (live)", "example": "/traits"},
+        {
+            "path": "/traits/drift",
+            "desc": "Trait drift history",
+            "example": "/traits/drift?limit=24",
+        },
+        {
+            "path": "/meta-cognition",
+            "desc": "Meta-cognitive insights",
+            "example": "/meta-cognition?limit=10",
+        },
+        {
+            "path": "/scenes",
+            "desc": "Narrative scenes from JSON self-model",
+            "example": "/scenes?limit=3",
+        },
+        {
+            "path": "/feedback/summary",
+            "desc": "Feedback counts and averages",
+            "example": "/feedback/summary?limit=100",
+        },
+        {
+            "path": "/embeddings/backlog",
+            "desc": "Unembedded events backlog",
+            "example": "/embeddings/backlog",
+        },
+        {
+            "path": "/metrics/hourly",
+            "desc": "Autonomy tick metrics (recent)",
+            "example": "/metrics/hourly?limit=24",
+        },
+        {
+            "path": "/bandit/reflection",
+            "desc": "Reflection bandit stats",
+            "example": "/bandit/reflection",
+        },
+        {
+            "path": "/reflection/contract",
+            "desc": "Reflection pass/fail metrics",
+            "example": "/reflection/contract?limit=50",
+        },
+    ]
+    return {"items": items}
 
 
 @app.get("/integrity")
 def integrity(db: str = Query("pmm.db", description="Path to PMM SQLite DB")):
-    rows = _all_rows(db)
-    ok = verify_chain(rows)
-    return {"ok": ok, "events": len(rows)}
+    """Verify hash-chain integrity using the store's canonical hashing.
+
+    This recomputes each row's hash using the same canonical JSON used by
+    SQLiteStore.append_event to avoid parity mismatches.
+    """
+    import hashlib
+
+    store = SQLiteStore(db)
+
+    def _rehash(row: dict) -> str:
+        try:
+            meta = row.get("meta") or {}
+            if isinstance(meta, str):
+                # Best-effort parse if string made it through
+                meta = json.loads(meta)
+        except Exception:
+            meta = {}
+        payload = {
+            "ts": row.get("ts"),
+            "kind": row.get("kind"),
+            "content": row.get("content"),
+            "meta": meta,
+            "prev_hash": row.get("prev_hash"),
+        }
+        canon = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canon.encode()).hexdigest()
+
+    try:
+        ok = store.verify_chain(_rehash)
+        events = len(store.all_events())
+        return {"ok": ok, "events": events}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/events/recent")
@@ -258,38 +447,50 @@ def commitments(
     return {"items": filtered_items}
 
 
-# PHASE 3B+: Identity endpoint to verify current agent name
-@app.get("/identity")
-def get_identity(db: str = Query("pmm.db", description="Path to PMM SQLite DB")):
-    """Get current agent identity from latest identity_update event."""
+@app.get("/commitments/summary")
+def commitments_summary(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    """Summarize commitments and reinforcements from the event log.
+
+    - reinforcement_rate: reinforcements / (commitments + reinforcements)
+    - unique_intents: unique commitment contents (hash of normalized text)
+    """
     try:
-        # Find the most recent identity_update event from database
-        events = _load_events(db, limit=1000, kind="identity_update")
+        store = SQLiteStore(db)
+        rows = list(
+            store.conn.execute(
+                "SELECT kind, content, meta FROM events WHERE kind IN ('commitment','commitment_reinforcement') ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+        )
+        commits = 0
+        reinf = 0
+        unique = set()
+        import hashlib
 
-        if events:
-            latest_event = events[0]  # most recent first
-            # Extract name from event content/summary
-            import re
-
-            content = latest_event.get("content", "")
-            name_match = re.search(r"Name changed to '([^']+)'", content)
-            if name_match:
-                return {
-                    "name": name_match.group(1),
-                    "event_id": latest_event["id"],
-                    "timestamp": latest_event["ts"],
-                    "source": "identity_update_event",
-                }
-
-        # Fallback to default
+        for k, content, meta in rows:
+            norm = (content or "").strip().lower()
+            h = hashlib.sha256(norm.encode()).hexdigest()[:16]
+            if k == "commitment":
+                commits += 1
+                unique.add(h)
+            elif k == "commitment_reinforcement":
+                reinf += 1
+        total = commits + reinf
+        rate = (reinf / total) if total else 0.0
         return {
-            "name": "Agent",
-            "source": "default",
-            "note": "No identity_update events found",
+            "commitments": commits,
+            "reinforcements": reinf,
+            "reinforcement_rate": round(rate, 3),
+            "unique_intents": len(unique),
         }
-
     except Exception as e:
-        return {"error": str(e), "name": "Agent", "source": "error"}
+        return {"error": str(e)}
+
+
+# (removed duplicate /identity endpoint; unified above)
 
 
 # PHASE 3B: Reflection hygiene and evidence analysis endpoint
@@ -459,6 +660,8 @@ def traits(db: str = Query("pmm.db", description="Path to PMM SQLite DB")):
         # Get trait drift history from events
         store = SQLiteStore(db)
         recent_events = store.recent_events(limit=100)
+        event_count = len(store.all_events())
+        cold_start = event_count == 0
 
         # Calculate trait drift velocity (changes over time)
         trait_changes = []
@@ -501,6 +704,9 @@ def traits(db: str = Query("pmm.db", description="Path to PMM SQLite DB")):
         return {
             "big_five": big5_traits,
             "hexaco": hexaco_traits,
+            "defaults": cold_start,  # treat as defaults when no events yet
+            "cold_start": cold_start,
+            "event_count": event_count,
             "personality_metrics": {
                 "stability_score": round(stability_score, 3),
                 "total_trait_changes": len(trait_changes),
@@ -1285,6 +1491,302 @@ def meta_cognition(
 def create_probe_app(db_path: str = "pmm.db") -> FastAPI:
     """Create and configure the probe FastAPI app."""
     return app
+
+
+# --- Minimal bandit + backlog probes ---
+
+
+@app.get("/bandit/reflection")
+def bandit_reflection():
+    """Expose reflection template bandit's simple stats (if available)."""
+    try:
+        import pmm.reflection as ref
+
+        bandit = getattr(ref, "_bandit", None)
+        counts = getattr(bandit, "counts", []) if bandit else []
+        rewards = getattr(bandit, "rewards", []) if bandit else []
+        epsilon = getattr(bandit, "epsilon", None) if bandit else None
+        n = getattr(bandit, "n", None) if bandit else None
+
+        # Fallback to persisted bandit state when runtime is empty
+        from pmm.self_model_manager import SelfModelManager
+
+        persisted_counts = []
+        persisted_rewards = []
+        try:
+            mgr = SelfModelManager("persistent_self_model.json")
+            mc = mgr.model.meta_cognition
+            persisted_counts = list(getattr(mc, "bandit_counts", []) or [])
+            persisted_rewards = list(getattr(mc, "bandit_rewards", []) or [])
+        except Exception:
+            pass
+
+        def _is_nonzero(arr):
+            try:
+                return any((x or 0) != 0 for x in arr)
+            except Exception:
+                return False
+
+        source = "runtime" if _is_nonzero(counts) else "persisted"
+        if source == "persisted" and _is_nonzero(persisted_counts):
+            counts = persisted_counts
+            rewards = persisted_rewards
+            if not n:
+                n = len(counts)
+        # compute avg rewards where possible
+        avgs = []
+        try:
+            for i in range(len(counts or [])):
+                avgs.append(
+                    (float(rewards[i]) / float(counts[i])) if counts[i] else 0.0
+                )
+        except Exception:
+            avgs = []
+        return {
+            "available": True,
+            "source": source,
+            "n": n,
+            "epsilon": epsilon,
+            "counts": counts,
+            "rewards": rewards,
+            "avg_rewards": avgs,
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@app.get("/embeddings/backlog")
+def embeddings_backlog(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    kinds: Optional[str] = Query(None, description="CSV of kinds to filter (optional)"),
+):
+    """Report approximate backlog of unembedded events."""
+    try:
+        store = SQLiteStore(db)
+        kind_list = [k.strip() for k in kinds.split(",")] if kinds else None
+        cnt = store.count_unembedded_events(kind_list)
+        return {"db_path": db, "unembedded": cnt}
+    except Exception as e:
+        return {"error": str(e), "db_path": db}
+
+
+@app.get("/metrics/hourly")
+def metrics_hourly(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    limit: int = Query(
+        24, ge=1, le=240, description="Number of recent metrics to return"
+    ),
+):
+    """Return recent autonomy_tick metrics emitted by the autonomy loop.
+
+    These are stored as events with kind='event' and meta.type='autonomy_tick'.
+    """
+    try:
+        store = SQLiteStore(db)
+        # Fetch recent 'event' rows with meta.type='autonomy_tick'
+        rows = list(
+            store.conn.execute(
+                "SELECT id,ts,kind,content,meta,prev_hash,hash FROM events WHERE kind='event' ORDER BY id DESC LIMIT ?",
+                (limit * 3,),  # oversample, filter below
+            )
+        )
+        out = []
+        import json
+
+        for r in rows:
+            try:
+                meta = json.loads(r[4]) if isinstance(r[4], str) else (r[4] or {})
+            except Exception:
+                meta = {}
+            if str(meta.get("type", "")) != "autonomy_tick":
+                continue
+            out.append(
+                {
+                    "id": r[0],
+                    "ts": r[1],
+                    "content": r[3],
+                    "metrics": meta.get("evidence", meta),
+                }
+            )
+            if len(out) >= limit:
+                break
+        return {"items": out}
+    except Exception as e:
+        return {"error": str(e), "items": []}
+
+
+@app.get("/reflection/contract")
+def reflection_contract(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    limit: int = Query(
+        30, ge=1, le=200, description="Number of recent reflections to inspect"
+    ),
+):
+    """Show pass/fail stats for the 'Next:' contract across recent reflections."""
+    try:
+        items = _load_events(db, limit, "reflection")
+        passed = 0
+        failed = 0
+        reasons = {}
+        rows = []
+        first_ok = 0
+        final_ok = 0
+        rerolled_cnt = 0
+        for ev in items:
+            meta = ev.get("meta", {}) or {}
+            status = meta.get("status")
+            reason = meta.get("reason")
+            contract = meta.get("contract") or {}
+            fp = contract.get("first_pass")
+            fr = contract.get("first_reason")
+            final = "ok" if status == "ok" else "inert"
+            if fp == "ok":
+                first_ok += 1
+            if final == "ok":
+                final_ok += 1
+            if contract.get("rerolled"):
+                rerolled_cnt += 1
+            if status == "inert":
+                failed += 1
+                if reason:
+                    reasons[reason] = reasons.get(reason, 0) + 1
+            else:
+                passed += 1
+            rows.append(
+                {
+                    "id": ev.get("id"),
+                    "ts": ev.get("ts"),
+                    "status": (status or "ok"),
+                    "reason": reason,
+                    "first_pass": fp,
+                    "first_reason": fr,
+                    "rerolled": bool(contract.get("rerolled")),
+                    "preview": (ev.get("content", "")[:100]),
+                }
+            )
+        total = passed + failed
+        pass_rate = (passed / total) if total else 0.0
+        first_pass_rate = (first_ok / total) if total else 0.0
+        final_pass_rate = (final_ok / total) if total else 0.0
+        rerolled_share = (rerolled_cnt / total) if total else 0.0
+        return {
+            "total": total,
+            "passed": passed,
+            "failed": failed,
+            "pass_rate": round(pass_rate, 3),
+            "first_pass_rate": round(first_pass_rate, 3),
+            "final_pass_rate": round(final_pass_rate, 3),
+            "rerolled_share": round(rerolled_share, 3),
+            "reasons": reasons,
+            "items": rows,
+        }
+    except Exception as e:
+        return {"error": str(e), "total": 0, "passed": 0, "failed": 0, "items": []}
+
+
+@app.get("/scenes")
+def scenes(
+    limit: int = Query(2, ge=1, le=10, description="Number of recent scenes to return"),
+):
+    """Return last N narrative scenes from the JSON self-model."""
+    try:
+        from pmm.self_model_manager import SelfModelManager
+
+        mgr = SelfModelManager("persistent_self_model.json")
+        sc_list = getattr(mgr.model.narrative_identity, "scenes", []) or []
+        out = []
+        for sc in sc_list[-limit:][::-1]:
+            out.append(
+                {
+                    "id": getattr(sc, "id", None),
+                    "t": getattr(sc, "t", None),
+                    "type": getattr(sc, "type", None),
+                    "summary": (getattr(sc, "summary", "") or "")[:300],
+                    "tags": getattr(sc, "tags", []),
+                }
+            )
+        return {"count": len(sc_list), "items": out}
+    except Exception as e:
+        return {"error": str(e), "count": 0, "items": []}
+
+
+# --- Feedback summary probe ---
+
+
+@app.get("/feedback/summary")
+def feedback_summary(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    limit: int = Query(
+        200, ge=1, le=2000, description="Number of recent feedback events to include"
+    ),
+):
+    """Summarize feedback events logged from chat.
+
+    Computes count and average rating (1-5) and returns recent items.
+    """
+    try:
+        store = SQLiteStore(db)
+        rows = list(
+            store.conn.execute(
+                "SELECT id, ts, content, meta FROM events WHERE kind='feedback' ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+        )
+        items = []
+        ratings = []
+        conservative = []
+        for r in rows:
+            try:
+                meta = json.loads(r[3]) if isinstance(r[3], str) else (r[3] or {})
+            except Exception:
+                meta = {}
+            rating = meta.get("rating")
+            if isinstance(rating, (int, float)):
+                try:
+                    ratings.append(float(rating))
+                except Exception:
+                    pass
+            # Conservative score heuristic: derive booleans from the linked response, if available
+            ok = False
+            has_evid = False
+            not_dup = False
+            novel = False
+            try:
+                resp_id = int(meta.get("response_ref") or 0)
+                if resp_id:
+                    rr = store.conn.execute(
+                        "SELECT content, meta FROM events WHERE id=? AND kind='response' LIMIT 1",
+                        (resp_id,),
+                    ).fetchone()
+                    if rr:
+                        rcontent = rr[0] or ""
+                        ok = "Next:" in (rcontent or "")
+                        has_evid = "ev" in (rcontent or "").lower()
+                        not_dup = True  # best‑effort: no direct signal, assume true
+                        novel = True  # best‑effort: no direct signal, assume true
+            except Exception:
+                pass
+            cons = min(5, 1 + int(ok) + int(has_evid) + int(not_dup) + int(novel))
+            conservative.append(cons)
+            items.append(
+                {
+                    "id": r[0],
+                    "ts": r[1],
+                    "content": (r[2] or "")[:200],
+                    "rating": rating,
+                    "response_ref": meta.get("response_ref"),
+                }
+            )
+        avg = (sum(ratings) / len(ratings)) if ratings else None
+        avgc = (sum(conservative) / len(conservative)) if conservative else None
+        return {
+            "count": len(rows),
+            "avg_rating": (round(avg, 3) if avg is not None else None),
+            "avg_conservative": (round(avgc, 3) if avgc is not None else None),
+            "items": items[:30],
+        }
+    except Exception as e:
+        return {"error": str(e), "count": 0, "avg_rating": None, "items": []}
 
 
 if __name__ == "__main__":

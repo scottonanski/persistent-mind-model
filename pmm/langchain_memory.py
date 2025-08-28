@@ -223,6 +223,197 @@ class PersistentMindMemory(BaseChatMemory):
         # Ensure clean shutdown on process exit
         atexit.register(self._shutdown_autonomy)
 
+        # === Background Embedding Backlog (autonomous) ===
+        self._embedder_thread = None
+        self._embedder_stop = None
+        try:
+            if self.enable_embeddings:
+                self._embedder_stop = threading.Event()
+
+                def _embed_backlog():
+                    import time
+                    import numpy as np
+                    from pmm.semantic_analysis import get_semantic_analyzer
+
+                    analyzer = get_semantic_analyzer()
+                    store = getattr(self.pmm, "sqlite_store", None)
+                    if not store:
+                        return
+                    idle_sleep = 20.0
+                    active_sleep = 0.2
+                    batch = 20
+                    while not self._embedder_stop.is_set():
+                        try:
+                            # Pull a small batch of unembedded events
+                            items = store.get_unembedded_events(limit=batch)
+                            if not items:
+                                time.sleep(idle_sleep)
+                                continue
+                            for ev in items:
+                                if self._embedder_stop.is_set():
+                                    break
+                                content = (
+                                    ev.get("summary") or ev.get("content") or ""
+                                ).strip()
+                                if not content:
+                                    # Mark empty content with zero vector to avoid re-processing
+                                    store.set_event_embedding(ev["id"], b"")
+                                    time.sleep(active_sleep)
+                                    continue
+                                try:
+                                    vec = analyzer._get_embedding(content)
+                                    emb = np.array(vec, dtype=np.float32).tobytes()
+                                except Exception:
+                                    emb = None
+                                try:
+                                    store.set_event_embedding(ev["id"], emb)
+                                except Exception:
+                                    pass
+                                time.sleep(active_sleep)
+                        except Exception:
+                            time.sleep(idle_sleep)
+
+                self._embedder_thread = threading.Thread(
+                    target=_embed_backlog, name="PMM-Embedder", daemon=True
+                )
+                self._embedder_thread.start()
+        except Exception:
+            pass
+
+        # Ensure background embedder stops on exit
+        atexit.register(self._shutdown_embedder)
+
+        # === Lightweight Scene Compactor (autonomous) ===
+        self._compactor_thread = None
+        self._compactor_stop = None
+        try:
+            self._compactor_stop = threading.Event()
+
+            def _compact_scenes():
+                import time
+                from datetime import datetime, timezone
+                from pmm.model import Scene
+
+                # Parameters
+                interval = 120.0  # seconds
+                window_events = 20
+                min_gap = 30  # require at least this many new events since last compact
+
+                while not self._compactor_stop.is_set():
+                    try:
+                        events = self.pmm.model.self_knowledge.autobiographical_events
+                        scenes = self.pmm.model.narrative_identity.scenes
+
+                        # Bootstrap: if we have few/no scenes, synthesize up to 3 from history
+                        try:
+                            if len(scenes) < 3 and events and len(events) >= 12:
+                                total = len(events)
+                                # Divide recent history into up to 3 chunks (newest-first)
+                                chunk = max(4, total // 3)
+                                created = 0
+                                for idx in range(3):
+                                    end = total - (idx * chunk)
+                                    start = max(0, end - chunk)
+                                    seg = events[start:end]
+                                    if not seg:
+                                        break
+                                    parts = []
+                                    tags = set()
+                                    for ev in seg:
+                                        s = getattr(ev, "summary", "") or ""
+                                        if s:
+                                            parts.append(s)
+                                        for tg in getattr(ev, "tags", []) or []:
+                                            tags.add(str(tg))
+                                    summary = "; ".join(parts)[:480]
+                                    now_iso = datetime.now(timezone.utc).strftime(
+                                        "%Y-%m-%dT%H:%M:%SZ"
+                                    )
+                                    scene = Scene(
+                                        id=f"boot{len(scenes)+1}",
+                                        t=now_iso,
+                                        type="scene",
+                                        summary=summary,
+                                        tags=list(tags)[:10],
+                                    )
+                                    self.pmm.model.narrative_identity.scenes.append(
+                                        scene
+                                    )
+                                    created += 1
+                                    if (
+                                        len(self.pmm.model.narrative_identity.scenes)
+                                        >= 3
+                                    ):
+                                        break
+                                if created:
+                                    self.pmm.save_model()
+                        except Exception:
+                            pass
+
+                        if not events or len(events) < window_events:
+                            time.sleep(interval)
+                            continue
+
+                        # Determine if enough new events since last scene
+                        last_scene_time = None
+                        if scenes:
+                            try:
+                                last_scene_time = scenes[-1].t
+                            except Exception:
+                                last_scene_time = None
+
+                        # Count new events since last scene timestamp
+                        if last_scene_time:
+                            new_count = 0
+                            for ev in reversed(events):
+                                try:
+                                    if ev.t <= last_scene_time:
+                                        break
+                                except Exception:
+                                    break
+                                new_count += 1
+                            if new_count < min_gap:
+                                time.sleep(interval)
+                                continue
+
+                        # Build window summary from last N events
+                        slice_events = events[-window_events:]
+                        parts = []
+                        tags = set()
+                        for ev in slice_events:
+                            s = getattr(ev, "summary", "") or ""
+                            if s:
+                                parts.append(s)
+                            for tg in getattr(ev, "tags", []) or []:
+                                tags.add(str(tg))
+                        summary = "; ".join(parts)[:480]
+                        now_iso = datetime.now(timezone.utc).strftime(
+                            "%Y-%m-%dT%H:%M:%SZ"
+                        )
+
+                        # Create and append scene
+                        scene = Scene(
+                            id=f"scn{len(scenes)+1}",
+                            t=now_iso,
+                            type="scene",
+                            summary=summary,
+                            tags=list(tags)[:10],
+                        )
+                        self.pmm.model.narrative_identity.scenes.append(scene)
+                        self.pmm.save_model()
+                    except Exception:
+                        pass
+                    finally:
+                        time.sleep(interval)
+
+            self._compactor_thread = threading.Thread(
+                target=_compact_scenes, name="PMM-SceneCompactor", daemon=True
+            )
+            self._compactor_thread.start()
+        except Exception:
+            pass
+        atexit.register(self._shutdown_compactor)
+
     def _shutdown_autonomy(self) -> None:
         """Stop autonomy thread if it was started (best-effort)."""
         try:
@@ -233,6 +424,26 @@ class PersistentMindMemory(BaseChatMemory):
                 self._autonomy_thread.join(timeout=0.5)
         except Exception:
             # best-effort cleanup
+            pass
+
+    def _shutdown_embedder(self) -> None:
+        """Stop background embedder thread (best-effort)."""
+        try:
+            if self._embedder_stop is not None:
+                self._embedder_stop.set()
+            if self._embedder_thread is not None and self._embedder_thread.is_alive():
+                self._embedder_thread.join(timeout=0.5)
+        except Exception:
+            pass
+
+    def _shutdown_compactor(self) -> None:
+        """Stop scene compactor thread (best-effort)."""
+        try:
+            if self._compactor_stop is not None:
+                self._compactor_stop.set()
+            if self._compactor_thread is not None and self._compactor_thread.is_alive():
+                self._compactor_thread.join(timeout=0.5)
+        except Exception:
             pass
 
     def _apply_personality_config(self, config: Dict[str, float]) -> None:
@@ -1228,89 +1439,219 @@ class PersistentMindMemory(BaseChatMemory):
             # Fallback to legacy commitment loading
             pass
 
-        # Load conversation history using hybrid approach: semantic + chronological
+        # Load conversation history using priority recall: similarity × recency × stage weighting
         try:
             if hasattr(self.pmm, "sqlite_store"):
-                conversation_history = []
-                key_facts = []  # Extract key facts like names
+                key_facts: List[str] = []
 
-                # Get current input for semantic search
-                current_input = inputs.get(self.input_key, "")
+                # Stage-aware weights
+                try:
+                    from pmm.emergence import compute_emergence_scores
 
-                # 1. Semantic search for relevant context (if we have input)
-                if current_input and self.enable_embeddings:
-                    semantic_memories = self._get_semantic_context(
-                        current_input, max_results=8
+                    scores = compute_emergence_scores(
+                        window=15, storage_manager=self.pmm.sqlite_store
                     )
-                    if semantic_memories:
-                        conversation_history.extend(semantic_memories)
-                        conversation_history.append("---")  # Separator
+                    stage = str(scores.get("stage", "S2: Adoption"))
+                except Exception:
+                    stage = "S2: Adoption"
 
-                # 2. Recent chronological events for immediate context (increased for better pattern recognition)
-                recent_events = self.pmm.sqlite_store.recent_events(limit=45)
-                if recent_events:
-                    for event in reversed(recent_events):  # chronological order
-                        # Extract fields from dictionary (recent_events returns dicts via _row_to_dict)
-                        kind = event.get("kind", "")
-                        content = event.get("content", "")
-                        summary = event.get("summary", "")
-                        keywords = event.get("keywords", [])
+                def _weights_for_stage(stage_label: str) -> dict:
+                    if stage_label.startswith("S0"):
+                        return {"w_sim": 0.3, "w_rec": 0.2, "w_cmt": 0.5, "w_ref": 0.1}
+                    if stage_label.startswith("S1"):
+                        return {
+                            "w_sim": 0.35,
+                            "w_rec": 0.25,
+                            "w_cmt": 0.4,
+                            "w_ref": 0.1,
+                        }
+                    if stage_label.startswith("S3"):
+                        return {
+                            "w_sim": 0.55,
+                            "w_rec": 0.25,
+                            "w_cmt": 0.2,
+                            "w_ref": 0.15,
+                        }
+                    if stage_label.startswith("S4"):
+                        return {"w_sim": 0.6, "w_rec": 0.2, "w_cmt": 0.2, "w_ref": 0.2}
+                    return {"w_sim": 0.5, "w_rec": 0.3, "w_cmt": 0.2, "w_ref": 0.1}
 
-                        # Prefer summary when available
-                        display_text = summary or content or ""
+                W = _weights_for_stage(stage)
 
-                        if kind in ["event", "response", "prompt"]:
-                            # Format for LLM context
-                            if "User said:" in display_text:
-                                user_msg = display_text.replace("User said: ", "")
-                                conversation_history.append(f"Human: {user_msg}")
+                # Gather candidates from semantic search and recent recency window
+                current_input = inputs.get(self.input_key, "")
+                sem_events = []
+                if current_input and self.enable_embeddings:
+                    try:
+                        from pmm.semantic_analysis import get_semantic_analyzer
+                        import numpy as np
 
-                                # Extract key information automatically
-                                if (
-                                    "my name is" in user_msg.lower()
-                                    or "i am" in user_msg.lower()
-                                ):
-                                    key_facts.append(f"IMPORTANT: {user_msg}")
+                        emb = get_semantic_analyzer()._get_embedding(current_input)
+                        q = np.array(emb, dtype=np.float32).tobytes()
+                        sem_events = self.pmm.sqlite_store.semantic_search(q, limit=12)
+                    except Exception:
+                        sem_events = []
 
-                            elif "I responded:" in display_text:
-                                ai_msg = display_text.replace("I responded: ", "")
-                                if not self._is_non_behavioral_input(ai_msg):
-                                    conversation_history.append(f"Assistant: {ai_msg}")
+                recent_events = self.pmm.sqlite_store.recent_events(limit=60)
+                max_id = max((e.get("id", 1) for e in recent_events), default=1)
 
-                                    # Extract commitments and identity info
-                                    if (
-                                        "next, i will" in ai_msg.lower()
-                                        or "scott" in ai_msg.lower()
-                                    ):
-                                        key_facts.append(
-                                            f"COMMITMENT/IDENTITY: {ai_msg}"
-                                        )
+                # Index candidates by event id and accumulate best score
+                candidates: dict[int, dict] = {}
 
-                            elif kind == "event":
-                                conversation_history.append(f"Context: {display_text}")
+                def _kind_bonus(kind: str) -> float:
+                    k = kind or ""
+                    if k == "commitment":
+                        return W["w_cmt"]
+                    if k == "reflection":
+                        return W["w_ref"]
+                    if k in ("response", "prompt", "event"):
+                        return 0.05
+                    return 0.0
 
-                            # Include keywords when available (already parsed as list)
+                # Seed from semantic search
+                for ev in sem_events:
+                    ev_id = int(ev.get("id", 0) or 0)
+                    sim = float(ev.get("similarity", 0.0) or 0.0)
+                    rec = (ev_id / max_id) if max_id else 0.0
+                    k = ev.get("kind", "")
+                    score = W["w_sim"] * sim + W["w_rec"] * rec + _kind_bonus(k)
+                    ev_copy = dict(ev)
+                    ev_copy["_score"] = score
+                    candidates[ev_id] = ev_copy
+
+                # Add recent recency-only candidates
+                for idx, ev in enumerate(recent_events):
+                    ev_id = int(ev.get("id", 0) or 0)
+                    k = ev.get("kind", "")
+                    rec = (
+                        (ev_id / max_id)
+                        if max_id
+                        else (1.0 - idx / max(1, len(recent_events)))
+                    )
+                    base = candidates.get(ev_id, dict(ev))
+                    sim = float(base.get("similarity", 0.0) or 0.0)
+                    score = max(
+                        base.get("_score", 0.0),
+                        W["w_sim"] * sim + W["w_rec"] * rec + _kind_bonus(k),
+                    )
+                    base.update({"_score": score})
+                    candidates[ev_id] = base
+
+                # Sort by score and format into lines
+                scored = sorted(
+                    candidates.values(),
+                    key=lambda d: d.get("_score", 0.0),
+                    reverse=True,
+                )
+                lines: List[str] = []
+                seen: set[str] = set()
+
+                def _fmt(ev: dict) -> str:
+                    kind = ev.get("kind", "")
+                    display_text = (
+                        ev.get("summary") or ev.get("content") or ""
+                    ).strip()
+                    if "User said:" in display_text:
+                        return "Human: " + display_text.replace("User said: ", "")
+                    if "I responded:" in display_text:
+                        return "Assistant: " + display_text.replace("I responded: ", "")
+                    if kind == "commitment":
+                        return "[Commitment] " + display_text
+                    if kind == "reflection":
+                        return "[Insight] " + display_text
+                    return "Context: " + display_text
+
+                for ev in scored:
+                    line = _fmt(ev)
+                    if not line:
+                        continue
+                    key = line[:160].lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    lines.append(line)
+                    if len(lines) >= 18:  # cap base pool
+                        break
+
+                # Promote key facts from selected lines
+                for line in lines:
+                    low = line.lower()
+                    if "human:" in low and (
+                        "my name is" in low or low.startswith("human: i am ")
+                    ):
+                        key_facts.append("IMPORTANT: " + line.replace("Human: ", ""))
+                    if "commitment" in low or "identity" in low:
+                        key_facts.append("COMMITMENT/IDENTITY: " + line)
+
+                # Keep token budget steady: stage-aware cap for lines
+                cap = 15
+                if stage.startswith("S1"):
+                    cap = 14
+                elif stage.startswith("S3"):
+                    cap = 12
+                elif stage.startswith("S4"):
+                    cap = 10
+                # If we already have scenes, tighten further by 2 lines to save tokens
+                try:
+                    if getattr(self.pmm.model.narrative_identity, "scenes", None):
+                        if len(self.pmm.model.narrative_identity.scenes) > 0:
+                            cap = max(6, cap - 2)
+                except Exception:
+                    pass
+
+                chosen = lines[:cap]
+                if key_facts:
+                    pmm_context_parts.append(
+                        "Key Information to Remember:\n" + "\n".join(key_facts[-5:])
+                    )
+                if chosen:
+                    # S3/S4: show last 1–2 scene summaries (compact) before history
+                    try:
+                        if stage.startswith("S3") or stage.startswith("S4"):
+                            scenes = self.pmm.model.narrative_identity.scenes
+                            if scenes:
+                                last = scenes[-2:] if len(scenes) >= 2 else scenes[-1:]
+                                scene_lines = []
+                                for sc in last[::-1]:  # newest first
+                                    line = f"[Scene] {getattr(sc,'t','')}: " + (
+                                        getattr(sc, "summary", "") or ""
+                                    )
+                                    scene_lines.append(line[:200])
+                                if scene_lines:
+                                    pmm_context_parts.append(
+                                        "Recent scenes:\n" + "\n".join(scene_lines)
+                                    )
+                    except Exception:
+                        pass
+                    # Ensure early-stage commitment emphasis within history block
+                    try:
+                        need_commitment_emphasis = stage.startswith(
+                            "S0"
+                        ) or stage.startswith("S1")
+                    except Exception:
+                        need_commitment_emphasis = False
+
+                    if need_commitment_emphasis:
+                        have = sum(1 for ln in chosen if "[Commitment]" in ln)
+                        if have < 2:
+                            # Pull top open commitments and prepend as lines
+                            added = []
                             try:
-                                if keywords and isinstance(keywords, list) and keywords:
-                                    # Add a compact keywords line
-                                    key_facts.append(
-                                        "KEYWORDS: " + ", ".join(map(str, keywords[:6]))
+                                active = (
+                                    self.directive_system.get_active_commitments() or []
+                                )
+                                for c in active[: 2 - have]:
+                                    added.append(
+                                        "[Commitment] " + c.get("text", "")[:200]
                                     )
                             except Exception:
                                 pass
+                            if added:
+                                chosen = added + chosen
 
-                if conversation_history:
-                    # Add key facts at the top for emphasis
-                    if key_facts:
-                        pmm_context_parts.append(
-                            "Key Information to Remember:\n" + "\n".join(key_facts[-5:])
-                        )
-
-                    # Add recent conversation history
                     pmm_context_parts.append(
-                        "Recent conversation history:\n"
-                        + "\n".join(conversation_history[-15:])
-                    )  # Last 15 exchanges
+                        "Recent conversation history:\n" + "\n".join(chosen)
+                    )
         except Exception as e:
             pmm_dlog(f"Warning: Failed to load conversation history from SQLite: {e}")
 
@@ -1549,6 +1890,17 @@ class PersistentMindMemory(BaseChatMemory):
                     base_thresh, profile.stage
                 )
             )
+            # Day-1 tuning: reduce novelty threshold slightly in S0/S1 to encourage reflection
+            try:
+                if str(profile.stage.value).startswith("S0") or str(
+                    profile.stage.value
+                ).startswith("S1"):
+                    adapted_thresh = max(0.0, min(1.0, adapted_thresh - 0.05))
+            except Exception:
+                # Fallback to string profile
+                stage_label = str(getattr(profile, "stage", ""))
+                if stage_label.startswith("S0") or stage_label.startswith("S1"):
+                    adapted_thresh = max(0.0, min(1.0, adapted_thresh - 0.05))
             # Set adapted novelty threshold for this decision
             self.reflection_cooldown.novelty_threshold = adapted_thresh
 

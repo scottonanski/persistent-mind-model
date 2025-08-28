@@ -150,6 +150,9 @@ class AutonomyLoop:
         self._lock = threading.Lock()
         self._last_scores: Tuple[Optional[float], Optional[float]] = (None, None)
         self._snapshot = AutonomySnapshot()
+        # Adaptive metrics emission state
+        self._last_metrics_at: Optional[datetime] = None
+        self._last_metrics_event_id: Optional[int] = None
 
         # Plateau detection and dynamic drift tuning state
         try:
@@ -598,7 +601,48 @@ class AutonomyLoop:
         except Exception:
             pass
 
-        # Persist audit event
+        # Decide whether to emit metrics (adaptive cadence)
+        # Environment-configurable thresholds
+        try:
+            min_interval = int(os.getenv("PMM_METRICS_MIN_INTERVAL", "3600"))  # seconds
+        except Exception:
+            min_interval = 3600
+        try:
+            active_interval = int(
+                os.getenv("PMM_METRICS_ACTIVE_INTERVAL", "900")
+            )  # seconds
+        except Exception:
+            active_interval = 900
+        try:
+            min_events = int(os.getenv("PMM_METRICS_MIN_EVENTS", "12"))
+        except Exception:
+            min_events = 12
+
+        # Compute elapsed time and new-event count
+        latest_row = None
+        try:
+            latest_row = self.db.conn.execute("SELECT MAX(id) FROM events").fetchone()
+        except Exception:
+            latest_row = None
+        latest_id = int(latest_row[0]) if latest_row and latest_row[0] else 0
+        new_events = (
+            (latest_id - int(self._last_metrics_event_id or 0)) if latest_id else 0
+        )
+        elapsed = (
+            (now - self._last_metrics_at).total_seconds()
+            if self._last_metrics_at
+            else 9e9
+        )
+
+        # Choose target interval based on activity/decline
+        declining = (di is not None and di < 0) or (dg is not None and dg < 0)
+        target_interval = (
+            active_interval
+            if (declining or reflected or booster_triggered)
+            else min_interval
+        )
+        should_emit = (elapsed >= target_interval) or (new_events >= min_events)
+
         meta = {
             "reason": reason,
             "reflected": reflected or booster_triggered,
@@ -612,15 +656,26 @@ class AutonomyLoop:
             "plateau_counter": self._plateau_counter,
             "booster": booster_triggered,
         }
+        # Skip emission when we lack sufficient recent signal
+        min_state_events = 5
         try:
-            self.pmm.add_event(
-                summary=f"Autonomy tick: {reason} | IAS={ias} GAS={gas}",
-                etype="autonomy_tick",
-                effects=[],
-                evidence=meta,
-            )
+            min_state_events = int(os.getenv("PMM_METRICS_STATE_MIN_EVENTS", "5"))
         except Exception:
             pass
+        has_state = int(scores.get("events_analyzed", 0) or 0) >= min_state_events
+
+        if should_emit and has_state:
+            try:
+                self.pmm.add_event(
+                    summary=f"Autonomy tick: {reason} | IAS={ias} GAS={gas}",
+                    etype="autonomy_tick",
+                    effects=[],
+                    evidence=meta,
+                )
+                self._last_metrics_at = now
+                self._last_metrics_event_id = latest_id
+            except Exception:
+                pass
 
         # Update snapshot + persistence
         self._snapshot = AutonomySnapshot(

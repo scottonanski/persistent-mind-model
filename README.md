@@ -95,12 +95,24 @@ python chat.py --debug --telemetry
 PMM_TELEMETRY=true python chat.py
 ```
 
-**Available commands in chat:**
-- `personality` - View current personality traits
-- `memory` - Show recent conversation history
-- `models` - List available models and switch providers/models
-- `status` - Show PMM status (feature toggles, DB size, event counts)
-- `quit`/`exit`/`bye` - Exit and save state
+**In‑chat help system (type `--@help`):**
+
+The chat now has a discoverable command router. Start with:
+
+```
+--@help
+```
+
+Common actions (pasteable examples):
+- Identity mode: `--@identity list` • `--@identity open 3` • `--@identity clear`
+- Probe API: `--@probe list` • `--@probe start` • `--@probe identity`
+- Commitments: `--@commitments list` • `--@commitments search identity`
+- Events: `--@events list` • `--@events kind response 5`
+- Global search: `--@find something`
+- Real‑time tracking: `--@track on` • `--@track legend` • `--@track explain`
+
+You can still use simple words:
+- `personality`, `memory`, `models`, `status`, `quit`
 
 
 ## Monitoring API
@@ -108,17 +120,20 @@ PMM_TELEMETRY=true python chat.py
 **Start the monitoring server:**
 ```bash
 uvicorn pmm.api.probe:app --port 8000
+# or from inside chat: --@probe start
 ```
 
-**Available endpoints:**
-- `GET /health` - Database status and event count
-- `GET /integrity` - Hash-chain verification  
-- `GET /emergence` - Identity and growth scoring
-- `GET /commitments` - Commitment tracking with status
-- `GET /events/recent` - Recent conversation history
-- `GET /traits` - Current personality traits
+**Endpoint discovery:**
+- `GET /endpoints` - Curated directory with short descriptions and examples
 
-**Example response:**
+**Common endpoints:**
+- `GET /identity` - Current agent name + active identity turn‑scoped commitments
+- `GET /commitments` - Commitment rows with open/closed status
+- `GET /events/recent` - Recent events
+- `GET /emergence` - Identity and growth metrics
+- `GET /health` - Basic health snapshot
+
+**Example response (`/emergence`):**
 ```json
 {
   "IAS": 0.64,
@@ -128,6 +143,10 @@ uvicorn pmm.api.probe:app --port 8000
   "timestamp": "2025-08-15T19:45:00"
 }
 ```
+
+## Changelog
+
+See `CHANGELOG.md` for a detailed list of recent improvements (identity TTL commitments, probe directory, in‑chat help, real‑time `[TRACK]` telemetry, and friendlier colored logs).
 
 ## File Structure
 

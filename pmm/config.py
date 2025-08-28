@@ -155,3 +155,22 @@ def set_config(config: PMMConfig) -> None:
     global _config
     config.validate()
     _config = config
+
+
+# --- Identity Commitment Defaults ---
+@dataclass(frozen=True)
+class IdentityCommitmentDefaults:
+    """Defaults for identity expression commitments.
+
+    - ttl_turns: number of assistant messages a turn-scoped identity
+      commitment should live before auto-closing.
+    - min_confidence: minimum confidence to attach for heuristic evidence
+      when auto-closing due to TTL (to be refined by behavior checks).
+    """
+
+    ttl_turns: int = 3
+    min_confidence: float = 0.60
+
+
+# Singleton-style defaults for easy import
+IDENTITY_COMMIT = IdentityCommitmentDefaults()

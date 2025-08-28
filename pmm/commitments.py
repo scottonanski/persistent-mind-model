@@ -2,17 +2,28 @@
 """
 Commitment lifecycle management for Persistent Mind Model.
 Tracks agent commitments from creation to completion.
+
+This module also contains lightweight helpers for "turn‑scoped" identity
+commitments that live for N assistant turns and are enforced via the
+append‑only SQLite event log. These helpers are designed to be immutable:
+we append `commitment.update` rows to decrement remaining turns and then
+emit `evidence` and `commitment.close` when TTL reaches zero.
 """
 
 import re
+import os
 import hashlib
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from pmm.config.models import (
     get_evidence_confidence_threshold,
     is_evidence_debug,
 )
+
+# Note: Avoid importing SelfModelManager here to prevent circular import.
+# Functions below accept an object with a `sqlite_store` attribute.
+from pmm.config.models import IDENTITY_COMMIT
 
 
 @dataclass
@@ -28,6 +39,14 @@ class Commitment:
     closed_at: Optional[str] = None
     close_note: Optional[str] = None
     ngrams: List[str] = None  # 3-grams for matching
+    # Hash of the associated 'commitment' event in the SQLite chain
+    # If present, this becomes the canonical reference for evidence
+    event_hash: Optional[str] = None
+    # Reinforcement tracking
+    attempts: int = 1
+    reinforcements: int = 0
+    last_reinforcement_ts: Optional[str] = None
+    _just_reinforced: bool = False
 
 
 class CommitmentTracker:
@@ -436,7 +455,7 @@ class CommitmentTracker:
                 ngrams.append(" ".join(words[i : i + 3]))
         return ngrams
 
-    def _is_duplicate_commitment(self, text: str) -> bool:
+    def _is_duplicate_commitment(self, text: str) -> Optional[str]:
         """Check if commitment is semantically similar to recent open commitments."""
         if not text:
             return False
@@ -497,9 +516,13 @@ class CommitmentTracker:
                 print(
                     f"🔍 DEBUG: Duplicate detected ({max_similarity:.1%} similar): '{text[:50]}...' vs '{existing.text[:50]}...'"
                 )
-                return True
+                # Return the existing commitment id as the duplicate target
+                try:
+                    return getattr(existing, "cid", None)
+                except Exception:
+                    return None
 
-        return False
+        return None
 
     def add_commitment(
         self, text: str, source_insight_id: str, due: Optional[str] = None
@@ -509,11 +532,26 @@ class CommitmentTracker:
         if not commitment_text:
             return ""
 
-        # Check for duplicates
-        if self._is_duplicate_commitment(commitment_text):
-            print(
-                f"🔍 DEBUG: Commitment rejected as duplicate: {commitment_text[:50]}..."
-            )
+        # Check for duplicates -> convert to reinforcement signal
+        dup_cid = self._is_duplicate_commitment(commitment_text)
+        if dup_cid:
+            c = self.commitments.get(dup_cid)
+            if c:
+                c.reinforcements += 1
+                c.attempts += 1
+                c.last_reinforcement_ts = datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                )
+                c._just_reinforced = True
+            try:
+                from pmm.logging_config import pmm_dlog
+
+                pmm_dlog(
+                    f"[COMMIT~] reinforcement for {dup_cid}: {commitment_text[:50]}..."
+                )
+            except Exception:
+                pass
+            # Indicate rejection to callers (treat as duplicate)
             return ""
 
         cid = f"c{len(self.commitments) + 1}"
@@ -529,7 +567,12 @@ class CommitmentTracker:
         )
 
         self.commitments[cid] = commitment
-        print(f"🔍 DEBUG: Valid commitment added: {commitment_text}")
+        try:
+            from pmm.logging_config import pmm_dlog
+
+            pmm_dlog(f"[COMMIT+] {commitment_text}")
+        except Exception:
+            pass
         return cid
 
     def mark_commitment(
@@ -642,6 +685,8 @@ class CommitmentTracker:
                     c.source_insight_id if hasattr(c, "source_insight_id") else ""
                 ),
                 "due": c.due if hasattr(c, "due") else None,
+                # Provide canonical hash for UI/probe linkage
+                "hash": self.get_commitment_hash(c) if hasattr(c, "text") else "",
             }
             for c in self.commitments.values()
             if hasattr(c, "status") and c.status == "open"
@@ -721,8 +766,17 @@ class CommitmentTracker:
         return archived_cids
 
     def get_commitment_hash(self, commitment: Commitment) -> str:
-        """Generate a hash for a commitment for evidence linking."""
-        # Create a stable hash from commitment content
+        """Return canonical hash used for evidence linking.
+
+        Prefers the event hash from the SQLite 'commitment' row if available,
+        falling back to a stable legacy hash for backward compatibility.
+        """
+        try:
+            if getattr(commitment, "event_hash", None):
+                return str(commitment.event_hash)
+        except Exception:
+            pass
+        # Legacy short hash
         content = f"{commitment.cid}:{commitment.text}:{commitment.created_at}"
         return hashlib.sha256(content.encode()).hexdigest()[:16]
 
@@ -894,6 +948,23 @@ class CommitmentTracker:
             )
             return False
 
+        # Require artifact for 'done' evidence when configured
+        try:
+            require_art = str(
+                os.environ.get("PMM_REQUIRE_EVIDENCE_ARTIFACT", "1")
+            ).lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+        except Exception:
+            require_art = True
+        if require_art and not artifact:
+            print(
+                "[PMM_EVIDENCE] missing artifact: not closing without artifact when required"
+            )
+            return False
+
         # Compute/validate evidence confidence
         if confidence is None:
             confidence = self._estimate_evidence_confidence(
@@ -963,9 +1034,32 @@ class CommitmentTracker:
 
             score = base + 0.3 * b_overlap + 0.2 * t_overlap
 
-            # Artifacts increase confidence
+            # Simple semantic boost via cosine similarity (best-effort)
+            try:
+                from pmm.semantic_analysis import get_semantic_analyzer
+
+                analyzer = get_semantic_analyzer()
+                cos = analyzer.cosine_similarity(commitment_text, description)
+                # Blend in a modest weight to avoid overfitting
+                score += 0.25 * max(0.0, min(1.0, float(cos)))
+            except Exception:
+                pass
+
+            # Artifacts increase confidence with type-aware boosts
             if artifact:
-                score += 0.15
+                score += 0.10  # base artifact boost
+                try:
+                    # Type heuristics
+                    if re.search(r"https?://", artifact):
+                        score += 0.05  # URL evidence
+                    if re.search(r"#\d+", artifact) or re.search(
+                        r"[A-Z]{2,}-\d+", artifact
+                    ):
+                        score += 0.05  # PR/issue/ticket id
+                    if re.search(r"\.(py|md|txt|ipynb|json)$", artifact):
+                        score += 0.05  # file artifact
+                except Exception:
+                    pass
 
             # Action verbs in description push up slightly
             action_cues = [
@@ -1016,3 +1110,299 @@ class CommitmentTracker:
                 continue
 
         return expired_cids
+
+
+# =============================
+# Identity turn-scoped helpers
+# =============================
+
+
+def canonical_identity_dedupe_key(policy: str, scope: str, ttl_turns: int) -> str:
+    """Return a canonical dedupe key for identity commitments.
+
+    Example: identity::express_core_principles::turns::3
+    """
+    return f"identity::{policy}::{scope}::{int(ttl_turns)}"
+
+
+def _safe_json_loads(s: Optional[str]) -> Dict[str, Any]:
+    try:
+        import json
+
+        if not s:
+            return {}
+        obj = json.loads(s)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _list_open_identity_turn_commitments(smm: Any) -> List[Dict[str, Any]]:
+    """List open identity commitments scoped to turns with latest remaining_turns.
+
+    Returns a list of dicts like:
+    {"event_hash": str, "open_event_id": int, "content": { ... }, "meta": { ... }}
+    """
+    try:
+        store = getattr(smm, "sqlite_store", None)
+        if store is None:
+            return []
+        # Query only the relevant kinds for efficiency
+        with store._lock:  # type: ignore[attr-defined]
+            rows = list(
+                store.conn.execute(
+                    "SELECT id, ts, kind, content, meta, hash FROM events "
+                    "WHERE kind IN ('commitment.open','commitment.update','commitment.close') "
+                    "ORDER BY id"
+                )
+            )
+
+        opens: Dict[str, Dict[str, Any]] = {}
+        updates: Dict[str, int] = {}
+        closed: set[str] = set()
+
+        for r in rows:
+            kind = r[2]
+            content_raw = r[3]
+            meta_raw = r[4]
+            ev_hash = r[5]
+
+            meta = _safe_json_loads(meta_raw)
+
+            if kind == "commitment.open":
+                cont = _safe_json_loads(content_raw)
+                if (
+                    str(cont.get("category", "")) == "identity"
+                    and str(cont.get("scope", "")) == "turns"
+                ):
+                    opens[ev_hash] = {
+                        "event_hash": ev_hash,
+                        "open_event_id": int(r[0]),
+                        "content": cont,
+                        "meta": meta or {},
+                    }
+                    # Prime updates with the initial remaining_turns
+                    try:
+                        updates[ev_hash] = int(cont.get("remaining_turns", 0))
+                    except Exception:
+                        updates[ev_hash] = 0
+            elif kind == "commitment.update":
+                cref = str((meta or {}).get("commit_ref", ""))
+                if cref in opens:
+                    cont = _safe_json_loads(content_raw)
+                    try:
+                        updates[cref] = int(
+                            cont.get("remaining_turns", updates.get(cref, 0))
+                        )
+                    except Exception:
+                        pass
+            elif kind == "commitment.close":
+                cref = str((meta or {}).get("commit_ref", ""))
+                if cref:
+                    closed.add(cref)
+
+        # Build final list with latest remaining_turns and exclude closed
+        out: List[Dict[str, Any]] = []
+        for k, rec in opens.items():
+            if k in closed:
+                continue
+            # Overlay latest remaining_turns if present
+            if k in updates:
+                try:
+                    rec["content"] = dict(rec["content"])
+                    rec["content"]["remaining_turns"] = int(updates[k])
+                except Exception:
+                    pass
+            out.append(rec)
+        return out
+    except Exception:
+        return []
+
+
+def _append_evidence_event(
+    smm: Any, commit_hash: str, reply_text: str, confidence: float
+) -> None:
+    try:
+        store = getattr(smm, "sqlite_store", None)
+        if store is None:
+            return
+        import json
+
+        evidence_content = {
+            "type": "done",
+            "summary": "Turn elapsed; identity expression enforced this turn.",
+            "artifact": {"reply_excerpt": (reply_text or "")[:400]},
+            "confidence": float(confidence),
+        }
+        store.append_event(
+            kind="evidence",
+            content=json.dumps(evidence_content, ensure_ascii=False),
+            meta={"commit_ref": commit_hash, "subsystem": "identity"},
+        )
+    except Exception:
+        return
+
+
+def _close_commitment(smm: Any, commit_hash: str) -> None:
+    try:
+        store = getattr(smm, "sqlite_store", None)
+        if store is None:
+            return
+        import json
+
+        store.append_event(
+            kind="commitment.close",
+            content=json.dumps({"reason": "ttl_exhausted"}, ensure_ascii=False),
+            meta={"commit_ref": commit_hash, "subsystem": "identity"},
+        )
+    except Exception:
+        return
+
+
+def tick_turn_scoped_identity_commitments(smm: Any, reply_text: str) -> None:
+    """Decrement remaining_turns for open identity commitments; auto-close at zero.
+
+    Appends immutable `commitment.update` events for each tick. When TTL hits
+    zero, emits a minimal `evidence` row then a `commitment.close` row.
+    """
+    items = _list_open_identity_turn_commitments(smm)
+    if not items:
+        return
+    for item in items:
+        content = dict(item.get("content", {}) or {})
+        commit_hash = item.get("event_hash")
+        try:
+            remaining = int(content.get("remaining_turns", 0))
+        except Exception:
+            remaining = 0
+
+        if remaining <= 0:
+            _close_commitment(smm, commit_hash)
+            continue
+
+        # Decrement and append update
+        remaining -= 1
+        upd_content = {"remaining_turns": remaining, "note": "decrement after turn"}
+        try:
+            smm.sqlite_store.append_event(
+                kind="commitment.update",
+                content=__import__("json").dumps(upd_content, ensure_ascii=False),
+                meta={"commit_ref": commit_hash, "subsystem": "identity"},
+            )
+        except Exception:
+            pass
+
+        if remaining == 0:
+            _append_evidence_event(
+                smm,
+                commit_hash=commit_hash,
+                reply_text=reply_text or "",
+                confidence=float(IDENTITY_COMMIT.min_confidence),
+            )
+            _close_commitment(smm, commit_hash)
+
+
+def open_identity_commitment(
+    smm: Any,
+    policy: str = "express_core_principles",
+    ttl_turns: Optional[int] = None,
+    note: Optional[str] = None,
+) -> str:
+    """Open a turn-scoped identity commitment and return its event hash.
+
+    Dedupe is enforced by a canonical key (policy+scope+ttl); if an open
+    commitment with the same key exists, returns its hash instead of
+    creating a new one.
+    """
+    try:
+        ttl = (
+            int(ttl_turns) if ttl_turns is not None else int(IDENTITY_COMMIT.ttl_turns)
+        )
+    except Exception:
+        ttl = int(IDENTITY_COMMIT.ttl_turns)
+
+    scope = "turns"
+    key = canonical_identity_dedupe_key(policy, scope, ttl)
+
+    # If one is open with same key, return it (no-op)
+    try:
+        open_items = _list_open_identity_turn_commitments(smm)
+        for it in open_items:
+            cont = it.get("content", {}) or {}
+            if (
+                str(cont.get("policy", "")) == policy
+                and str(cont.get("scope", "")) == scope
+                and int(cont.get("ttl_turns", ttl)) == ttl
+            ):
+                return str(it.get("event_hash", ""))
+    except Exception:
+        pass
+
+    # Append the 'commitment.open' event
+    import json
+
+    content: Dict[str, Any] = {
+        "category": "identity",
+        "scope": scope,
+        "policy": policy,
+        "ttl_turns": ttl,
+        "remaining_turns": ttl,
+        "note": note or "",
+    }
+    meta = {"subsystem": "identity", "dedupe_key": key}
+
+    try:
+        res = smm.sqlite_store.append_event(
+            kind="commitment.open",
+            content=json.dumps(content, ensure_ascii=False),
+            meta=meta,
+        )
+        return str(res.get("hash", ""))
+    except Exception:
+        return ""
+
+
+def get_identity_turn_commitments(smm: Any) -> List[Dict[str, Any]]:
+    """Return a simplified list of open identity turn-scoped commitments.
+
+    Each item contains: policy, ttl_turns, remaining_turns, event_hash.
+    """
+    items = _list_open_identity_turn_commitments(smm)
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        cont = dict(it.get("content", {}) or {})
+        out.append(
+            {
+                "policy": str(cont.get("policy", "")),
+                "ttl_turns": int(cont.get("ttl_turns", 0) or 0),
+                "remaining_turns": int(cont.get("remaining_turns", 0) or 0),
+                "event_hash": str(it.get("event_hash", "")),
+            }
+        )
+    return out
+
+
+def close_identity_turn_commitments(
+    smm: Any, commit_hashes: Optional[List[str]] = None
+) -> int:
+    """Force-close identity turn-scoped commitments.
+
+    If commit_hashes is None, closes all currently open identity turn commitments.
+    Returns the number of commitments closed.
+    """
+    try:
+        items = _list_open_identity_turn_commitments(smm)
+        targets = []
+        if commit_hashes:
+            want = set(str(h) for h in commit_hashes)
+            for it in items:
+                if str(it.get("event_hash", "")) in want:
+                    targets.append(str(it.get("event_hash", "")))
+        else:
+            targets = [str(it.get("event_hash", "")) for it in items]
+        for h in targets:
+            if h:
+                _close_commitment(smm, h)
+        return len(targets)
+    except Exception:
+        return 0
