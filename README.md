@@ -18,6 +18,11 @@ By design, evolution is a slow burn—steady, evidence‑driven, and anchored in
 
 In simple terms: PMM is an AI that remembers, stays consistent, and gradually becomes itself.
 
+
+**Side note:**
+I'm currently working on a branch that allows the PMM to see its own code and analyze it. This is a work in progress and is not yet ready for release.
+[self-code-analysis branch](https://github.com/scottonanski/persistent-mind-model/tree/self-code-analysis)
+
 ---
 
 Plain-English overview of key concepts:
