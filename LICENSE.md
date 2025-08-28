@@ -9,18 +9,18 @@ This software is available under two options:
 
 Permitted Uses:
 
-✅ Personal projects & experimentation
-✅ Academic research & educational purposes
-✅ Open source projects (non-commercial)
-✅ Evaluation & testing
-✅ Contributing to this project
+- ✅ Personal projects & experimentation
+- ✅ Academic research & educational purposes
+- ✅ Open source projects (non-commercial)
+- ✅ Evaluation & testing
+- ✅ Contributing to this project
 
 Restrictions:
 
-❌ Commercial use or monetization
-❌ Integration into commercial products or services
-❌ Use in revenue-generating applications (direct or indirect)
-❌ Redistribution for commercial purposes
+- ❌ Commercial use or monetization
+- ❌ Integration into commercial products or services
+- ❌ Use in revenue-generating applications (direct or indirect)
+- ❌ Redistribution for commercial purposes
 
 ### Commercial License (Paid)
 
