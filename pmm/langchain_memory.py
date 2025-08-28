@@ -57,6 +57,7 @@ from .ngram_ban import NGramBanSystem
 from .emergence_stages import EmergenceStageManager
 from .core.autonomy import AutonomyLoop
 from .logging_config import pmm_tlog, pmm_dlog
+from .evidence.behavior_engine import process_reply_for_evidence
 
 
 class PersistentMindMemory(BaseChatMemory):
@@ -1357,6 +1358,13 @@ class PersistentMindMemory(BaseChatMemory):
         # ---- 9) Keep LangChain compatibility ----
         # FIXED: Commented out to prevent hanging - PMM handles all persistence internally
         # super().save_context(inputs, outputs)
+
+        # ---- 10) Behavior-based evidence (heuristic) ----
+        try:
+            if ai_output and not is_non_behavioral:
+                _ = process_reply_for_evidence(self.pmm, ai_output)
+        except Exception:
+            pass
 
     def _process_evidence_events(self, text: str) -> None:
         """Process evidence events from text and emit them to PMM system."""

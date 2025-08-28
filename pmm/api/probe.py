@@ -165,6 +165,96 @@ def identity(
     return {"name": name or "Agent", "id": ident, "identity_commitments": formatted}
 
 
+# ---- Autonomy Probes --------------------------------------------------------
+
+
+@app.get("/autonomy/tasks")
+def autonomy_tasks(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """Reconstruct dev tasks from task_* events; return current open + recent closed.
+
+    Event kinds: task_created, task_progress, task_closed with meta.task_id.
+    """
+    store = SQLiteStore(db)
+    rows = list(
+        store.conn.execute(
+            "SELECT id,ts,kind,content,meta FROM events WHERE kind IN ('task_created','task_progress','task_closed') ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+    )
+    tasks: dict[str, dict] = {}
+    import json
+
+    for rid, ts, kind, content, meta in rows[::-1]:  # oldest->newest
+        try:
+            m = json.loads(meta) if isinstance(meta, str) else (meta or {})
+        except Exception:
+            m = {}
+        tid = str(m.get("task_id", ""))
+        if not tid:
+            continue
+        rec = tasks.setdefault(
+            tid,
+            {
+                "task_id": tid,
+                "status": "open",
+                "created_at": ts,
+                "kind": None,
+                "title": None,
+                "policy": None,
+                "ttl": None,
+                "progress": [],
+                "closed_at": None,
+            },
+        )
+        if kind == "task_created":
+            try:
+                c = json.loads(content) if isinstance(content, str) else (content or {})
+            except Exception:
+                c = {}
+            rec.update({
+                "kind": c.get("kind"),
+                "title": c.get("title"),
+                "policy": c.get("policy"),
+                "ttl": c.get("ttl"),
+            })
+        elif kind == "task_progress":
+            rec["progress"].append({"ts": ts, "content": content})
+        elif kind == "task_closed":
+            rec["status"] = "closed"
+            rec["closed_at"] = ts
+
+    open_tasks = [t for t in tasks.values() if t.get("status") == "open"]
+    closed_tasks = [t for t in tasks.values() if t.get("status") == "closed"]
+    return {"open": open_tasks, "closed": closed_tasks}
+
+
+@app.get("/autonomy/status")
+def autonomy_status(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+):
+    """Return a compact autonomy snapshot using recent metrics and task counts."""
+    try:
+        from pmm.emergence import compute_emergence_scores
+
+        store = SQLiteStore(db)
+        scores = compute_emergence_scores(window=15, storage_manager=store)
+        # Count open tasks from events
+        tasks = autonomy_tasks(db)
+        open_count = len(tasks.get("open", []))
+        return {
+            "stage": scores.get("stage"),
+            "IAS": scores.get("IAS"),
+            "GAS": scores.get("GAS"),
+            "commit_close_rate": scores.get("commit_close_rate"),
+            "open_tasks": open_count,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _get_emergence_events(
     db_path: str, kinds: List[str] = None, limit: int = 15
 ) -> List[EmergenceEvent]:
