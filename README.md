@@ -26,8 +26,11 @@ Plain-English overview of key concepts:
 Technical analysis (ChatGPT-5):
 - [📊 Technical Analysis: PMM Architecture & Innovation](TECHNICAL_ANALYSIS.md)
 
-- General analysis / Current Project State (ChatGPT-5):
-   [Persistent Mind Model (PMM) – Analysis](Persistent%20Mind%20Model%20(PMM)%20–%20Analysis.md)
+- General analysis / Project State (ChatGPT-5):
+  - [Persistent Mind Model (PMM) – Analysis](Persistent%20Mind%20Model%20(PMM)%20–%20Analysis.md)
+
+- Potential Acquisition Analysis (PDF) — simulated report for curiosity/fun; not a real acquisition document.
+  - [Simulated: Potential Acquisition Analysis (PDF)](Persistent%20Mind%20Model%20(PMM)%20–%20Potential%20Acquisition%20Analysis.pdf) 
 
 ---
 
