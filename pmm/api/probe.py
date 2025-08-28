@@ -168,20 +168,11 @@ def identity(
 # ---- Autonomy Probes --------------------------------------------------------
 
 
-@app.get("/autonomy/tasks")
-def autonomy_tasks(
-    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
-    limit: int = Query(200, ge=1, le=1000),
-):
-    """Reconstruct dev tasks from task_* events; return current open + recent closed.
-
-    Event kinds: task_created, task_progress, task_closed with meta.task_id.
-    """
-    store = SQLiteStore(db)
+def _fold_tasks(store: SQLiteStore, limit: int = 200) -> dict:
     rows = list(
         store.conn.execute(
             "SELECT id,ts,kind,content,meta FROM events WHERE kind IN ('task_created','task_progress','task_closed') ORDER BY id DESC LIMIT ?",
-            (limit,),
+            (int(limit),),
         )
     )
     tasks: dict[str, dict] = {}
@@ -231,6 +222,15 @@ def autonomy_tasks(
     return {"open": open_tasks, "closed": closed_tasks}
 
 
+@app.get("/autonomy/tasks")
+def autonomy_tasks(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    store = SQLiteStore(db)
+    return _fold_tasks(store, int(limit))
+
+
 @app.get("/autonomy/status")
 def autonomy_status(
     db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
@@ -241,9 +241,9 @@ def autonomy_status(
 
         store = SQLiteStore(db)
         scores = compute_emergence_scores(window=15, storage_manager=store)
-        # Count open tasks from events
-        tasks = autonomy_tasks(db)
-        open_count = len(tasks.get("open", []))
+        # Count open tasks without calling the FastAPI handler
+        folded = _fold_tasks(store, 200)
+        open_count = len(folded.get("open", []))
         return {
             "stage": scores.get("stage"),
             "IAS": scores.get("IAS"),

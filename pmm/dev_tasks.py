@@ -73,6 +73,20 @@ class DevTaskManager:
 
     def close_task(self, task_id: str, *, reason: Optional[str] = None, evidence: Optional[str] = None) -> None:
         import json
+        # 1) Emit an evidence:done row if any evidence string is provided
+        if evidence:
+            ev_content = {
+                "type": "done",
+                "summary": f"Task {task_id} closed",
+                "artifact": evidence,
+                "confidence": 0.7,
+            }
+            self.store.append_event(
+                kind="evidence",
+                content=json.dumps(ev_content, ensure_ascii=False),
+                meta={"task_ref": task_id},
+            )
+        # 2) Append the task_closed row (unchanged)
         payload = {"reason": reason, "evidence": evidence}
         self.store.append_event(
             kind="task_closed",
