@@ -41,4 +41,7 @@ jobs:
         run: ruff check .
       - name: Pytest (only on code changes)
         if: steps.changes.outputs.code == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-fake-key-for-testing' }}
+          PMM_SKIP_OPENAI_TESTS: ${{ secrets.OPENAI_API_KEY == '' && 'true' || 'false' }}
         run: pytest -q
