@@ -29,7 +29,9 @@ def test_commitment_detection_fixes():
     for text in test_cases:
         commitment, _ = tracker.extract_commitment(text)
         # Each example should be detected as a commitment
-        assert commitment is not None, f"Expected commitment detection for: {text[:80]}..."
+        assert (
+            commitment is not None
+        ), f"Expected commitment detection for: {text[:80]}..."
 
 
 if __name__ == "__main__":

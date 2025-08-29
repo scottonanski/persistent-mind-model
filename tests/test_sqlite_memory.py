@@ -19,17 +19,17 @@ def test_sqlite_memory():
         store = SQLiteStore(db_path)
 
         # Seed known events
-        res1 = store.append_event(
+        store.append_event(
             kind="prompt",
             content="User said: My name is Scott",
             meta={"role": "user"},
         )
-        res2 = store.append_event(
+        store.append_event(
             kind="response",
             content="I responded: Nice to meet you, Scott!",
             meta={"role": "assistant"},
         )
-        res3 = store.append_event(
+        store.append_event(
             kind="event",
             content="Context: Discussing project updates",
             meta={},

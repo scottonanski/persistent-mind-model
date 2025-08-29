@@ -316,7 +316,9 @@ class EmergenceAnalyzer:
         )
         # Merge by recency and cap to window
         commits_all = sorted(
-            list(commits_generic) + list(commits_identity), key=lambda r: r[0], reverse=True
+            list(commits_generic) + list(commits_identity),
+            key=lambda r: r[0],
+            reverse=True,
         )[: int(window)]
         if not commits_all:
             return 0.0
@@ -356,7 +358,11 @@ class EmergenceAnalyzer:
             # Allow short-hash prefixes (e.g., first 8-16 hex chars)
             try:
                 for h in commit_hash_list:
-                    if isinstance(ref, str) and isinstance(h, str) and h.startswith(ref):
+                    if (
+                        isinstance(ref, str)
+                        and isinstance(h, str)
+                        and h.startswith(ref)
+                    ):
                         closed.add(h)
                         break
             except Exception:
@@ -396,7 +402,11 @@ class EmergenceAnalyzer:
                 continue
             try:
                 for h in commit_hash_list:
-                    if isinstance(ref, str) and isinstance(h, str) and h.startswith(ref):
+                    if (
+                        isinstance(ref, str)
+                        and isinstance(h, str)
+                        and h.startswith(ref)
+                    ):
                         closed.add(h)
                         break
             except Exception:
@@ -625,7 +635,9 @@ class EmergenceAnalyzer:
                     cbonus = float(os.getenv("PMM_IAS_ID_COMMIT_BONUS", "0.03"))
                 except Exception:
                     cbonus = 0.03
-                identity_signal_count = self._count_identity_signals(scan, window=min(window_env, 15))
+                identity_signal_count = self._count_identity_signals(
+                    scan, window=min(window_env, 15)
+                )
                 identity_boost = min(identity_signal_count * mult, cap)
                 if self._has_open_identity_commit(scan, window=min(window_env, 15)):
                     identity_boost = min(identity_boost + cbonus, cap)
@@ -725,7 +737,9 @@ class EmergenceAnalyzer:
                     cbonus = float(os.getenv("PMM_IAS_ID_COMMIT_BONUS", "0.03"))
                 except Exception:
                     cbonus = 0.03
-                identity_signal_count = self._count_identity_signals(scan, window=min(window_env, 15))
+                identity_signal_count = self._count_identity_signals(
+                    scan, window=min(window_env, 15)
+                )
                 identity_boost = min(identity_signal_count * mult, cap)
                 if self._has_open_identity_commit(scan, window=min(window_env, 15)):
                     identity_boost = min(identity_boost + cbonus, cap)
@@ -807,7 +821,9 @@ class EmergenceAnalyzer:
     # --------------------
     # Identity signal helpers (extended mode)
     # --------------------
-    def _count_identity_signals(self, events: List[EmergenceEvent], window: int = 15) -> int:
+    def _count_identity_signals(
+        self, events: List[EmergenceEvent], window: int = 15
+    ) -> int:
         """Count recent identity-like signals in the last `window` events.
 
         Signals include tags containing 'identity' or regex matches in content.
@@ -822,7 +838,7 @@ class EmergenceAnalyzer:
         cnt = 0
         for e in tail:
             try:
-                text = (e.content or "")
+                text = e.content or ""
                 tags = (e.meta or {}).get("tags", [])
                 kind = (e.kind or "").lower()
             except Exception:
@@ -839,7 +855,9 @@ class EmergenceAnalyzer:
                     cnt += 1
         return cnt
 
-    def _has_open_identity_commit(self, events: List[EmergenceEvent], window: int = 15) -> bool:
+    def _has_open_identity_commit(
+        self, events: List[EmergenceEvent], window: int = 15
+    ) -> bool:
         """Heuristic: detect if a recent commitment.open mentions identity."""
         if not events:
             return False
@@ -848,7 +866,7 @@ class EmergenceAnalyzer:
         )
         for e in events[-window:]:
             if (e.kind or "").lower() == "commitment.open":
-                text = (e.content or "")
+                text = e.content or ""
                 tags = (e.meta or {}).get("tags", [])
                 if ("identity" in tags) or id_rx.search(text):
                     return True

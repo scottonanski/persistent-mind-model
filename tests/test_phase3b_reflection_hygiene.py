@@ -61,9 +61,7 @@ def test_insight_validation():
 
         for content, expected_accepted in test_cases:
             is_accepted, refs = _validate_insight_references(content, mgr)
-            print(
-                f"  '{content[:50]}...' -> Accepted: {is_accepted}, Refs: {refs}"
-            )
+            print(f"  '{content[:50]}...' -> Accepted: {is_accepted}, Refs: {refs}")
             assert (
                 is_accepted == expected_accepted
             ), f"Unexpected acceptance for: {content}"

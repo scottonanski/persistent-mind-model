@@ -325,7 +325,7 @@ def autonomy_status(
             ias = float(scores.get("IAS", 0.0) or 0.0)
             close_rate = float(scores.get("commit_close_rate", 0.0) or 0.0)
             identity_signals = float(scores.get("identity_signal_count", 0.0) or 0.0)
-            
+
             # Build context to get hot_strength (same logic as _auto_reflect)
             ctx = pmm_bandit.build_context(
                 gas=gas,
@@ -1708,6 +1708,8 @@ def create_probe_app(db_path: str = "pmm.db") -> FastAPI:
     """Create and configure the probe FastAPI app."""
     # Ensure bandit tables exist as a safety migration (idempotent)
     try:
+        import os
+
         flag = os.getenv("PMM_BANDIT_ENABLED")
         enabled = True if flag is None else flag.lower() in ("1", "true", "yes", "on")
         if enabled:

@@ -76,7 +76,11 @@ class PolicyEvolution:
 
         for ts, kind, evidence in rows[::-1]:
             try:
-                ev = json.loads(evidence) if isinstance(evidence, str) else (evidence or {})
+                ev = (
+                    json.loads(evidence)
+                    if isinstance(evidence, str)
+                    else (evidence or {})
+                )
             except Exception:
                 ev = {}
             out.append(
@@ -116,7 +120,13 @@ class PolicyEvolution:
         except Exception:
             pass
 
-    def _emit_adjusted(self, policy_type: str, before: Dict[str, Any], after: Dict[str, Any], reason: str) -> None:
+    def _emit_adjusted(
+        self,
+        policy_type: str,
+        before: Dict[str, Any],
+        after: Dict[str, Any],
+        reason: str,
+    ) -> None:
         import json
 
         try:

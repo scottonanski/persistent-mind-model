@@ -61,7 +61,6 @@ from .ngram_ban import NGramBanSystem
 from .emergence_stages import EmergenceStageManager
 from .core.autonomy import AutonomyLoop
 from .logging_config import pmm_tlog, pmm_dlog
-from .evidence.behavior_engine import process_reply_for_evidence
 
 
 class PersistentMindMemory(BaseChatMemory):
@@ -179,14 +178,18 @@ class PersistentMindMemory(BaseChatMemory):
         except Exception:
             horizon = 5
         self._bandit_horizon_turns: int = max(1, min(50, horizon))
-        self._bandit_events: deque = deque(maxlen=20)  # records of recent bandit actions
+        self._bandit_events: deque = deque(
+            maxlen=20
+        )  # records of recent bandit actions
         self._bandit_turn_id: int = 0
         self._bandit_last_close_event_id: int = 0
 
         # ---- Bandit DB ensure (Step 8) ----
         try:
             flag = os.getenv("PMM_BANDIT_ENABLED")
-            enabled = True if flag is None else flag.lower() in ("1", "true", "yes", "on")
+            enabled = (
+                True if flag is None else flag.lower() in ("1", "true", "yes", "on")
+            )
             if enabled and hasattr(self.pmm, "sqlite_store"):
                 # Ensure bandit tables exist at startup
                 pmm_bandit.set_store(self.pmm.sqlite_store)
@@ -948,13 +951,18 @@ class PersistentMindMemory(BaseChatMemory):
                 tags: List[str] = []
                 try:
                     active_idents = get_identity_turn_commitments(self.pmm) or []
-                    if any((it or {}).get("remaining_turns", 0) > 0 for it in active_idents):
+                    if any(
+                        (it or {}).get("remaining_turns", 0) > 0 for it in active_idents
+                    ):
                         tags.append("identity")
                 except Exception:
                     pass
                 try:
                     # Regex aligned with emergence identity-signal detector
-                    id_rx = re.compile(r"\b(my name is|i am\s+\w+|identity confirm|identity:|i am\s+quest|name is)\b", re.IGNORECASE)
+                    id_rx = re.compile(
+                        r"\b(my name is|i am\s+\w+|identity confirm|identity:|i am\s+quest|name is)\b",
+                        re.IGNORECASE,
+                    )
                     if id_rx.search(ai_output or "") and "identity" not in tags:
                         tags.append("identity")
                 except Exception:
@@ -1006,6 +1014,7 @@ class PersistentMindMemory(BaseChatMemory):
                 # Emit canonical evidence based on assistant behavior/output only
                 try:
                     from .evidence.behavior_engine import process_reply_for_evidence
+
                     _ = process_reply_for_evidence(self.pmm, ai_output)
                 except Exception:
                     pass
@@ -1429,7 +1438,9 @@ class PersistentMindMemory(BaseChatMemory):
             pass
 
     # ---- Bandit helper hooks (Step 4) ----
-    def _bandit_note_event(self, kind: str, details: Optional[Dict[str, Any]] = None) -> None:
+    def _bandit_note_event(
+        self, kind: str, details: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Record an outcome-related event for recent bandit actions within horizon.
 
         This does not compute rewards yet (handled in Step 5); it simply tags
@@ -1536,7 +1547,9 @@ class PersistentMindMemory(BaseChatMemory):
                 if age <= horizon:
                     continue  # Not yet at horizon
 
-                events = sorted(rec.get("events", []), key=lambda e: int(e.get("turn", 0)))
+                events = sorted(
+                    rec.get("events", []), key=lambda e: int(e.get("turn", 0))
+                )
                 action = rec.get("action")
                 ctx = rec.get("ctx", {})
                 reward = 0.0
@@ -1550,14 +1563,19 @@ class PersistentMindMemory(BaseChatMemory):
 
                 if action == "reflect_now":
                     # Positive: accepted reflection
-                    acc_turns = [int(e.get("turn", 0)) for e in events if e.get("kind") == "reflection_accepted"]
+                    acc_turns = [
+                        int(e.get("turn", 0))
+                        for e in events
+                        if e.get("kind") == "reflection_accepted"
+                    ]
                     if acc_turns:
                         components["accepted"] = True
                         reward += POS_ACCEPTED
                         first_acc_turn = min(acc_turns)
                         # Additional positive: commitment close within horizon after acceptance
                         has_close = any(
-                            (e.get("kind") == "commit_close") and int(e.get("turn", 0)) >= first_acc_turn
+                            (e.get("kind") == "commit_close")
+                            and int(e.get("turn", 0)) >= first_acc_turn
                             for e in events
                         )
                         if has_close:
@@ -1583,15 +1601,19 @@ class PersistentMindMemory(BaseChatMemory):
 
                     # Negative: rejected by dedup/novelty without acceptance (no INERT)
                     has_inert = any(e.get("kind") == "reflection_inert" for e in events)
-                    if (not components["accepted"]) and (not has_inert) and any(
-                        e.get("kind") == "reflection_rejected" for e in events
+                    if (
+                        (not components["accepted"])
+                        and (not has_inert)
+                        and any(e.get("kind") == "reflection_rejected" for e in events)
                     ):
                         components["reject"] = True
                         reward -= NEG_REJECT
 
                 else:  # action == "continue"
                     has_close = any(e.get("kind") == "commit_close" for e in events)
-                    has_accept = any(e.get("kind") == "reflection_accepted" for e in events)
+                    has_accept = any(
+                        e.get("kind") == "reflection_accepted" for e in events
+                    )
                     if has_close and not has_accept:
                         components["continue_close"] = True
                         reward += POS_CONT_CLOSE
@@ -1609,7 +1631,9 @@ class PersistentMindMemory(BaseChatMemory):
                         f"inert2={components['inert2']} reject={components['reject']} "
                         f"continue_close={components['continue_close']}"
                     )
-                    pmm_bandit.record_outcome(ctx, action, float(reward), horizon=horizon, notes=note)
+                    pmm_bandit.record_outcome(
+                        ctx, action, float(reward), horizon=horizon, notes=note
+                    )
                 except Exception:
                     pass
 
@@ -2162,7 +2186,11 @@ class PersistentMindMemory(BaseChatMemory):
         # Default enabled unless explicitly disabled later (Step 7 will formalize envs).
         try:
             bandit_enabled = os.getenv("PMM_BANDIT_ENABLED")
-            bandit_enabled = True if bandit_enabled is None else bandit_enabled.lower() in ("1", "true", "yes", "on")
+            bandit_enabled = (
+                True
+                if bandit_enabled is None
+                else bandit_enabled.lower() in ("1", "true", "yes", "on")
+            )
         except Exception:
             bandit_enabled = True
 
@@ -2177,9 +2205,13 @@ class PersistentMindMemory(BaseChatMemory):
                 try:
                     from pmm.emergence import compute_emergence_scores
 
-                    em = compute_emergence_scores(
-                        window=15, storage_manager=getattr(self.pmm, "sqlite_store", None)
-                    ) or {}
+                    em = (
+                        compute_emergence_scores(
+                            window=15,
+                            storage_manager=getattr(self.pmm, "sqlite_store", None),
+                        )
+                        or {}
+                    )
                 except Exception:
                     em = {}
 
@@ -2207,16 +2239,24 @@ class PersistentMindMemory(BaseChatMemory):
                 # Dedup threshold (effective)
                 try:
                     ar_stats = self.atomic_reflection.get_stats()
-                    dedup_thr = float(ar_stats.get("embedding_threshold_effective", 0.94) or 0.94)
+                    dedup_thr = float(
+                        ar_stats.get("embedding_threshold_effective", 0.94) or 0.94
+                    )
                 except Exception:
                     dedup_thr = 0.94
 
                 # Inert streak (consecutive non-accepted insights)
                 inert_streak = 0
                 try:
-                    insights = getattr(self.pmm.model.self_knowledge, "insights", []) or []
+                    insights = (
+                        getattr(self.pmm.model.self_knowledge, "insights", []) or []
+                    )
                     for ins in reversed(insights):
-                        meta = getattr(ins, "meta", {}) or getattr(ins, "__dict__", {}).get("meta", {}) or {}
+                        meta = (
+                            getattr(ins, "meta", {})
+                            or getattr(ins, "__dict__", {}).get("meta", {})
+                            or {}
+                        )
                         if bool(meta.get("accepted", False)):
                             break
                         inert_streak += 1
@@ -2240,15 +2280,17 @@ class PersistentMindMemory(BaseChatMemory):
                     action_info = pmm_bandit.select_action_info(ctx)
                     # Support both old and new tuple sizes
                     if len(action_info) == 5:
-                        bandit_action, sel_eps, q_reflect, q_continue, hot_bias = action_info
+                        bandit_action, sel_eps, q_reflect, q_continue, hot_bias = (
+                            action_info
+                        )
                     else:
                         bandit_action, sel_eps, q_reflect, q_continue = action_info  # type: ignore[misc]
                 except Exception:
                     bandit_action = pmm_bandit.select_action(ctx)
                     st = pmm_bandit.load_policy()
-                    sel_eps = float(os.getenv("PMM_BANDIT_EPSILON", "0.10") or 0.10)
-                    q_reflect = float((st.get("reflect_now", {}) or {}).get("value", 0.0))
-                    q_continue = float((st.get("continue", {}) or {}).get("value", 0.0))
+                    float(os.getenv("PMM_BANDIT_EPSILON", "0.10") or 0.10)
+                    float((st.get("reflect_now", {}) or {}).get("value", 0.0))
+                    float((st.get("continue", {}) or {}).get("value", 0.0))
                     hot_bias = False
 
                 # Safety guardrails (Step 2: Re-balanced for hot ticks)
@@ -2256,42 +2298,60 @@ class PersistentMindMemory(BaseChatMemory):
                 try:
                     turn_now = int(getattr(self, "_bandit_turn_id", 0) or 0)
                     hot_strength = float(ctx.get("hot_strength", 0.0))
-                    
+
                     # Never block the first reflection inside a hot window
-                    first_hot_always = os.getenv("PMM_SAFETY_FIRST_HOT_ALWAYS", "1").lower() in ("1", "true", "yes", "on")
+                    first_hot_always = os.getenv(
+                        "PMM_SAFETY_FIRST_HOT_ALWAYS", "1"
+                    ).lower() in ("1", "true", "yes", "on")
                     if first_hot_always and hot_strength >= 0.5:
                         # Check if no reflect attempt in last 3 turns
                         recent_reflects_3 = 0
                         for r in list(getattr(self, "_bandit_events", []) or []):
                             rt = int(r.get("turn", 0) or 0)
-                            if (turn_now - 3) < rt < turn_now and str(r.get("action")) == "reflect_now":
+                            if (turn_now - 3) < rt < turn_now and str(
+                                r.get("action")
+                            ) == "reflect_now":
                                 recent_reflects_3 += 1
                         if recent_reflects_3 == 0:
                             # Skip safety override for first hot reflection
                             pass
                         else:
                             # Apply normal safety rules
-                            max_reflect_per_5 = int(os.getenv("PMM_SAFETY_MAX_REFLECT_PER_5", "2"))
+                            max_reflect_per_5 = int(
+                                os.getenv("PMM_SAFETY_MAX_REFLECT_PER_5", "2")
+                            )
                             recent_reflects = 0
                             for r in list(getattr(self, "_bandit_events", []) or []):
                                 rt = int(r.get("turn", 0) or 0)
-                                if (turn_now - 5) < rt < turn_now and str(r.get("action")) == "reflect_now":
+                                if (turn_now - 5) < rt < turn_now and str(
+                                    r.get("action")
+                                ) == "reflect_now":
                                     # Only count actual attempts, not blocked by time/turns gate
                                     if r.get("finalized", False):
                                         recent_reflects += 1
-                            if bandit_action == "reflect_now" and recent_reflects >= max_reflect_per_5:
+                            if (
+                                bandit_action == "reflect_now"
+                                and recent_reflects >= max_reflect_per_5
+                            ):
                                 safety_override = True
                     else:
                         # Normal safety: max 2 reflections per 5 turns
-                        max_reflect_per_5 = int(os.getenv("PMM_SAFETY_MAX_REFLECT_PER_5", "2"))
+                        max_reflect_per_5 = int(
+                            os.getenv("PMM_SAFETY_MAX_REFLECT_PER_5", "2")
+                        )
                         recent_reflects = 0
                         for r in list(getattr(self, "_bandit_events", []) or []):
                             rt = int(r.get("turn", 0) or 0)
-                            if (turn_now - 5) < rt < turn_now and str(r.get("action")) == "reflect_now":
+                            if (turn_now - 5) < rt < turn_now and str(
+                                r.get("action")
+                            ) == "reflect_now":
                                 # Only count actual attempts, not blocked by time/turns gate
                                 if r.get("finalized", False):
                                     recent_reflects += 1
-                        if bandit_action == "reflect_now" and recent_reflects >= max_reflect_per_5:
+                        if (
+                            bandit_action == "reflect_now"
+                            and recent_reflects >= max_reflect_per_5
+                        ):
                             safety_override = True
 
                     # Inert loop breaker: do not trigger on hot ticks
@@ -2300,13 +2360,17 @@ class PersistentMindMemory(BaseChatMemory):
                         for r in list(getattr(self, "_bandit_events", []) or []):
                             rt = int(r.get("turn", 0) or 0)
                             if rt >= (turn_now - 5):
-                                for ev in (r.get("events") or []):
+                                for ev in r.get("events") or []:
                                     if str(ev.get("kind")) == "commit_close":
                                         no_close_recent = False
                                         break
                             if not no_close_recent:
                                 break
-                        if bandit_action == "reflect_now" and (float(inert_streak) >= 2.0) and no_close_recent:
+                        if (
+                            bandit_action == "reflect_now"
+                            and (float(inert_streak) >= 2.0)
+                            and no_close_recent
+                        ):
                             safety_override = True
                 except Exception:
                     safety_override = False
@@ -2327,11 +2391,19 @@ class PersistentMindMemory(BaseChatMemory):
                     try:
                         cd_status = self.reflection_cooldown.get_status()
                     except Exception:
-                        cd_status = {"turns_gate_passed": None, "time_gate_passed": None, "novelty_threshold": None}
+                        cd_status = {
+                            "turns_gate_passed": None,
+                            "time_gate_passed": None,
+                            "novelty_threshold": None,
+                        }
                     try:
                         ar_stats = self.atomic_reflection.get_stats()
-                        eff = float(ar_stats.get("embedding_threshold_effective", 0.0) or 0.0)
-                        cfg = float(ar_stats.get("embedding_threshold_configured", 0.0) or 0.0)
+                        eff = float(
+                            ar_stats.get("embedding_threshold_effective", 0.0) or 0.0
+                        )
+                        cfg = float(
+                            ar_stats.get("embedding_threshold_configured", 0.0) or 0.0
+                        )
                     except Exception:
                         eff, cfg = 0.0, 0.0
                     extra = ", bandit_safety_override=True" if safety_override else ""
@@ -2418,20 +2490,29 @@ class PersistentMindMemory(BaseChatMemory):
                 base_cd = int(self.reflection_cooldown.min_wall_time_seconds)
 
             # Read broader window for stability
-            em = compute_emergence_scores(
-                window=15, storage_manager=getattr(self.pmm, "sqlite_store", None)
-            ) or {}
+            em = (
+                compute_emergence_scores(
+                    window=15, storage_manager=getattr(self.pmm, "sqlite_store", None)
+                )
+                or {}
+            )
             gas_now = float(em.get("GAS", 0.0) or 0.0)
             close_now = float(em.get("commit_close_rate", 0.0) or 0.0)
 
             # Detect last reflection inert status (accepted=False)
             def _last_inert() -> bool:
                 try:
-                    insights = getattr(self.pmm.model.self_knowledge, "insights", []) or []
+                    insights = (
+                        getattr(self.pmm.model.self_knowledge, "insights", []) or []
+                    )
                     if not insights:
                         return False
                     last = insights[-1]
-                    meta = getattr(last, "meta", {}) or getattr(last, "__dict__", {}).get("meta", {}) or {}
+                    meta = (
+                        getattr(last, "meta", {})
+                        or getattr(last, "__dict__", {}).get("meta", {})
+                        or {}
+                    )
                     return not bool(meta.get("accepted", False))
                 except Exception:
                     return False
@@ -2474,16 +2555,20 @@ class PersistentMindMemory(BaseChatMemory):
         orig_min_turns = int(getattr(self.reflection_cooldown, "min_turns", 2) or 2)
         turns_override_applied = False
         bandit_override_turns = False
-        
+
         try:
             # Reuse previously computed gas_now/close_now if available; otherwise recompute
             try:
                 hot_now  # type: ignore # noqa
             except Exception:
                 try:
-                    em = compute_emergence_scores(
-                        window=15, storage_manager=getattr(self.pmm, "sqlite_store", None)
-                    ) or {}
+                    em = (
+                        compute_emergence_scores(
+                            window=15,
+                            storage_manager=getattr(self.pmm, "sqlite_store", None),
+                        )
+                        or {}
+                    )
                     gas_now = float(em.get("GAS", 0.0) or 0.0)
                     close_now = float(em.get("commit_close_rate", 0.0) or 0.0)
                     hot_now = bool(gas_now >= 0.85 and close_now >= 0.60)
@@ -2533,7 +2618,11 @@ class PersistentMindMemory(BaseChatMemory):
                 try:
                     cd_status = self.reflection_cooldown.get_status()
                     ar_stats = self.atomic_reflection.get_stats()
-                    override_reason = "bandit_override_turns=True" if bandit_override_turns else f"turns_override={turns_override_applied}"
+                    override_reason = (
+                        "bandit_override_turns=True"
+                        if bandit_override_turns
+                        else f"turns_override={turns_override_applied}"
+                    )
                     pmm_tlog(
                         f"[PMM_TELEMETRY] reflection_attempt: decision=blocked, reason={cooldown_reason}, "
                         f"turns_gate={cd_status.get('turns_gate_passed')}, time_gate={cd_status.get('time_gate_passed')}, "
@@ -2588,8 +2677,9 @@ class PersistentMindMemory(BaseChatMemory):
 
             # Step 4: Generate reflection ID for credit assignment tracking
             import uuid
-            reflect_id = str(uuid.uuid4())[:8]
-            
+
+            str(uuid.uuid4())[:8]
+
             # Atomic reflection validation and persistence
             success = self.atomic_reflection.add_insight(
                 content, active_model_config, active_model_config.get("epoch", 0)

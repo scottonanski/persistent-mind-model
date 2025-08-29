@@ -177,7 +177,9 @@ def test_hybrid_memory_retrieval():
             1 for term in programming_terms if term.lower() in history.lower()
         )
 
-        assert programming_mentions > 0, "No programming-related content found in memory context"
+        assert (
+            programming_mentions > 0
+        ), "No programming-related content found in memory context"
 
         print(
             f"✅ Found {programming_mentions} programming-related mentions in context"

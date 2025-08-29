@@ -24,6 +24,7 @@ from pmm.config import (
     get_ollama_models,
 )
 from pmm.emergence import compute_emergence_scores
+from pmm.metrics import compute_close_rate
 from pmm.commitments import (
     tick_turn_scoped_identity_commitments,
     open_identity_commitment,
@@ -521,7 +522,9 @@ def main():
         # If an identity turn commitment is active, require an explicit self-ascription early
         try:
             active_idents = get_identity_turn_commitments(pmm_memory.pmm)
-            if any((it or {}).get("remaining_turns", 0) > 0 for it in (active_idents or [])):
+            if any(
+                (it or {}).get("remaining_turns", 0) > 0 for it in (active_idents or [])
+            ):
                 mind_policy_lines.append(
                     "Identity Mode: In the first sentence, include a brief explicit self-ascription (e.g., 'I am currently …' or 'My name is …'), then continue naturally. Only once."
                 )
@@ -609,7 +612,10 @@ def main():
             # Carry forward identity-mode instruction in trimmed header too
             try:
                 active_idents = get_identity_turn_commitments(pmm_memory.pmm)
-                if any((it or {}).get("remaining_turns", 0) > 0 for it in (active_idents or [])):
+                if any(
+                    (it or {}).get("remaining_turns", 0) > 0
+                    for it in (active_idents or [])
+                ):
                     mind_policy_lines.append(
                         "Identity Mode: In the first sentence, include a brief explicit self-ascription (e.g., 'I am currently …' or 'My name is …'), then continue naturally. Only once."
                     )
@@ -747,7 +753,12 @@ def main():
 
         ias = scores.get("IAS")
         gas = scores.get("GAS")
-        close_rate = scores.get("commit_close_rate")
+        # Use event-based close rate calculation instead of emergence scores
+        try:
+            events = pmm_memory.storage_manager.get_events()
+            close_rate = compute_close_rate(events)
+        except Exception:
+            close_rate = 0.0
 
         # Color helpers
         def c(text: str, lvl: str) -> str:
@@ -879,7 +890,9 @@ def main():
                     print("  • --@probe identity    Show current identity via server")
                     print("  • --@find something    Search everywhere for text")
                     print("  • --@track on|off      Toggle real-time telemetry")
-                    print("  • --@bandit debug      Show bandit Qs/eps; simulate outcomes")
+                    print(
+                        "  • --@bandit debug      Show bandit Qs/eps; simulate outcomes"
+                    )
                     continue
                 # Contextual help: --@help identity|probe
                 if at_cmd.startswith("help "):
@@ -1351,8 +1364,12 @@ def main():
                     sub = parts[1] if len(parts) > 1 else None
                     if sub in {None, "list", "help"}:
                         print("\n📘 --@bandit options")
-                        print("  • --@bandit debug  Print Qs/eps, simulate outcomes, show updated values")
-                        print("  • --@bandit runbook  Run a 12-turn verification with hot segments")
+                        print(
+                            "  • --@bandit debug  Print Qs/eps, simulate outcomes, show updated values"
+                        )
+                        print(
+                            "  • --@bandit runbook  Run a 12-turn verification with hot segments"
+                        )
                         continue
                     if sub == "debug":
                         try:
@@ -1360,40 +1377,74 @@ def main():
                             pmm_bandit.set_store(pmm_memory.pmm.sqlite_store)
                             # Read current status
                             pol_before = pmm_bandit.load_policy()
-                            stat_before = pmm_bandit.get_status(pmm_memory.pmm.sqlite_store)
+                            stat_before = pmm_bandit.get_status(
+                                pmm_memory.pmm.sqlite_store
+                            )
+
                             def _row(name):
                                 r = pol_before.get(name, {"value": 0.0, "pulls": 0})
-                                return float(r.get("value", 0.0)), int(r.get("pulls", 0))
+                                return float(r.get("value", 0.0)), int(
+                                    r.get("pulls", 0)
+                                )
+
                             qr_b, nr_b = _row("reflect_now")
                             qc_b, nc_b = _row("continue")
                             print("\n[bandit] BEFORE:")
-                            print(f"  q_reflect={qr_b:.3f} pulls={nr_b} | q_continue={qc_b:.3f} pulls={nc_b} | eps={stat_before.get('eps'):.3f}")
+                            print(
+                                f"  q_reflect={qr_b:.3f} pulls={nr_b} | q_continue={qc_b:.3f} pulls={nc_b} | eps={stat_before.get('eps'):.3f}"
+                            )
 
                             # Simulate outcomes: one strong reflect win (+0.7/+0.3), one inert2 (-0.15)
                             import os as _os
+
                             def _f(name, default):
                                 try:
                                     return float(_os.getenv(name, str(default)))
                                 except Exception:
                                     return default
+
                             pos_acc = _f("PMM_BANDIT_POS_ACCEPTED", 0.7)
                             pos_close = _f("PMM_BANDIT_POS_CLOSE", 0.3)
                             neg_in2 = _f("PMM_BANDIT_NEG_INERT2", 0.15)
                             # Good reflect
-                            pmm_bandit.record_outcome({"debug": True}, "reflect_now", pos_acc + pos_close, horizon=int(_os.getenv("PMM_BANDIT_HORIZON_TURNS", "5")), notes="debug: accepted=True close=True")
+                            pmm_bandit.record_outcome(
+                                {"debug": True},
+                                "reflect_now",
+                                pos_acc + pos_close,
+                                horizon=int(
+                                    _os.getenv("PMM_BANDIT_HORIZON_TURNS", "5")
+                                ),
+                                notes="debug: accepted=True close=True",
+                            )
                             # Inert2
-                            pmm_bandit.record_outcome({"debug": True}, "reflect_now", -neg_in2, horizon=int(_os.getenv("PMM_BANDIT_HORIZON_TURNS", "5")), notes="debug: inert2=True")
+                            pmm_bandit.record_outcome(
+                                {"debug": True},
+                                "reflect_now",
+                                -neg_in2,
+                                horizon=int(
+                                    _os.getenv("PMM_BANDIT_HORIZON_TURNS", "5")
+                                ),
+                                notes="debug: inert2=True",
+                            )
 
                             # Read updated status
                             pol_after = pmm_bandit.load_policy()
-                            stat_after = pmm_bandit.get_status(pmm_memory.pmm.sqlite_store)
+                            stat_after = pmm_bandit.get_status(
+                                pmm_memory.pmm.sqlite_store
+                            )
+
                             def _row2(name):
                                 r = pol_after.get(name, {"value": 0.0, "pulls": 0})
-                                return float(r.get("value", 0.0)), int(r.get("pulls", 0))
+                                return float(r.get("value", 0.0)), int(
+                                    r.get("pulls", 0)
+                                )
+
                             qr_a, nr_a = _row2("reflect_now")
                             qc_a, nc_a = _row2("continue")
                             print("[bandit] AFTER:")
-                            print(f"  q_reflect={qr_a:.3f} pulls={nr_a} | q_continue={qc_a:.3f} pulls={nc_a} | eps={stat_after.get('eps'):.3f}")
+                            print(
+                                f"  q_reflect={qr_a:.3f} pulls={nr_a} | q_continue={qc_a:.3f} pulls={nc_a} | eps={stat_after.get('eps'):.3f}"
+                            )
                             print("  (Inserted: +accepted+close, -inert2)")
                         except Exception as e:
                             print(f"\n❌ Bandit debug error: {e}")
@@ -1441,15 +1492,16 @@ def main():
                             hot_turns = {1, 5, 9}
                             # Ensure horizon comes due by the end
                             try:
-                                horizon = int(_os.getenv("PMM_BANDIT_HORIZON_TURNS", "5"))
+                                int(_os.getenv("PMM_BANDIT_HORIZON_TURNS", "5"))
                             except Exception:
-                                horizon = 5
+                                pass
 
                             for t in range(1, turns + 1):
                                 # Increment turn counter like save_context would
-                                pmm_memory._bandit_turn_id = int(
-                                    getattr(pmm_memory, "_bandit_turn_id", 0) or 0
-                                ) + 1
+                                pmm_memory._bandit_turn_id = (
+                                    int(getattr(pmm_memory, "_bandit_turn_id", 0) or 0)
+                                    + 1
+                                )
 
                                 # Build a synthetic context snapshot
                                 is_hot = t in hot_turns
@@ -1466,10 +1518,14 @@ def main():
 
                                 # Select and record action into ring buffer
                                 try:
-                                    action, eps, qrf, qct = pmm_bandit.select_action_info(ctx)
+                                    action, eps, qrf, qct = (
+                                        pmm_bandit.select_action_info(ctx)
+                                    )
                                 except Exception:
                                     action = pmm_bandit.select_action(ctx)
-                                    eps = float(_os.getenv("PMM_BANDIT_EPSILON", "0.10"))
+                                    eps = float(
+                                        _os.getenv("PMM_BANDIT_EPSILON", "0.10")
+                                    )
                                     qrf = qct = 0.0
                                 rec = {
                                     "turn": int(pmm_memory._bandit_turn_id),
@@ -1523,7 +1579,9 @@ def main():
                             except Exception:
                                 pass
 
-                            print("\nRunbook complete. Check console for bandit_reward lines and /autonomy/status for bandit_q_*")
+                            print(
+                                "\nRunbook complete. Check console for bandit_reward lines and /autonomy/status for bandit_q_*"
+                            )
                         except Exception as e:
                             print(f"\n❌ Bandit runbook error: {e}")
                         continue
@@ -2090,6 +2148,20 @@ def main():
                         # Legacy label
                         for ln in lines:
                             print(ln.replace("[TRACK]", "[PMM_TELEMETRY]", 1))
+
+                    # Trigger reflection when ready
+                    try:
+                        if cd_status.get("time_gate_passed") and cd_status.get(
+                            "turns_gate_passed"
+                        ):
+                            from pmm.atomic_reflection import AtomicReflectionManager
+
+                            reflection_manager = AtomicReflectionManager(pmm_memory.pmm)
+                            reflection_manager.run_once(user_input)
+                    except Exception as e:
+                        if track_enabled:
+                            print(f"[TRACK] reflection_trigger_error: {e}")
+                        pass
 
                 # Decide on recovery actions when stuck in S0
                 if s0_consecutive >= s0_streak_threshold:

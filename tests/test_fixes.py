@@ -55,9 +55,9 @@ def test_concurrent_id_generation():
         # Assertions: no thread errors and no duplicate IDs
         assert not errors, f"Thread errors occurred: {errors}"
         unique_ids = set(results)
-        assert len(unique_ids) == len(results), (
-            f"Duplicate IDs found! Generated: {len(results)}, Unique: {len(unique_ids)}"
-        )
+        assert len(unique_ids) == len(
+            results
+        ), f"Duplicate IDs found! Generated: {len(results)}, Unique: {len(unique_ids)}"
         print(f"✅ Generated {len(results)} unique IDs across 3 threads")
 
 
@@ -85,9 +85,9 @@ def test_hash_chain_integrity():
         prev_hash = None
         for i, event in enumerate(events):
             if event["prev_hash"] != prev_hash:
-                assert False, (
-                    f"Chain break at event {i}: expected prev_hash={prev_hash}, got {event['prev_hash']}"
-                )
+                assert (
+                    False
+                ), f"Chain break at event {i}: expected prev_hash={prev_hash}, got {event['prev_hash']}"
             prev_hash = event["hash"]
 
         print(f"✅ Hash chain verified for {len(events)} events")
@@ -145,9 +145,9 @@ def test_field_parity():
         json_tags = set(json_event.tags)
         sqlite_tags = set(sqlite_event["meta"].get("tags", []))
 
-        assert json_tags == sqlite_tags, (
-            f"Tag mismatch: JSON={json_tags}, SQLite={sqlite_tags}"
-        )
+        assert (
+            json_tags == sqlite_tags
+        ), f"Tag mismatch: JSON={json_tags}, SQLite={sqlite_tags}"
         print(f"✅ Field parity verified for event {ev_id}")
 
 
@@ -172,9 +172,9 @@ def test_identity_logging():
         assert json_changes, "No identity changes in JSON model"
 
         latest_change = json_changes[-1]
-        assert new_name in latest_change.change, (
-            f"JSON identity change incorrect: {latest_change}"
-        )
+        assert (
+            new_name in latest_change.change
+        ), f"JSON identity change incorrect: {latest_change}"
 
         # Check SQLite
         sqlite_events = manager.sqlite_store.all_events()
@@ -183,9 +183,9 @@ def test_identity_logging():
         assert identity_events, "No identity_change events in SQLite"
 
         latest_sqlite = identity_events[-1]
-        assert latest_sqlite["meta"].get("new_value") == new_name, (
-            f"SQLite identity change incorrect: {latest_sqlite}"
-        )
+        assert (
+            latest_sqlite["meta"].get("new_value") == new_name
+        ), f"SQLite identity change incorrect: {latest_sqlite}"
 
         print(f"✅ Identity change logged consistently: {old_name} → {new_name}")
 

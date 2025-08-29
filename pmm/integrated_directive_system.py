@@ -56,7 +56,7 @@ class IntegratedDirectiveSystem:
         detected_directives = []
 
         # Create conversation context
-        context = ConversationContext(
+        ConversationContext(
             user_message=user_message,
             ai_response=ai_response,
             event_id=event_id,

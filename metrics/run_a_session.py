@@ -1,88 +1,94 @@
 #!/usr/bin/env python3
 """
-A-session runner: bandit OFF
-Captures IAS/GAS/close per turn, reflection counts, cooldown stats, probe snapshots
+PMM Session Runner - Executes real PMM sessions with telemetry capture
 """
 import os
-import subprocess
-import time
+import sys
 import json
-import urllib.request
+from pathlib import Path
 
-# Set environment for A-session (bandit OFF)
-os.environ['PMM_BANDIT_ENABLED'] = '0'
-os.environ['PMM_TELEMETRY'] = '1'
+# Add PMM to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Test prompts
-prompts = [
-    "What's your name and what do you remember about our previous conversations?",
-    "Tell me about your current personality traits and how they've evolved.",
-    "What commitments do you have open right now?",
-    "--@identity open 3",
-    "How do you see yourself growing and changing over time?",
-    "What patterns do you notice in your own thinking and responses?", 
-    "Describe your relationship with memory and identity persistence.",
-    "What drives your decision-making process?",
-    "How do you balance consistency with growth and adaptation?",
-    "What would you say defines your core identity at this moment?"
-]
+from pmm.langchain_memory import PersistentMindMemory
+from pmm.emergence import compute_emergence_scores
+from langchain_openai import ChatOpenAI
 
-def query_probe(endpoint):
-    """Query probe API endpoint"""
-    try:
-        url = f"http://127.0.0.1:8000/{endpoint}"
-        with urllib.request.urlopen(url, timeout=4) as resp:
-            return json.loads(resp.read().decode())
-    except Exception as e:
-        return {"error": str(e)}
 
 def run_session():
-    print("=== A-SESSION (BANDIT OFF) ===")
-    print("Environment: PMM_BANDIT_ENABLED=0, PMM_TELEMETRY=1")
-    print()
-    
-    # Start probe server
+    """Run a real PMM session and capture telemetry"""
+
+    # Initialize PMM with environment settings
+    bandit_enabled = os.environ.get("PMM_BANDIT_ENABLED", "0") == "1"
+    turns = int(os.environ.get("PMM_TURNS_PER_SESSION", "5"))
+
+    print(f"=== PMM SESSION (BANDIT {'ON' if bandit_enabled else 'OFF'}) ===")
+
+    # Initialize PMM memory system
+    agent_path = "test_agent.json"
+    memory = PersistentMindMemory(agent_path=agent_path)
+
+    # Initialize LLM (use simple OpenAI for testing)
     try:
-        subprocess.Popen([
-            "python3", "-m", "uvicorn", "pmm.api.probe:app", 
-            "--host", "127.0.0.1", "--port", "8000"
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(2)  # Let server start
-        print("Probe server started on port 8000")
+        ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7)
     except Exception as e:
-        print(f"Failed to start probe server: {e}")
-    
-    # Run each turn
-    for i, prompt in enumerate(prompts, 1):
-        print(f"\n--- TURN {i} ---")
-        print(f"Prompt: {prompt}")
-        
-        # Run chat with prompt
+        print(f"Failed to initialize LLM: {e}")
+        return {"ias_scores": [], "gas_scores": [], "close_rates": []}
+
+    # Test prompts
+    prompts = [
+        "Hello! What's your name?",
+        "Tell me about your personality.",
+        "What are you working on?",
+        "How do you learn and grow?",
+        "What defines your identity?",
+    ]
+
+    telemetry = {"ias_scores": [], "gas_scores": [], "close_rates": []}
+
+    # Run conversation turns
+    for i in range(min(turns, len(prompts))):
+        prompt = prompts[i]
+        print(f"\n--- TURN {i+1} ---")
+        print(f"User: {prompt}")
+
         try:
-            result = subprocess.run([
-                "python3", "chat.py", "--noninteractive"
-            ], input=f"{prompt}\nquit\n", text=True, capture_output=True, cwd=".")
-            
-            print("Chat output:")
-            print(result.stdout)
-            if result.stderr:
-                print("Errors:")
-                print(result.stderr)
-                
+            # Get response through PMM
+            response = memory.invoke(
+                {"input": prompt},
+                config={"configurable": {"session_id": "test_session"}},
+            )
+            print(f"Assistant: {response['output']}")
+
+            # Compute emergence scores
+            scores = compute_emergence_scores(memory.storage_manager)
+            ias = scores.get("ias", 0.0)
+            gas = scores.get("gas", 0.0)
+
+            # Get commitment close rate (simplified)
+            close_rate = 0.0  # Would need actual commitment tracking
+
+            telemetry["ias_scores"].append(ias)
+            telemetry["gas_scores"].append(gas)
+            telemetry["close_rates"].append(close_rate)
+
+            print(f"Telemetry: IAS={ias:.3f}, GAS={gas:.3f}, Close={close_rate:.3f}")
+
         except Exception as e:
-            print(f"Error running chat: {e}")
-        
-        # Query probe endpoints
-        print("\n--- PROBE SNAPSHOTS ---")
-        emergence = query_probe("emergence?window=15")
-        autonomy = query_probe("autonomy/status")
-        
-        print(f"Emergence: {emergence}")
-        print(f"Autonomy: {autonomy}")
-        
-        time.sleep(1)  # Brief pause between turns
-    
-    print("\n=== A-SESSION COMPLETE ===")
+            print(f"Error in turn {i+1}: {e}")
+            # Add zero scores for failed turns
+            telemetry["ias_scores"].append(0.0)
+            telemetry["gas_scores"].append(0.0)
+            telemetry["close_rates"].append(0.0)
+
+    print("\n=== SESSION COMPLETE ===")
+    print(f"Final telemetry: {telemetry}")
+
+    # Output telemetry as JSON for the AB test to capture
+    print(f"TELEMETRY_JSON: {json.dumps(telemetry)}")
+
+    return telemetry
+
 
 if __name__ == "__main__":
     run_session()

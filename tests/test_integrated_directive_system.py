@@ -73,8 +73,11 @@ def test_integrated_system():
     )
 
     # Assertions: ensure system produced directives and export/import preserves counts
-    assert summary['statistics']['total_directives'] >= 1
-    assert new_summary['statistics']['total_directives'] == summary['statistics']['total_directives']
+    assert summary["statistics"]["total_directives"] >= 1
+    assert (
+        new_summary["statistics"]["total_directives"]
+        == summary["statistics"]["total_directives"]
+    )
 
 
 def test_classification_accuracy():
@@ -142,10 +145,13 @@ if __name__ == "__main__":
         print("Basic functionality test: PASS")
         test_classification_accuracy()
         print("Classification accuracy test: PASS")
-        print("\n🎉 All tests PASSED! Integrated directive system is working correctly.")
+        print(
+            "\n🎉 All tests PASSED! Integrated directive system is working correctly."
+        )
     except AssertionError as e:
         print(f"\n❌ A test assertion failed: {e}")
     except Exception as e:
         print(f"❌ Test failed with error: {e}")
         import traceback
+
         traceback.print_exc()

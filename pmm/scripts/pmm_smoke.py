@@ -38,6 +38,7 @@ def _c1():
     # Adjust paths/names if your package layout differs
     from pmm.emergence import compute_emergence_scores, detect_stage
     from pmm.atomic_reflection import AtomicReflectionManager
+
     # Non-LARP: assert symbols exist
     assert callable(compute_emergence_scores), "compute_emergence_scores not callable"
     assert callable(detect_stage), "detect_stage not callable"
@@ -89,7 +90,9 @@ def _c4():
     assert getattr(rc, "time_gate", None) is not None, "time_gate missing"
     assert getattr(rc, "turns_gate", None) is not None, "turns_gate missing"
     for v in (rc.time_gate, rc.turns_gate):
-        assert isinstance(v, (int, float)) and v >= 0, "cooldown gates must be non-negative numbers"
+        assert (
+            isinstance(v, (int, float)) and v >= 0
+        ), "cooldown gates must be non-negative numbers"
     return {
         "time_gate": getattr(rc, "time_gate", None),
         "turns_gate": getattr(rc, "turns_gate", None),
@@ -120,7 +123,9 @@ def _c5():
     assert isinstance(ctx, dict)
     # Non-LARP: context should expose emergence signals
     if ctx:
-        assert any(k in ctx for k in ("stage","ias","gas","pmmspec","selfref")), "emergence context missing expected keys"
+        assert any(
+            k in ctx for k in ("stage", "ias", "gas", "pmmspec", "selfref")
+        ), "emergence context missing expected keys"
     return {"has_accessor": has_accessor, "context_keys": sorted(list(ctx.keys()))[:5]}
 
 

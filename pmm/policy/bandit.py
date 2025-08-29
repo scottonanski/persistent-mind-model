@@ -137,8 +137,12 @@ class _BanditCore:
     def select_action(self, context: Dict) -> Tuple[str, float, float, float, bool]:
         """Pick an action. Returns (action, eps_used, q_reflect, q_continue, hot_bias)."""
         policy = self.load_policy()
-        q_reflect = policy.get("reflect_now", _PolicyRow("reflect_now", 0.0, 0, _now_utc())).value
-        q_continue = policy.get("continue", _PolicyRow("continue", 0.0, 0, _now_utc())).value
+        q_reflect = policy.get(
+            "reflect_now", _PolicyRow("reflect_now", 0.0, 0, _now_utc())
+        ).value
+        q_continue = policy.get(
+            "continue", _PolicyRow("continue", 0.0, 0, _now_utc())
+        ).value
 
         eps = float(self._eps)
         hot_bias = False
@@ -173,11 +177,11 @@ class _BanditCore:
         try:
             if action not in ["reflect_now", "continue"]:
                 return
-            
+
             # Step 5: Reward shaping for hot contexts
             original_reward = reward
             hot_strength = context.get("hot_strength", 0.0) if context else 0.0
-            
+
             # Hot context reward shaping
             if hot_strength >= 0.5 and action == "reflect_now":
                 # Boost reflection rewards in hot contexts
@@ -187,7 +191,7 @@ class _BanditCore:
                 # Mild penalty for continuing without reflection in hot contexts
                 hot_penalty = float(os.getenv("PMM_BANDIT_HOT_CONTINUE_PENALTY", "0.1"))
                 reward -= hot_penalty * hot_strength
-            
+
             # Clamp reward after shaping
             if reward < -1.0:
                 reward = -1.0
@@ -228,9 +232,15 @@ class _BanditCore:
             # Telemetry with reflection ID tracking and reward shaping
             if os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on"):
                 reflect_info = f", reflect_id={reflect_id}" if reflect_id else ""
-                shaping_info = f", original_reward={original_reward:.3f}, hot_strength={hot_strength:.3f}" if hot_strength > 0 else ""
-                print(f"[PMM_TELEMETRY] bandit_reward: action={action}, reward={reward:.3f}, horizon={horizon}{reflect_info}{shaping_info}")
-                
+                shaping_info = (
+                    f", original_reward={original_reward:.3f}, hot_strength={hot_strength:.3f}"
+                    if hot_strength > 0
+                    else ""
+                )
+                print(
+                    f"[PMM_TELEMETRY] bandit_reward: action={action}, reward={reward:.3f}, horizon={horizon}{reflect_info}{shaping_info}"
+                )
+
         except Exception:
             # Graceful degradation
             pass
@@ -259,7 +269,9 @@ def select_action(context: Dict, store: Optional[SQLiteStore] = None) -> str:
     return "reflect_now" if action == "reflect_now" else "continue"
 
 
-def select_action_info(context: Dict, store: Optional[SQLiteStore] = None) -> Tuple[str, float, float, float, bool]:
+def select_action_info(
+    context: Dict, store: Optional[SQLiteStore] = None
+) -> Tuple[str, float, float, float, bool]:
     """Select action and return (action, eps, q_reflect, q_continue, hot_bias)."""
     core = _get_core(store)
     action, eps, q_reflect, q_continue, hot_bias = core.select_action(context)
@@ -285,7 +297,9 @@ def load_policy(store: Optional[SQLiteStore] = None) -> Dict[str, Dict[str, floa
     return {k: {"value": v.value, "pulls": v.pulls} for k, v in rows.items()}
 
 
-def save_policy(policy: Dict[str, Dict[str, float]], store: Optional[SQLiteStore] = None) -> None:
+def save_policy(
+    policy: Dict[str, Dict[str, float]], store: Optional[SQLiteStore] = None
+) -> None:
     core = _get_core(store)
     rows: Dict[str, _PolicyRow] = {}
     for a, obj in policy.items():
@@ -309,12 +323,22 @@ def get_status(store: Optional[SQLiteStore] = None) -> Dict[str, float]:
     """Return current epsilon and Qs for probe/telemetry."""
     core = _get_core(store)
     policy = core.load_policy()
-    q_reflect = policy.get("reflect_now", _PolicyRow("reflect_now", 0.0, 0, _now_utc())).value
-    q_continue = policy.get("continue", _PolicyRow("continue", 0.0, 0, _now_utc())).value
-    return {"eps": float(core._eps), "q_reflect": float(q_reflect), "q_continue": float(q_continue)}
+    q_reflect = policy.get(
+        "reflect_now", _PolicyRow("reflect_now", 0.0, 0, _now_utc())
+    ).value
+    q_continue = policy.get(
+        "continue", _PolicyRow("continue", 0.0, 0, _now_utc())
+    ).value
+    return {
+        "eps": float(core._eps),
+        "q_reflect": float(q_reflect),
+        "q_continue": float(q_continue),
+    }
 
 
-def get_winrate_reflect(last_n: int = 50, store: Optional[SQLiteStore] = None) -> Optional[float]:
+def get_winrate_reflect(
+    last_n: int = 50, store: Optional[SQLiteStore] = None
+) -> Optional[float]:
     """Compute rolling acceptance rate for 'reflect_now' over last N outcomes.
 
     Uses bandit_rewards.notes text to detect accepted reflections.
@@ -362,18 +386,20 @@ def _clamp01(x: float) -> float:
     return float(x)
 
 
-def compute_hot_strength(gas: float, close_rate: float, rolling_close_5: Optional[float] = None) -> float:
+def compute_hot_strength(
+    gas: float, close_rate: float, rolling_close_5: Optional[float] = None
+) -> float:
     """Compute hot_strength ∈ [0,1] based on GAS and close rates.
-    
+
     gas_term = clamp((GAS-0.85)/0.10, 0, 1)
     close_term = max(commit_close_rate_15w, rolling_close_5) then clamp((close_term-0.60)/0.20, 0, 1)
     hot_strength = 0.5*gas_term + 0.5*close_term
     """
     gas_term = _clamp01((gas - 0.85) / 0.10)
-    
+
     close_term = max(close_rate, rolling_close_5 or 0.0)
     close_term = _clamp01((close_term - 0.60) / 0.20)
-    
+
     hot_strength = 0.5 * gas_term + 0.5 * close_term
     return _clamp01(hot_strength)
 

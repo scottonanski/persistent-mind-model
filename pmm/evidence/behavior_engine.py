@@ -17,9 +17,18 @@ FILE_RX = re.compile(r"\b[\w/\.-]+\.(py|md|txt|json|yaml|yml|ipynb)\b")
 
 # Identity adoption patterns (e.g., "I am now officially Quest", "my name is now Quest")
 IDENTITY_NAME_RXES: List[re.Pattern] = [
-    re.compile(r"\bmy\s+name\s+is\s+(?:now\s+)?['\"]?(?P<name>[A-Z][\w\- ]{1,40})['\"]?", re.IGNORECASE),
-    re.compile(r"\bi\s*(?:am|'m)\s+now\s+(?:officially\s+)?(?P<name>[A-Z][\w\- ]{1,40})\b", re.IGNORECASE),
-    re.compile(r"\bofficially\s+(?:named|name)\s+['\"]?(?P<name>[A-Z][\w\- ]{1,40})['\"]?", re.IGNORECASE),
+    re.compile(
+        r"\bmy\s+name\s+is\s+(?:now\s+)?['\"]?(?P<name>[A-Z][\w\- ]{1,40})['\"]?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bi\s*(?:am|'m)\s+now\s+(?:officially\s+)?(?P<name>[A-Z][\w\- ]{1,40})\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bofficially\s+(?:named|name)\s+['\"]?(?P<name>[A-Z][\w\- ]{1,40})['\"]?",
+        re.IGNORECASE,
+    ),
 ]
 
 
@@ -90,7 +99,11 @@ def process_reply_for_evidence(smm, reply_text: str) -> Optional[str]:
             except Exception:
                 current_name = ""
 
-            if mapped_commit and identity_name and identity_name.lower() in current_name.lower():
+            if (
+                mapped_commit
+                and identity_name
+                and identity_name.lower() in current_name.lower()
+            ):
                 # Strong evidence — construct evidence content now
                 meta = {"type": "done", "commit_ref": commit_ref}
                 content = {
@@ -100,7 +113,9 @@ def process_reply_for_evidence(smm, reply_text: str) -> Optional[str]:
                     "confidence": 0.9,
                 }
                 res = smm.sqlite_store.append_event(
-                    kind="evidence", content=json.dumps(content, ensure_ascii=False), meta=meta
+                    kind="evidence",
+                    content=json.dumps(content, ensure_ascii=False),
+                    meta=meta,
                 )
                 try:
                     smm.commitment_tracker.close_commitment_with_evidence(

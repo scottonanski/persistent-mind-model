@@ -256,12 +256,16 @@ def test_evolution_pipeline():
 
         # Assertions: verify directives were processed (classification may vary)
         total_directives = (
-            final_summary["meta_principles"]["count"] +
-            final_summary["principles"]["count"] +
-            final_summary["commitments"]["count"]
+            final_summary["meta_principles"]["count"]
+            + final_summary["principles"]["count"]
+            + final_summary["commitments"]["count"]
         )
-        assert total_directives >= 3, f"Expected at least 3 directives, got {total_directives}"
-        assert final_summary["commitments"]["count"] >= 2, "Expected at least 2 commitments"
+        assert (
+            total_directives >= 3
+        ), f"Expected at least 3 directives, got {total_directives}"
+        assert (
+            final_summary["commitments"]["count"] >= 2
+        ), "Expected at least 2 commitments"
 
     except Exception as e:
         print(f"Evolution pipeline test failed: {e}")
