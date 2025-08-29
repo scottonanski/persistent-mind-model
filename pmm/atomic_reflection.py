@@ -132,12 +132,46 @@ class AtomicReflectionManager:
         Returns True if insight was added, False if rejected.
         """
         with self._lock:
+            # Step 3: Check if we're in a hot context and ease gates accordingly
+            hot_context = False
+            hot_strength = 0.0
+            try:
+                from pmm.emergence import compute_emergence_scores
+                em = compute_emergence_scores(window=15, storage_manager=getattr(self.pmm, "sqlite_store", None)) or {}
+                gas_now = float(em.get("GAS", 0.0) or 0.0)
+                close_now = float(em.get("commit_close_rate", 0.0) or 0.0)
+                
+                # Use the same hot_strength computation as bandit
+                from pmm.policy.bandit import compute_hot_strength
+                hot_strength = compute_hot_strength(gas_now, close_now)
+                hot_context = hot_strength >= 0.5
+            except Exception:
+                pass
+            
             # Stage-adapt the effective threshold up front so subsequent dedup logic uses it
             try:
                 self._apply_stage_adaptation()
             except Exception:
                 # Never block on adaptation failures
                 pass
+            
+            # Step 3: Ease dedup floor when hot
+            if hot_context:
+                dedup_floor_hot = float(os.getenv("PMM_REFLECT_DEDUP_FLOOR_HOT", "0.88"))
+                if self._effective_threshold > dedup_floor_hot:
+                    old_threshold = self._effective_threshold
+                    self._effective_threshold = max(dedup_floor_hot, self._min_thresh)
+                    if os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on"):
+                        print(f"[PMM_TELEMETRY] dedup_hot_ease: threshold {old_threshold:.3f} -> {self._effective_threshold:.3f}, hot_strength={hot_strength:.3f}")
+            
+            # Step 3: Check minimum tokens when hot
+            if hot_context:
+                min_tokens_hot = int(os.getenv("PMM_REFLECT_MIN_TOKENS_HOT", "45"))
+                token_count = len(insight_content.split())
+                if token_count < min_tokens_hot:
+                    if os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on"):
+                        print(f"[PMM_TELEMETRY] reflection_attempt: decision=rejected, reason=min_tokens_hot, tokens={token_count}, min_required={min_tokens_hot}, hot_strength={hot_strength:.3f}")
+                    return False
             # Snapshot emergence stage for decision logging
             try:
                 _ctx = self._get_emergence_context()
@@ -148,11 +182,17 @@ class AtomicReflectionManager:
             cleaned_content = self._clean_and_normalize(insight_content)
             if not self._passes_basic_validation(cleaned_content):
                 pmm_dlog("🔍 DEBUG: Insight failed basic validation")
+                # Step 6: Enhanced telemetry for rejection reasons
+                if os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on"):
+                    print(f"[PMM_TELEMETRY] reflection_attempt: decision=rejected, reason=basic_validation, hot_strength={hot_strength:.3f}")
                 return False
 
             # Step 2: Fast text similarity check
             if self._is_duplicate_text(cleaned_content):
                 pmm_dlog("🔍 DEBUG: Insight rejected - duplicate text similarity")
+                # Step 6: Enhanced telemetry for duplicate rejection
+                if os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on"):
+                    print(f"[PMM_TELEMETRY] reflection_attempt: decision=rejected, reason=duplicate_text, hot_strength={hot_strength:.3f}")
                 return False
 
             # Step 2.5: One-shot force-accept override (env-controlled)

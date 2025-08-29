@@ -26,23 +26,10 @@ def test_commitment_detection_fixes():
         "I aim to enhance my creative thinking and provide a more engaging conversational experience.",
     ]
 
-    print("🧪 Testing Improved Commitment Detection")
-    print("=" * 50)
-
-    for i, test_case in enumerate(test_cases, 1):
-        commitment, ngrams = tracker.extract_commitment(test_case)
-
-        print(f"\n**Test Case {i}:**")
-        print(f"Input: {test_case[:100]}...")
-
-        if commitment:
-            print(f"✅ **DETECTED**: {commitment[:80]}...")
-            print(f"   N-grams: {len(ngrams)} generated")
-        else:
-            print("❌ **MISSED**: No commitment detected")
-
-    print("\n" + "=" * 50)
-    print("🎯 Summary: These should ALL be detected now!")
+    for text in test_cases:
+        commitment, _ = tracker.extract_commitment(text)
+        # Each example should be detected as a commitment
+        assert commitment is not None, f"Expected commitment detection for: {text[:80]}..."
 
 
 if __name__ == "__main__":

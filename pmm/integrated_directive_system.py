@@ -57,54 +57,41 @@ class IntegratedDirectiveSystem:
 
         # Create conversation context
         context = ConversationContext(
+            user_message=user_message,
+            ai_response=ai_response,
+            event_id=event_id,
             preceding_user_message=user_message,
             directive_position=self._determine_position(ai_response),
             conversation_phase=self._determine_phase(user_message),
-            user_intent_signals=self._extract_user_intents(user_message),
+            user_intent_signal=", ".join(self._extract_user_intents(user_message)),
         )
 
         # Look for directive patterns in AI response
         directive_candidates = self._extract_directive_candidates(ai_response)
 
         for candidate_text in directive_candidates:
-            # Use enhanced validator for better commitment detection
-            existing_texts = [c["text"] for c in self.commitments.values()]
-            analysis = self.validator.validate_commitment(
-                candidate_text, existing_texts
+            # For directive detection, be more permissive than strict commitment validation
+            # Use the hierarchy's classifier directly for consistency
+            directive = self.hierarchy.add_directive(
+                content=candidate_text, source_event_id=event_id
             )
 
-            if analysis.is_valid:
-                # Classify using adaptive system for hierarchy placement
-                classification, confidence = self.classifier.classify_with_context(
-                    candidate_text, context
-                )
+            if directive:
+                detected_directives.append(directive)
 
-                # Create directive with tier information
-                directive = self.hierarchy.add_directive(
-                    content=candidate_text, source_event_id=event_id
-                )
+                # Persist to storage if available
+                if self.storage:
+                    self._persist_directive(directive, event_id)
 
-                if directive:
-                    # Add tier metadata
-                    directive.tier = analysis.tier.value
-                    directive.validation_confidence = analysis.confidence
-
-                    detected_directives.append(directive)
-
-                    # Persist to storage if available
-                    if self.storage:
-                        self._persist_directive(directive, event_id)
-
-                    # Update legacy interface for backward compatibility
-                    if isinstance(directive, Commitment):
-                        self.commitments[directive.id] = {
-                            "cid": directive.id,
-                            "text": directive.content,
-                            "created_at": directive.created_at,
-                            "status": directive.status,
-                            "tier": analysis.tier.value,
-                            "confidence": analysis.confidence,
-                        }
+                # Update legacy interface for backward compatibility
+                if directive.directive_type == "commitment":
+                    self.commitments[directive.id] = {
+                        "cid": directive.id,
+                        "text": directive.content,
+                        "created_at": directive.created_at,
+                        "status": directive.status,
+                        "confidence": directive.confidence,
+                    }
 
         return detected_directives
 

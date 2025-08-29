@@ -315,3 +315,5 @@ class PersistentMindModel:
     metrics: Metrics = field(default_factory=Metrics)
     drift_config: DriftConfig = field(default_factory=DriftConfig)
     meta_cognition: MetaCognition = field(default_factory=MetaCognition)
+    # Lightweight indices for self-directed development
+    dev_tasks: Dict[str, Any] = field(default_factory=dict)

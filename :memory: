@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "inception_moment": "2025-08-28T00:13:25Z",
+  "inception_moment": "2025-08-29T18:03:34Z",
   "core_identity": {
     "id": "e9062655-73e3-4626-adfe-90d18eda13ad",
-    "name": "Agent-5cbfe208",
+    "name": "Quest",
     "birth_timestamp": "2025-08-26T19:24:39Z",
     "aliases": []
   },
@@ -208,6 +208,66 @@
           "plateau_counter": 0,
           "booster": false
         }
+      },
+      {
+        "id": "ev5",
+        "t": "2025-08-29T02:59:39Z",
+        "type": "identity_change",
+        "summary": "Name changed from 'Agent-5cbfe208' to 'Quest' (origin=test)",
+        "valence": 0.5,
+        "arousal": 0.5,
+        "salience": 0.5,
+        "tags": [],
+        "effects": [],
+        "effects_hypothesis": [],
+        "meta": {
+          "processed": false
+        },
+        "evidence": null
+      },
+      {
+        "id": "ev6",
+        "t": "2025-08-29T18:03:34Z",
+        "type": "autonomy_start",
+        "summary": "Autonomy loop started (interval=300s)",
+        "valence": 0.5,
+        "arousal": 0.5,
+        "salience": 0.5,
+        "tags": [],
+        "effects": [],
+        "effects_hypothesis": [],
+        "meta": {
+          "processed": false
+        },
+        "evidence": null
+      },
+      {
+        "id": "ev7",
+        "t": "2025-08-29T18:03:34Z",
+        "type": "autonomy_tick",
+        "summary": "Autonomy tick: time-gate | IAS=0.274 GAS=0.593",
+        "valence": 0.5,
+        "arousal": 0.5,
+        "salience": 0.5,
+        "tags": [],
+        "effects": [],
+        "effects_hypothesis": [],
+        "meta": {
+          "processed": false
+        },
+        "evidence": {
+          "reason": "time-gate",
+          "reflected": false,
+          "reflection_id": null,
+          "ias": 0.274,
+          "gas": 0.593,
+          "ias_delta": null,
+          "gas_delta": null,
+          "events_analyzed": 15,
+          "stage": "S2: Adoption",
+          "plateau_counter": 0,
+          "booster": false
+        }
       }
     ],
     "thoughts": [],
@@ -239,8 +299,26 @@
   "meta_cognition": {
     "times_accessed_self": 0,
     "self_modification_count": 0,
-    "identity_evolution": [],
+    "identity_evolution": [
+      {
+        "t": "2025-08-29T02:59:39Z",
+        "change": "Name changed from 'Agent-5cbfe208' to 'Quest' (origin=test)"
+      }
+    ],
     "bandit_counts": [],
     "bandit_rewards": []
+  },
+  "dev_tasks": {
+    "dt1": {
+      "task_id": "dt1",
+      "kind": "self_heal",
+      "title": "Reflection nudged (drift recovery)",
+      "ttl": 1.0,
+      "policy": {
+        "origin": "drift_watch"
+      },
+      "status": "open",
+      "created_at": "2025-08-29T18:03:34Z"
+    }
   }
 }

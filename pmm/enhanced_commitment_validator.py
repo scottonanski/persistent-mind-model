@@ -1,329 +1,262 @@
 #!/usr/bin/env python3
 """
-Enhanced commitment validation with tiered approach and relaxed filtering.
-Addresses the over-strict filtering that throttles PMM growth.
+Enhanced commitment validator - validates and tiers commitments with semantic analysis.
+Provides multi-tier validation with duplicate detection and structural analysis.
 """
 
-from typing import List, Dict
+from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+import re
+import difflib
 
 
-class CommitmentTier(Enum):
-    TENTATIVE = "tentative"  # Borderline, needs confirmation
-    CONFIRMED = "confirmed"  # Clear commitment
-    PERMANENT = "permanent"  # Explicitly marked as permanent
+class ValidationTier(Enum):
+    """Validation tiers for commitments."""
+    TENTATIVE = "tentative"
+    CONFIRMED = "confirmed"
+    PERMANENT = "permanent"
 
 
 @dataclass
-class CommitmentAnalysis:
-    """Analysis result for commitment validation."""
-
+class ValidationResult:
+    """Result of commitment validation."""
     is_valid: bool
-    tier: CommitmentTier
-    confidence: float  # 0.0 to 1.0
-    reasoning: List[str]
-    structural_elements: Dict[str, bool]
+    confidence: float
+    tier: ValidationTier
+    reasons: List[str]
+    similarity_score: Optional[float] = None
+    duplicate_of: Optional[str] = None
 
 
 class EnhancedCommitmentValidator:
     """
-    Enhanced validator that uses structural logic instead of brittle patterns.
-    Implements tiered validation with relaxed similarity thresholds.
+    Enhanced commitment validator with semantic analysis and duplicate detection.
+    
+    Validates commitments using:
+    - Structural analysis (actionability, specificity)
+    - Semantic similarity detection for duplicates
+    - Context-aware tiering (tentative/confirmed/permanent)
+    - Pattern-based quality assessment
     """
-
-    def __init__(self):
-        # Relaxed similarity threshold (was 0.92, now 0.95)
-        self.similarity_threshold = 0.95
-
-        # Structural indicators (more flexible than hardcoded patterns)
-        self.ownership_indicators = {
-            "first_person": [
-                "i will",
-                "i shall",
-                "i commit",
-                "i acknowledge",
-                "i aim",
-                "i strive",
-                "my goal",
-            ],
-            "identity_statements": ["i am", "i operate", "i function", "i serve as"],
-            "capability_claims": ["i can", "i have the capacity", "i am designed to"],
-        }
-
-        self.action_indicators = [
-            "will",
-            "shall",
-            "aim to",
-            "strive to",
-            "commit to",
-            "ensure",
-            "provide",
-            "maintain",
-            "adapt",
-            "learn",
-            "reflect",
-            "analyze",
-            "identify",
-            "foster",
+    
+    def __init__(self, similarity_threshold: float = 0.85):
+        self.validation_history = []
+        self.similarity_threshold = similarity_threshold
+        
+        # Patterns for commitment quality assessment
+        self.actionable_patterns = [
+            r'\b(?:will|shall|commit to|promise to|aim to)\b',
+            r'\b(?:deliver|complete|finish|accomplish|achieve)\b',
+            r'\b(?:create|build|develop|implement|design)\b',
+            r'\b(?:analyze|review|evaluate|assess|examine)\b'
         ]
-
-        self.temporal_indicators = [
-            "over time",
-            "in the future",
-            "going forward",
-            "from now on",
-            "continuously",
-            "ongoing",
-            "always",
-            "whenever",
-            "as needed",
+        
+        self.specific_patterns = [
+            r'\b(?:by|before|within|until|on)\s+\w+',  # Time specificity
+            r'\b(?:\d+|one|two|three|four|five)\b',     # Quantity specificity
+            r'\b(?:exactly|specifically|precisely)\b',   # Explicit specificity
+            r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b'      # Proper nouns (specific entities)
         ]
-
-        # Permanent commitment markers
-        self.permanence_markers = [
-            "permanent",
-            "always",
-            "core principle",
-            "fundamental",
-            "guiding principle",
-            "meta-principle",
-            "baseline",
-            "foundation",
-            "identity",
-            "define",
+        
+        self.vague_patterns = [
+            r'\b(?:maybe|perhaps|might|could|possibly)\b',
+            r'\b(?:try to|attempt to|hope to|wish to)\b',
+            r'\b(?:generally|usually|typically|often)\b',
+            r'\b(?:something|anything|whatever|somehow)\b'
         ]
-
-    def validate_commitment(
-        self, text: str, existing_commitments: List[str] = None
-    ) -> CommitmentAnalysis:
+    
+    def validate_commitment(self, text: str, existing_commitments: List[str]) -> ValidationResult:
         """
-        Enhanced validation using structural analysis instead of brittle patterns.
-
+        Validate a commitment text against quality criteria and existing commitments.
+        
         Args:
-            text: Text to analyze for commitment
-            existing_commitments: List of existing commitment texts for similarity check
-
+            text: Commitment text to validate
+            existing_commitments: List of existing commitment texts
+            
         Returns:
-            CommitmentAnalysis with tier, confidence, and reasoning
+            ValidationResult with detailed validation analysis
         """
-        text_lower = text.lower().strip()
-
-        # Skip very short texts
-        if len(text) < 20:
-            return CommitmentAnalysis(
+        text = text.strip()
+        reasons = []
+        
+        # Basic length and structure checks
+        if len(text) < 15:
+            return ValidationResult(
                 is_valid=False,
-                tier=CommitmentTier.TENTATIVE,
-                confidence=0.0,
-                reasoning=["Text too short to be meaningful commitment"],
-                structural_elements={},
+                confidence=0.1,
+                tier=ValidationTier.TENTATIVE,
+                reasons=["Text too short (minimum 15 characters)"]
             )
-
-        # Analyze structural elements
-        elements = self._analyze_structural_elements(text_lower)
-        confidence = self._calculate_confidence(elements)
-        reasoning = self._generate_reasoning(elements)
-
-        # Determine tier based on confidence and permanence markers
-        tier = self._determine_tier(text_lower, confidence)
-
-        # Check similarity only for high-confidence commitments
-        if confidence > 0.7 and existing_commitments:
-            similarity_score = self._check_similarity(text, existing_commitments)
-            if similarity_score > self.similarity_threshold:
-                return CommitmentAnalysis(
-                    is_valid=False,
-                    tier=CommitmentTier.TENTATIVE,
-                    confidence=confidence * 0.5,  # Reduce confidence but don't reject
-                    reasoning=reasoning
-                    + [
-                        f"High similarity to existing commitment: {similarity_score:.3f}"
-                    ],
-                    structural_elements=elements,
-                )
-
-        # Accept if confidence is reasonable
-        is_valid = confidence >= 0.3  # Lowered threshold from typical 0.5
-
-        return CommitmentAnalysis(
+        
+        if len(text) > 500:
+            reasons.append("Text very long - may need refinement")
+        
+        # Check for actionability
+        actionable_score = self._calculate_pattern_score(text, self.actionable_patterns)
+        if actionable_score == 0:
+            reasons.append("No clear actionable language detected")
+        else:
+            reasons.append(f"Actionable language detected (score: {actionable_score:.2f})")
+        
+        # Check for specificity
+        specific_score = self._calculate_pattern_score(text, self.specific_patterns)
+        vague_score = self._calculate_pattern_score(text, self.vague_patterns)
+        
+        if specific_score > 0:
+            reasons.append(f"Specific elements detected (score: {specific_score:.2f})")
+        if vague_score > 0:
+            reasons.append(f"Vague language detected (score: {vague_score:.2f})")
+        
+        # Check for duplicates
+        duplicate_info = self._check_duplicates(text, existing_commitments)
+        if duplicate_info["is_duplicate"]:
+            return ValidationResult(
+                is_valid=False,
+                confidence=0.2,
+                tier=ValidationTier.TENTATIVE,
+                reasons=[f"Duplicate of existing commitment (similarity: {duplicate_info['similarity']:.2f})"],
+                similarity_score=duplicate_info["similarity"],
+                duplicate_of=duplicate_info["duplicate_text"]
+            )
+        
+        # Calculate overall quality score
+        quality_score = self._calculate_quality_score(actionable_score, specific_score, vague_score, len(text))
+        
+        # Determine tier and validity
+        if quality_score >= 0.8:
+            tier = ValidationTier.PERMANENT
+            is_valid = True
+            confidence = min(0.95, quality_score)
+        elif quality_score >= 0.6:
+            tier = ValidationTier.CONFIRMED
+            is_valid = True
+            confidence = quality_score
+        elif quality_score >= 0.4:
+            tier = ValidationTier.TENTATIVE
+            is_valid = True
+            confidence = quality_score
+        else:
+            tier = ValidationTier.TENTATIVE
+            is_valid = False
+            confidence = quality_score
+        
+        reasons.append(f"Overall quality score: {quality_score:.2f}")
+        
+        result = ValidationResult(
             is_valid=is_valid,
-            tier=tier,
             confidence=confidence,
-            reasoning=reasoning,
-            structural_elements=elements,
+            tier=tier,
+            reasons=reasons,
+            similarity_score=duplicate_info.get("max_similarity", 0.0)
         )
-
-    def _analyze_structural_elements(self, text_lower: str) -> Dict[str, bool]:
-        """Analyze structural elements that indicate commitment."""
-        elements = {
-            "has_ownership": False,
-            "has_action": False,
-            "has_temporal": False,
-            "has_context": False,
-            "is_identity_statement": False,
-            "is_capability_claim": False,
-            "has_permanence_marker": False,
-        }
-
-        # Check ownership (first person indicators)
-        for category, indicators in self.ownership_indicators.items():
-            if any(indicator in text_lower for indicator in indicators):
-                elements["has_ownership"] = True
-                if category == "identity_statements":
-                    elements["is_identity_statement"] = True
-                elif category == "capability_claims":
-                    elements["is_capability_claim"] = True
-                break
-
-        # Check action indicators
-        elements["has_action"] = any(
-            action in text_lower for action in self.action_indicators
-        )
-
-        # Check temporal indicators
-        elements["has_temporal"] = any(
-            temporal in text_lower for temporal in self.temporal_indicators
-        )
-
-        # Check context (meaningful content beyond just patterns)
-        elements["has_context"] = len(text_lower.split()) > 8  # More than 8 words
-
-        # Check permanence markers
-        elements["has_permanence_marker"] = any(
-            marker in text_lower for marker in self.permanence_markers
-        )
-
-        return elements
-
-    def _calculate_confidence(self, elements: Dict[str, bool]) -> float:
-        """Calculate confidence score based on structural elements."""
+        
+        # Record validation for learning
+        self.validation_history.append({
+            "text": text,
+            "result": result,
+            "existing_count": len(existing_commitments),
+            "quality_score": quality_score,
+            "actionable_score": actionable_score,
+            "specific_score": specific_score,
+            "vague_score": vague_score
+        })
+        
+        return result
+    
+    def _calculate_pattern_score(self, text: str, patterns: List[str]) -> float:
+        """Calculate score based on pattern matches."""
         score = 0.0
-
-        # Core elements (required for basic commitment)
-        if elements["has_ownership"]:
-            score += 0.3
-        if elements["has_action"]:
-            score += 0.2
-        if elements["has_context"]:
-            score += 0.2
-
-        # Bonus elements
-        if elements["has_temporal"]:
-            score += 0.1
-        if elements["is_identity_statement"]:
-            score += 0.15  # Identity statements are strong commitments
-        if elements["is_capability_claim"]:
-            score += 0.1
-        if elements["has_permanence_marker"]:
-            score += 0.2  # Permanent commitments get bonus
-
-        return min(1.0, score)
-
-    def _determine_tier(self, text_lower: str, confidence: float) -> CommitmentTier:
-        """Determine commitment tier based on content and confidence."""
-
-        # Permanent tier for explicit permanence markers
-        if any(marker in text_lower for marker in self.permanence_markers):
-            return CommitmentTier.PERMANENT
-
-        # Confirmed tier for high confidence
-        if confidence >= 0.7:
-            return CommitmentTier.CONFIRMED
-
-        # Tentative for lower confidence
-        return CommitmentTier.TENTATIVE
-
-    def _generate_reasoning(self, elements: Dict[str, bool]) -> List[str]:
-        """Generate human-readable reasoning for the validation decision."""
-        reasoning = []
-
-        if elements["has_ownership"]:
-            reasoning.append("Contains first-person ownership indicators")
-        if elements["has_action"]:
-            reasoning.append("Contains action/intention indicators")
-        if elements["has_temporal"]:
-            reasoning.append("Contains temporal/future indicators")
-        if elements["has_context"]:
-            reasoning.append("Has sufficient contextual content")
-        if elements["is_identity_statement"]:
-            reasoning.append("Contains identity/self-definition statements")
-        if elements["has_permanence_marker"]:
-            reasoning.append("Contains permanence/principle markers")
-
-        if not reasoning:
-            reasoning.append("No clear commitment indicators found")
-
-        return reasoning
-
-    def _check_similarity(self, text: str, existing_commitments: List[str]) -> float:
-        """
-        Simple similarity check using word overlap.
-        In production, this could use embeddings for better accuracy.
-        """
+        text_lower = text.lower()
+        
+        for pattern in patterns:
+            matches = len(re.findall(pattern, text_lower, re.IGNORECASE))
+            score += matches * 0.2  # Each match adds 0.2
+        
+        return min(1.0, score)  # Cap at 1.0
+    
+    def _check_duplicates(self, text: str, existing_commitments: List[str]) -> Dict[str, Any]:
+        """Check for duplicate commitments using similarity analysis."""
         if not existing_commitments:
-            return 0.0
-
-        text_words = set(text.lower().split())
+            return {"is_duplicate": False, "similarity": 0.0, "max_similarity": 0.0}
+        
+        text_normalized = self._normalize_text(text)
         max_similarity = 0.0
-
+        most_similar_text = None
+        
         for existing in existing_commitments:
-            existing_words = set(existing.lower().split())
-
-            if not text_words or not existing_words:
-                continue
-
-            intersection = len(text_words & existing_words)
-            union = len(text_words | existing_words)
-
-            if union > 0:
-                similarity = intersection / union
-                max_similarity = max(max_similarity, similarity)
-
-        return max_similarity
-
-    def should_revisit_tentative(self, commitment_age_hours: float) -> bool:
-        """
-        Determine if a tentative commitment should be revisited for promotion.
-        """
-        # Revisit tentative commitments after 24 hours
-        return commitment_age_hours >= 24.0
-
-
-# Example usage and test cases
-def test_enhanced_validator():
-    """Test the enhanced validator with various commitment types."""
-
-    validator = EnhancedCommitmentValidator()
-
-    test_cases = [
-        # Clear commitments
-        "I will analyze past conversations to identify patterns and improve my responses.",
-        "I commit to being more proactive by asking follow-up questions.",
-        # Identity statements (should be captured)
-        "I am a reflective assistant designed to provide thoughtful dialogue.",
-        "I operate under a framework that allows me to remember past interactions.",
-        # Permanence markers
-        "I acknowledge honesty as a permanent guiding principle.",
-        "This meta-principle will guide how I form future commitments.",
-        # Borderline cases
-        "Thank you for the feedback.",  # Should be rejected
-        "I understand your point about recursive reflection.",  # Borderline
-        # Complex self-reflection (should be captured)
-        "Based on our interactions, I can summarize what I am now as a supportive entity that aims to foster positive outcomes.",
-    ]
-
-    print("Enhanced Commitment Validator Test Results:")
-    print("=" * 60)
-
-    for i, text in enumerate(test_cases, 1):
-        analysis = validator.validate_commitment(text)
-
-        print(f"\nTest {i}: {text[:50]}...")
-        print(f"Valid: {analysis.is_valid}")
-        print(f"Tier: {analysis.tier.value}")
-        print(f"Confidence: {analysis.confidence:.3f}")
-        print(f"Reasoning: {', '.join(analysis.reasoning)}")
-
-
-if __name__ == "__main__":
-    test_enhanced_validator()
+            existing_normalized = self._normalize_text(existing)
+            similarity = difflib.SequenceMatcher(None, text_normalized, existing_normalized).ratio()
+            
+            if similarity > max_similarity:
+                max_similarity = similarity
+                most_similar_text = existing
+        
+        is_duplicate = max_similarity >= self.similarity_threshold
+        
+        return {
+            "is_duplicate": is_duplicate,
+            "similarity": max_similarity,
+            "duplicate_text": most_similar_text if is_duplicate else None,
+            "max_similarity": max_similarity
+        }
+    
+    def _normalize_text(self, text: str) -> str:
+        """Normalize text for similarity comparison."""
+        # Convert to lowercase and remove extra whitespace
+        normalized = re.sub(r'\s+', ' ', text.lower().strip())
+        
+        # Remove common commitment prefixes that don't affect meaning
+        prefixes = [
+            r'^i\s+(?:will|shall|commit\s+to|promise\s+to|aim\s+to)\s+',
+            r'^next,?\s+i\s+will\s+',
+            r'^i\s+acknowledge\s+that\s+i\s+will\s+'
+        ]
+        
+        for prefix in prefixes:
+            normalized = re.sub(prefix, '', normalized)
+        
+        return normalized.strip()
+    
+    def _calculate_quality_score(self, actionable: float, specific: float, vague: float, length: int) -> float:
+        """Calculate overall quality score for commitment."""
+        # Base score from actionability and specificity
+        base_score = (actionable * 0.6) + (specific * 0.3)
+        
+        # Penalty for vague language
+        vague_penalty = vague * 0.2
+        
+        # Length bonus/penalty
+        length_factor = 1.0
+        if length < 30:
+            length_factor = 0.8  # Too short
+        elif length > 200:
+            length_factor = 0.9  # Too long
+        elif 50 <= length <= 150:
+            length_factor = 1.1  # Good length
+        
+        # Calculate final score
+        final_score = (base_score - vague_penalty) * length_factor
+        
+        return max(0.0, min(1.0, final_score))
+    
+    def get_validation_stats(self) -> Dict[str, Any]:
+        """Get comprehensive statistics about validation performance."""
+        if not self.validation_history:
+            return {"total_validations": 0}
+        
+        valid_count = sum(1 for item in self.validation_history if item["result"].is_valid)
+        tier_counts = {}
+        
+        for item in self.validation_history:
+            tier = item["result"].tier.value
+            tier_counts[tier] = tier_counts.get(tier, 0) + 1
+        
+        return {
+            "total_validations": len(self.validation_history),
+            "validation_rate": valid_count / len(self.validation_history),
+            "average_confidence": sum(item["result"].confidence for item in self.validation_history) / len(self.validation_history),
+            "average_quality_score": sum(item["quality_score"] for item in self.validation_history) / len(self.validation_history),
+            "tier_distribution": tier_counts,
+            "duplicate_detection_rate": sum(1 for item in self.validation_history if item["result"].duplicate_of) / len(self.validation_history)
+        }

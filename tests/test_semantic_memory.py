@@ -45,12 +45,9 @@ def test_embedding_generation():
         for i, (inp, out) in enumerate(zip(test_inputs, test_outputs)):
             memory.save_context(inputs={"input": inp}, outputs={"response": out})
 
-        # Check that events have embeddings
+        # Check that events have embeddings (user inputs embed synchronously)
         events_with_embeddings = memory.pmm.sqlite_store.get_events_with_embeddings()
-
-        if not events_with_embeddings:
-            print("❌ No events with embeddings found")
-            return False
+        assert events_with_embeddings, "No events with embeddings found"
 
         print(f"✅ Generated embeddings for {len(events_with_embeddings)} events")
 
@@ -63,10 +60,7 @@ def test_embedding_generation():
                 if len(embedding_array) > 0:
                     print(f"✅ Embedding shape: {embedding_array.shape}")
                 else:
-                    print("❌ Empty embedding array")
-                    return False
-
-        return True
+                    raise AssertionError("Empty embedding array")
 
 
 def test_semantic_search():
@@ -116,9 +110,7 @@ def test_semantic_search():
             query_embedding, limit=3
         )
 
-        if not similar_events:
-            print("❌ No similar events found")
-            return False
+        assert similar_events, "No similar events found"
 
         print(f"✅ Found {len(similar_events)} semantically similar events")
 
@@ -140,11 +132,7 @@ def test_semantic_search():
                 print(f"✅ AI-related content found: {content[:50]}...")
                 break
 
-        if not ai_related_found:
-            print("❌ Expected AI-related content not found in top results")
-            return False
-
-        return True
+        assert ai_related_found, "Expected AI-related content not found in top results"
 
 
 def test_hybrid_memory_retrieval():
@@ -179,9 +167,7 @@ def test_hybrid_memory_retrieval():
 
         history = memory_vars.get("history", "")
 
-        if not history:
-            print("❌ No history loaded")
-            return False
+        assert history, "No history loaded"
 
         print(f"✅ Loaded memory context ({len(history)} characters)")
 
@@ -191,9 +177,7 @@ def test_hybrid_memory_retrieval():
             1 for term in programming_terms if term.lower() in history.lower()
         )
 
-        if programming_mentions == 0:
-            print("❌ No programming-related content found in memory context")
-            return False
+        assert programming_mentions > 0, "No programming-related content found in memory context"
 
         print(
             f"✅ Found {programming_mentions} programming-related mentions in context"
@@ -207,7 +191,7 @@ def test_hybrid_memory_retrieval():
                 "⚠️  No semantic relevance markers found (may be expected if no embeddings)"
             )
 
-        return True
+        # Passes if assertions above hold
 
 
 def test_context_improvement():
@@ -272,13 +256,10 @@ def test_context_improvement():
         print(f"✅ Baseline mentions: {baseline_mentions}")
         print(f"✅ Semantic mentions: {semantic_mentions}")
 
-        # Semantic search should find more relevant content
-        if semantic_mentions >= baseline_mentions:
-            print("✅ Semantic search maintained or improved relevance")
-            return True
-        else:
-            print("⚠️  Semantic search may need tuning")
-            return True  # Still pass as implementation is working
+        # Semantic search should find more relevant content (or at least not worse)
+        assert (
+            semantic_mentions >= baseline_mentions
+        ), "Semantic memory did not improve relevance"
 
 
 def main():
@@ -295,21 +276,18 @@ def main():
     passed = 0
     for test in tests:
         try:
-            if test():
-                passed += 1
+            test()
+            passed += 1
             print()
-        except Exception as e:
-            print(f"❌ Test {test.__name__} failed with exception: {e}")
+        except AssertionError as e:
+            print(f"❌ Test {test.__name__} failed: {e}")
             print()
 
     print(f"📊 Results: {passed}/{len(tests)} tests passed")
-
     if passed == len(tests):
         print("🎉 Semantic memory search implementation validated!")
-        return True
     else:
         print("⚠️  Some tests failed - implementation needs attention")
-        return False
 
 
 if __name__ == "__main__":

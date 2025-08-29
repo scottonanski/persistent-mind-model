@@ -109,7 +109,8 @@ def test_real_conversation_examples():
         print(f"Total directives stored: {len(stored_directives)}")
 
         storage.close()
-        return correct / total >= 0.8  # 80% accuracy threshold
+        # Assertions: minimum accuracy threshold
+        assert correct / total >= 0.8  # 80% accuracy threshold
 
     except Exception as e:
         print(f"Test failed: {e}")
@@ -125,7 +126,11 @@ def test_real_conversation_examples():
 
 
 if __name__ == "__main__":
-    success = test_real_conversation_examples()
+    try:
+        test_real_conversation_examples()
+        success = True
+    except AssertionError:
+        success = False
     print(f"\nTest {'PASSED' if success else 'FAILED'}")
 
     if success:

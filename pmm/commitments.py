@@ -950,15 +950,16 @@ class CommitmentTracker:
 
         # Require artifact for 'done' evidence when configured
         try:
+            # Default OFF for chat-only autonomy (no file writes required)
             require_art = str(
-                os.environ.get("PMM_REQUIRE_EVIDENCE_ARTIFACT", "1")
+                os.environ.get("PMM_REQUIRE_EVIDENCE_ARTIFACT", "0")
             ).lower() in (
                 "1",
                 "true",
                 "yes",
             )
         except Exception:
-            require_art = True
+            require_art = False
         if require_art and not artifact:
             print(
                 "[PMM_EVIDENCE] missing artifact: not closing without artifact when required"

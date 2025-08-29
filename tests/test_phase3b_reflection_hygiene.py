@@ -59,18 +59,14 @@ def test_insight_validation():
             ("Next, I plan to focus on better communication.", False),
         ]
 
-        passed = 0
         for content, expected_accepted in test_cases:
             is_accepted, refs = _validate_insight_references(content, mgr)
-            status = "✅ PASS" if is_accepted == expected_accepted else "❌ FAIL"
             print(
-                f"  {status} '{content[:50]}...' -> Accepted: {is_accepted}, Refs: {refs}"
+                f"  '{content[:50]}...' -> Accepted: {is_accepted}, Refs: {refs}"
             )
-            if is_accepted == expected_accepted:
-                passed += 1
-
-        print(f"📊 Validation Tests: {passed}/{len(test_cases)} passed")
-        return passed == len(test_cases)
+            assert (
+                is_accepted == expected_accepted
+            ), f"Unexpected acceptance for: {content}"
 
     finally:
         os.unlink(temp_path)
@@ -93,7 +89,10 @@ def test_accepted_vs_inert_insights():
         mock_llm = Mock(spec=OpenAIAdapter)
 
         # Test 1: Insight WITH references (should be accepted)
-        mock_llm.chat.return_value = "Based on event ev1, I see improvement in my responses. Next, I will focus on clarity."
+        mock_llm.chat.return_value = (
+            "Based on event ev1, I see improvement in my responses.\n"
+            "Next: I will focus on clarity within 1 day."
+        )
 
         # initial_insights = len(mgr.model.self_knowledge.insights)  # Not used
         initial_mod_count = mgr.model.meta_cognition.self_modification_count
@@ -124,16 +123,10 @@ def test_accepted_vs_inert_insights():
         )
 
         # Validate results
-        success = (
-            is_accepted1  # First insight should be accepted
-            and not is_accepted2  # Second insight should be inert
-            and new_mod_count1 > initial_mod_count  # First should increment mod count
-            and new_mod_count2
-            == new_mod_count1  # Second should NOT increment mod count
-        )
-
-        print(f"📊 Accepted vs Inert Test: {'✅ PASS' if success else '❌ FAIL'}")
-        return success
+        assert is_accepted1 is True
+        assert is_accepted2 is False
+        assert new_mod_count1 > initial_mod_count
+        assert new_mod_count2 == new_mod_count1
 
     finally:
         os.unlink(temp_path)
@@ -174,16 +167,10 @@ def test_drift_gating():
         # Try to apply drift - should proceed
         drift_result2 = mgr.apply_drift_and_save()
 
-        success = (
-            len(drift_result1) == 0  # No drift with inert insights
-            and len(drift_result2) >= 0  # Drift allowed with accepted insights
-        )
-
-        print(f"📊 Drift Gating Test: {'✅ PASS' if success else '❌ FAIL'}")
+        assert len(drift_result1) == 0
+        assert len(drift_result2) >= 0
         print(f"  🚫 Inert insight drift result: {len(drift_result1)} changes")
         print(f"  ✅ Accepted insight drift result: {len(drift_result2)} changes")
-
-        return success
 
     finally:
         os.unlink(temp_path)
@@ -206,10 +193,10 @@ def main():
     passed = 0
     for test in tests:
         try:
-            if test():
-                passed += 1
-        except Exception as e:
-            print(f"❌ Test {test.__name__} failed with error: {e}")
+            test()
+            passed += 1
+        except AssertionError as e:
+            print(f"❌ Test {test.__name__} failed with assertion: {e}")
 
     print("\n" + "=" * 50)
     print(f"🏁 Phase 3B Test Results: {passed}/{len(tests)} tests passed")

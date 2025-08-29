@@ -292,8 +292,9 @@ class EmergenceAnalyzer:
         Compute the fraction of the most recent `window` commitments that have
         at least one evidence event referencing their hash via meta.commit_ref.
         """
-        # 1) Pull the most recent N commitments (newest first)
-        commits = self._fetch_rows(
+        # 1) Pull the most recent N commitments (newest first). Include both
+        #    generic commitments and identity-style 'commitment.open' rows.
+        commits_generic = self._fetch_rows(
             """
             SELECT id, ts, kind, content, meta, prev_hash, hash
             FROM events
@@ -303,14 +304,30 @@ class EmergenceAnalyzer:
             """,
             (int(window),),
         )
-        if not commits:
+        commits_identity = self._fetch_rows(
+            """
+            SELECT id, ts, kind, content, meta, prev_hash, hash
+            FROM events
+            WHERE kind='commitment.open'
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(window),),
+        )
+        # Merge by recency and cap to window
+        commits_all = sorted(
+            list(commits_generic) + list(commits_identity), key=lambda r: r[0], reverse=True
+        )[: int(window)]
+        if not commits_all:
             return 0.0
 
-        # 2) Build a set of hashes for these commitments
-        commit_hashes = {row[6] for row in commits if row and len(row) >= 7}
+        # 2) Build a set/list of hashes for these commitments
+        commit_hashes = {row[6] for row in commits_all if row and len(row) >= 7}
+        commit_hash_list = list(commit_hashes)
 
         # 3) Pull evidence rows that reference any of those hashes
         #    We scan recent evidence first to avoid full-table scan
+        scan_limit = max(500, window * 5)
         evidence_rows = self._fetch_rows(
             """
             SELECT id, ts, kind, content, meta, prev_hash, hash
@@ -319,19 +336,71 @@ class EmergenceAnalyzer:
             ORDER BY id DESC
             LIMIT ?
             """,
-            (max(500, window * 5),),  # heuristic
+            (scan_limit,),
         )
 
         closed = set()
+        # A) Canonical evidence rows with top-level meta.commit_ref
         for row in evidence_rows:
             meta = row[4]
             try:
                 m = json.loads(meta) if isinstance(meta, str) else (meta or {})
             except Exception:
                 m = {}
-            ref = m.get("commit_ref")
-            if ref and ref in commit_hashes:
+            ref = (m or {}).get("commit_ref")
+            if not ref:
+                continue
+            if ref in commit_hashes:
                 closed.add(ref)
+                continue
+            # Allow short-hash prefixes (e.g., first 8-16 hex chars)
+            try:
+                for h in commit_hash_list:
+                    if isinstance(ref, str) and isinstance(h, str) and h.startswith(ref):
+                        closed.add(h)
+                        break
+            except Exception:
+                pass
+
+        # B) Back-compat: some evidence is logged as kind='event' with meta.type like 'evidence:*'
+        #    and nested commit_ref under meta.evidence.commit_ref. Include those too.
+        event_rows = self._fetch_rows(
+            """
+            SELECT id, ts, kind, content, meta, prev_hash, hash
+            FROM events
+            WHERE kind='event'
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (scan_limit,),
+        )
+        for row in event_rows:
+            meta = row[4]
+            try:
+                m = json.loads(meta) if isinstance(meta, str) else (meta or {})
+            except Exception:
+                m = {}
+            t = (m or {}).get("type", "")
+            if not (isinstance(t, str) and t.startswith("evidence")):
+                continue
+            # Prefer top-level commit_ref if present, else nested under 'evidence'
+            ref = (m or {}).get("commit_ref")
+            if not ref:
+                ev = (m or {}).get("evidence")
+                if isinstance(ev, dict):
+                    ref = ev.get("commit_ref")
+            if not ref:
+                continue
+            if ref in commit_hashes:
+                closed.add(ref)
+                continue
+            try:
+                for h in commit_hash_list:
+                    if isinstance(ref, str) and isinstance(h, str) and h.startswith(ref):
+                        closed.add(h)
+                        break
+            except Exception:
+                pass
 
         # 4) Rate = closed / total in the window
         total = len(commit_hashes)
@@ -532,6 +601,42 @@ class EmergenceAnalyzer:
             # Standard weighting
             IAS = 0.6 * pmmspec_avg + 0.4 * selfref_avg
 
+        # Optional IAS lift when identity evidence is present
+        identity_boost = 0.0
+        identity_signal_count = 0
+        try:
+            use_extended = str(os.getenv("PMM_IAS_IDENTITY_EXTENDED", "0")).lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+            scan = all_events if all_events else events
+            if use_extended:
+                # Per-signal accumulation with cap and optional commit bonus
+                try:
+                    mult = float(os.getenv("PMM_IAS_IDENTITY_EVIDENCE_MULT", "0.02"))
+                except Exception:
+                    mult = 0.02
+                try:
+                    cap = float(os.getenv("PMM_IAS_IDENTITY_MAX_BOOST", "0.12"))
+                except Exception:
+                    cap = 0.12
+                try:
+                    cbonus = float(os.getenv("PMM_IAS_ID_COMMIT_BONUS", "0.03"))
+                except Exception:
+                    cbonus = 0.03
+                identity_signal_count = self._count_identity_signals(scan, window=min(window_env, 15))
+                identity_boost = min(identity_signal_count * mult, cap)
+                if self._has_open_identity_commit(scan, window=min(window_env, 15)):
+                    identity_boost = min(identity_boost + cbonus, cap)
+            else:
+                # Conservative single-step boost
+                identity_boost = float(self._compute_identity_boost(all_events))
+        except Exception:
+            identity_boost = 0.0
+        if identity_boost > 0:
+            IAS = min(1.0, IAS + identity_boost)
+
         # Detect stage using adaptive thresholds
         stage, stage_confidence = self._adaptive_detector.detect_stage_transition(
             ias_score=IAS, gas_score=GAS, content_metrics=semantic_metrics
@@ -550,6 +655,9 @@ class EmergenceAnalyzer:
             "timestamp": datetime.now().isoformat(),
             "events_analyzed": len(events),
             "kinds_considered": kinds,
+            "identity_evidence": bool(identity_boost > 0),
+            "identity_signal_count": int(identity_signal_count),
+            "identity_boost_applied": round(identity_boost, 3),
             "adaptive_metrics": {
                 "content_complexity": round(content_complexity, 3),
                 "behavioral_change": round(behavioral_change, 3),
@@ -591,8 +699,41 @@ class EmergenceAnalyzer:
         commit_rate = self.commitment_close_rate(window_env)
         hint_rate = self.provisional_hint_rate(window_env)
 
-        # Calculate composite scores
-        IAS = 0.6 * pmmspec_avg + 0.4 * selfref_avg
+        # Calculate composite IAS
+        base_IAS = 0.6 * pmmspec_avg + 0.4 * selfref_avg
+
+        # Optional IAS lift when identity evidence is present (extended mode behind env)
+        identity_boost = 0.0
+        identity_signal_count = 0
+        try:
+            use_extended = str(os.getenv("PMM_IAS_IDENTITY_EXTENDED", "0")).lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+            scan = all_events if all_events else events
+            if use_extended:
+                try:
+                    mult = float(os.getenv("PMM_IAS_IDENTITY_EVIDENCE_MULT", "0.02"))
+                except Exception:
+                    mult = 0.02
+                try:
+                    cap = float(os.getenv("PMM_IAS_IDENTITY_MAX_BOOST", "0.12"))
+                except Exception:
+                    cap = 0.12
+                try:
+                    cbonus = float(os.getenv("PMM_IAS_ID_COMMIT_BONUS", "0.03"))
+                except Exception:
+                    cbonus = 0.03
+                identity_signal_count = self._count_identity_signals(scan, window=min(window_env, 15))
+                identity_boost = min(identity_signal_count * mult, cap)
+                if self._has_open_identity_commit(scan, window=min(window_env, 15)):
+                    identity_boost = min(identity_boost + cbonus, cap)
+            else:
+                identity_boost = float(self._compute_identity_boost(all_events))
+        except Exception:
+            identity_boost = 0.0
+        IAS = max(0.0, min(1.0, base_IAS + identity_boost))
 
         # Adaptive GAS weighting based on novelty level
         base_w_exp = 0.5
@@ -637,7 +778,7 @@ class EmergenceAnalyzer:
         )
 
         # Detect stage using legacy hardcoded thresholds
-        stage = self.detect_stage(IAS, GAS)
+        stage = self.detect_stage(IAS, GAS, any(exp_detects), pmmspec_avg, selfref_avg)
 
         result = {
             "IAS": round(IAS, 3),
@@ -651,6 +792,9 @@ class EmergenceAnalyzer:
             "timestamp": datetime.now().isoformat(),
             "events_analyzed": len(events),
             "kinds_considered": kinds,
+            "identity_evidence": bool(identity_boost > 0),
+            "identity_signal_count": int(identity_signal_count),
+            "identity_boost_applied": round(identity_boost, 3),
         }
 
         if telemetry_on:
@@ -659,6 +803,107 @@ class EmergenceAnalyzer:
             )
 
         return result
+
+    # --------------------
+    # Identity signal helpers (extended mode)
+    # --------------------
+    def _count_identity_signals(self, events: List[EmergenceEvent], window: int = 15) -> int:
+        """Count recent identity-like signals in the last `window` events.
+
+        Signals include tags containing 'identity' or regex matches in content.
+        """
+        if not events:
+            return 0
+        id_rx = re.compile(
+            r"\b(my name is|i am\s+\w+|identity confirm|identity:|i am quest|name is)\b",
+            re.IGNORECASE,
+        )
+        tail = events[-window:]
+        cnt = 0
+        for e in tail:
+            try:
+                text = (e.content or "")
+                tags = (e.meta or {}).get("tags", [])
+                kind = (e.kind or "").lower()
+            except Exception:
+                text, tags, kind = "", [], ""
+            if kind in (
+                "evidence",
+                "event",
+                "response",
+                "self_expression",
+                "commitment",
+                "commitment.open",
+            ):
+                if ("identity" in tags) or id_rx.search(text):
+                    cnt += 1
+        return cnt
+
+    def _has_open_identity_commit(self, events: List[EmergenceEvent], window: int = 15) -> bool:
+        """Heuristic: detect if a recent commitment.open mentions identity."""
+        if not events:
+            return False
+        id_rx = re.compile(
+            r"\b(identity|identity confirm|adopt(ed)? name|i am\s+\w+)\b", re.IGNORECASE
+        )
+        for e in events[-window:]:
+            if (e.kind or "").lower() == "commitment.open":
+                text = (e.content or "")
+                tags = (e.meta or {}).get("tags", [])
+                if ("identity" in tags) or id_rx.search(text):
+                    return True
+        return False
+
+    def _compute_identity_boost(self, events: List[EmergenceEvent]) -> float:
+        """Detect identity evidence in recent events and return a small IAS boost.
+
+        Heuristics:
+        - Strong signals: recent 'identity_change' or 'identity_update' events.
+        - Evidence signals: recent 'evidence' with JSON content summary like
+          'Identity adopted: <name>' (from behavior_engine).
+
+        The applied boost is controlled via env var PMM_IAS_IDENTITY_BOOST (default 0.06)
+        and scaled by 1.0 for strong signals, 0.6 for evidence signals.
+        """
+        if not events:
+            return 0.0
+
+        try:
+            base_boost = float(os.getenv("PMM_IAS_IDENTITY_BOOST", "0.06"))
+        except Exception:
+            base_boost = 0.06
+
+        strong = False
+        evidence = False
+
+        for e in events:
+            k = (e.kind or "").lower()
+            if k in ("identity_change", "identity_update"):
+                strong = True
+                break
+            if k.startswith("evidence"):
+                # Try to parse JSON content; fallback to substring check
+                s = (e.content or "").strip()
+                summary = ""
+                if s.startswith("{") and s.endswith("}"):
+                    try:
+                        obj = json.loads(s)
+                        summary = str(obj.get("summary", ""))
+                    except Exception:
+                        summary = s
+                else:
+                    summary = s
+                sl = summary.lower()
+                if "identity adopted" in sl or (
+                    ("name" in sl and ("adopt" in sl or "now" in sl))
+                ):
+                    evidence = True
+
+        if strong:
+            return max(0.0, min(0.2, base_boost * 1.0))
+        if evidence:
+            return max(0.0, min(0.2, base_boost * 0.6))
+        return 0.0
 
     def detect_stage(
         self, IAS: float, GAS: float, exp_detect: bool, pmmspec: float, selfref: float

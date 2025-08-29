@@ -72,7 +72,9 @@ def test_integrated_system():
         f"Imported - Total directives: {new_summary['statistics']['total_directives']}"
     )
 
-    return True
+    # Assertions: ensure system produced directives and export/import preserves counts
+    assert summary['statistics']['total_directives'] >= 1
+    assert new_summary['statistics']['total_directives'] == summary['statistics']['total_directives']
 
 
 def test_classification_accuracy():
@@ -129,30 +131,21 @@ def test_classification_accuracy():
     accuracy = correct / total
     print(f"\nAccuracy: {correct}/{total} = {accuracy:.1%}")
 
-    return accuracy > 0.6  # 60% threshold
+    assert accuracy > 0.6  # 60% threshold
 
 
 if __name__ == "__main__":
     print("Testing Integrated Directive System...")
 
     try:
-        # Test basic functionality
-        basic_test = test_integrated_system()
-        print(f"Basic functionality test: {'PASS' if basic_test else 'FAIL'}")
-
-        # Test classification accuracy
-        accuracy_test = test_classification_accuracy()
-        print(f"Classification accuracy test: {'PASS' if accuracy_test else 'FAIL'}")
-
-        if basic_test and accuracy_test:
-            print(
-                "\n🎉 All tests PASSED! Integrated directive system is working correctly."
-            )
-        else:
-            print("\n❌ Some tests FAILED. Check the implementation.")
-
+        test_integrated_system()
+        print("Basic functionality test: PASS")
+        test_classification_accuracy()
+        print("Classification accuracy test: PASS")
+        print("\n🎉 All tests PASSED! Integrated directive system is working correctly.")
+    except AssertionError as e:
+        print(f"\n❌ A test assertion failed: {e}")
     except Exception as e:
         print(f"❌ Test failed with error: {e}")
         import traceback
-
         traceback.print_exc()

@@ -238,6 +238,14 @@ class SelfModelManager:
                 if hasattr(model.metadata, k):
                     setattr(model.metadata, k, v)
 
+            # dev_tasks index (optional, dict[str, Any])
+            try:
+                dev_tasks = data.get("dev_tasks", {}) or {}
+                if isinstance(dev_tasks, dict):
+                    model.dev_tasks = dev_tasks
+            except Exception:
+                pass
+
             return model
 
         def _to_effects(self, lst):
@@ -286,6 +294,11 @@ class SelfModelManager:
             try:
                 if obj is None:
                     return None
+                # Preserve dataclasses (e.g., EvidenceEvent) for in-memory access
+                from dataclasses import is_dataclass as _is_dc
+
+                if _is_dc(obj):
+                    return obj
                 if isinstance(obj, (str, int, float, bool)):
                     return obj
                 if isinstance(obj, (list, tuple)):
@@ -298,6 +311,26 @@ class SelfModelManager:
                 return "<non-serializable>"
 
         if evidence is not None:
+            # Convert dict payloads to EvidenceEvent dataclass when keys match
+            try:
+                from .model import EvidenceEvent as _EvidenceEvent
+
+                if isinstance(evidence, dict):
+                    keys = set(evidence.keys())
+                    required = {"evidence_type", "commit_ref", "description"}
+                    if required.issubset(keys):
+                        evidence = _EvidenceEvent(
+                            id=str(evidence.get("id", "")) or "",
+                            t=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            evidence_type=str(evidence.get("evidence_type")),
+                            commit_ref=str(evidence.get("commit_ref")),
+                            description=str(evidence.get("description")),
+                            artifact=evidence.get("artifact"),
+                            next_action=evidence.get("next_action"),
+                        )
+            except Exception:
+                # Fall back to sanitized dict
+                pass
             evidence = _sanitize(evidence)
         if tags is not None:
             tags = _sanitize(tags)

@@ -474,7 +474,7 @@ def reflect_once(
                 conf_thr = 0.3
 
             _ecv = EnhancedCommitmentValidator()
-            analysis = _ecv.validate_commitment(combined_for_validation)
+            analysis = _ecv.validate_commitment(combined_for_validation, [])
             actionable = bool(analysis.is_valid and analysis.confidence >= conf_thr)
             import re
 

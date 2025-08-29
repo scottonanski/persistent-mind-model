@@ -36,7 +36,12 @@ def check(name):
 @check("imports.emergence_and_reflection")
 def _c1():
     # Adjust paths/names if your package layout differs
-
+    from pmm.emergence import compute_emergence_scores, detect_stage
+    from pmm.atomic_reflection import AtomicReflectionManager
+    # Non-LARP: assert symbols exist
+    assert callable(compute_emergence_scores), "compute_emergence_scores not callable"
+    assert callable(detect_stage), "detect_stage not callable"
+    assert callable(AtomicReflectionManager), "AtomicReflectionManager not callable"
     return "Imported core modules"
 
 
@@ -69,6 +74,8 @@ def _c3():
     stage_s0 = detect_stage(pmmspec=0.01, selfref=0.0, IAS=0.49, GAS=0.0)
     # Force S1 scenario (bypass S0)
     stage_s1 = detect_stage(pmmspec=0.3, selfref=0.06, IAS=0.49, GAS=0.0)
+    # Non-LARP: gating must differentiate the cases
+    assert stage_s0 != stage_s1, "Stage gating did not differentiate S0 vs S1"
     return {"s0_case": stage_s0, "s1_case": stage_s1}
 
 
@@ -78,6 +85,11 @@ def _c4():
     from pmm.reflection_cooldown import ReflectionCooldownManager
 
     rc = ReflectionCooldownManager()
+    # Non-LARP: thresholds must exist and be sane
+    assert getattr(rc, "time_gate", None) is not None, "time_gate missing"
+    assert getattr(rc, "turns_gate", None) is not None, "turns_gate missing"
+    for v in (rc.time_gate, rc.turns_gate):
+        assert isinstance(v, (int, float)) and v >= 0, "cooldown gates must be non-negative numbers"
     return {
         "time_gate": getattr(rc, "time_gate", None),
         "turns_gate": getattr(rc, "turns_gate", None),
@@ -106,6 +118,9 @@ def _c5():
     # Call it; expect a dict regardless of underlying environment
     ctx = ar._get_emergence_context() if has_accessor else {}
     assert isinstance(ctx, dict)
+    # Non-LARP: context should expose emergence signals
+    if ctx:
+        assert any(k in ctx for k in ("stage","ias","gas","pmmspec","selfref")), "emergence context missing expected keys"
     return {"has_accessor": has_accessor, "context_keys": sorted(list(ctx.keys()))[:5]}
 
 

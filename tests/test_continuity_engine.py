@@ -169,28 +169,18 @@ def test_continuity_patterns():
 
         storage.close()
 
-        # Validate results
-        success_criteria = [
-            len(insights) >= 2,  # Should detect at least 2 patterns
-            len(registered_ids) >= 1,  # Should register at least 1 meta-principle
-            any(
-                i.insight_type == "reinforcement" for i in insights
-            ),  # Should detect reinforcement
-            type_counts.get("meta_principle", 0) >= 1,  # Should have meta-principles
-        ]
-
-        passed = sum(success_criteria)
-        total = len(success_criteria)
-
-        print(f"\nValidation: {passed}/{total} criteria met")
-        return passed == total
+        # Assertions: verify continuity insights and registration occurred
+        assert len(insights) >= 2
+        assert len(registered_ids) >= 1
+        assert any(i.insight_type == "reinforcement" for i in insights)
+        assert type_counts.get("meta_principle", 0) >= 1
 
     except Exception as e:
         print(f"Test failed: {e}")
         import traceback
 
         traceback.print_exc()
-        return False
+        assert False, f"Test failed: {e}"
     finally:
         try:
             os.unlink(db_path)
@@ -199,7 +189,11 @@ def test_continuity_patterns():
 
 
 if __name__ == "__main__":
-    success = test_continuity_patterns()
+    success = True
+    try:
+        test_continuity_patterns()
+    except AssertionError:
+        success = False
     print(f"\nTest {'PASSED' if success else 'FAILED'}")
 
     if success:

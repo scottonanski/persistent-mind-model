@@ -37,3 +37,35 @@ All notable changes in this development pass are listed here. The summary focuse
 
 Files of interest: `chat.py`, `pmm/commitments.py`, `pmm/api/probe.py`, `docs/api/probe.md`, `pmm/reflection.py`, `pmm/config/models.py`.
 
+### Autonomy Extensions (Phase 1 scaffolding)
+
+- Development Task Manager
+  - `pmm/dev_tasks.py` with `DevTaskManager.open_task/update_task/close_task`.
+  - Emits `task_created` / `task_progress` / `task_closed` rows to SQLite.
+  - Optional JSON index mirrored to self‑model (`model.dev_tasks`).
+  - CLI: `--@tasks open KIND TITLE` and `--@tasks close ID`.
+
+- Behavior‑Based Evidence Engine
+  - Hooked into `langchain_memory.save_context`: scans replies for `Done:` and synonyms.
+  - Emits `evidence` events and auto‑closes mapped commitments when confidence ≥ threshold.
+
+- Probe API additions
+  - `GET /autonomy/status` — compact IAS/GAS/stage + open task count.
+  - `GET /autonomy/tasks` — folded dev tasks (open/closed with progress).
+  - `GET /autonomy/experiments` — scheduled and executed micro‑experiments.
+
+- Micro‑Experiment Scheduler
+  - `pmm/experiments.py` with `ExperimentManager.schedule()` and `run_due()`.
+  - Records `experiment_scheduled` and `experiment_executed` with metrics snapshots.
+
+- Policy Evolution
+  - `pmm/policy/evolution.py` with a stagnation‑based tuner.
+  - Emits `policy_adjusted` and mirrors evidence confidence threshold to env.
+
+- Drift Watch + Self‑Heal
+  - `pmm/drift_watch.py` monitors IAS/GAS/stage snapshot.
+  - On drift, opens a short identity TTL or nudges reflection; logs `drift_detected` and `self_healing_initiated`.
+
+- Autonomy Loop Integration
+  - Hooks for drift watch, experiments runner, and policy evolution at the end of each tick.
+

@@ -74,8 +74,14 @@ def test_storage_integration():
             f"Root directives: {len(root_directives)}, Child directives: {len(child_directives)}"
         )
 
+        # Assertions: verify data was stored and hierarchy is retrievable
+        assert len(meta_principles) >= 1
+        assert len(principles) >= 1
+        assert len(commitments) >= 1
+        assert isinstance(root_directives, list)
+        assert len(child_directives) >= 1
+
         storage.close()
-        return True
 
     except Exception as e:
         print(f"Storage test failed: {e}")
@@ -123,8 +129,12 @@ def test_integrated_system_with_storage():
             f"Loaded system summary: {summary['statistics']['total_directives']} total directives"
         )
 
+        # Assertions: verify directives persisted and can be summarized
+        assert len(stored_directives) > 0
+        assert isinstance(summary, dict)
+        assert summary["statistics"]["total_directives"] >= 1
+
         storage.close()
-        return len(stored_directives) > 0
 
     except Exception as e:
         print(f"Integrated system test failed: {e}")
@@ -186,7 +196,9 @@ def test_pmm_memory_integration():
 
         print(f"Memory includes directive context: {has_directive_context}")
 
-        return directive_summary["statistics"]["total_directives"] > 0
+        # Assertions: verify directives were created and are surfaced in memory vars
+        assert directive_summary["statistics"]["total_directives"] > 0
+        assert has_directive_context is True
 
     except Exception as e:
         print(f"PMM memory integration test failed: {e}")
@@ -242,11 +254,18 @@ def test_evolution_pipeline():
             f"{final_summary['commitments']['count']} commitments"
         )
 
-        return True
+        # Assertions: verify directives were processed (classification may vary)
+        total_directives = (
+            final_summary["meta_principles"]["count"] +
+            final_summary["principles"]["count"] +
+            final_summary["commitments"]["count"]
+        )
+        assert total_directives >= 3, f"Expected at least 3 directives, got {total_directives}"
+        assert final_summary["commitments"]["count"] >= 2, "Expected at least 2 commitments"
 
     except Exception as e:
         print(f"Evolution pipeline test failed: {e}")
-        return False
+        raise
 
 
 def run_all_tests():

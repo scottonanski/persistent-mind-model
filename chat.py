@@ -33,6 +33,7 @@ from pmm.commitments import (
 from pmm.reflection import reflect_once
 from pmm.logging_config import pmm_tlog
 from pmm.dev_tasks import DevTaskManager
+from pmm.policy import bandit as pmm_bandit
 
 
 def parse_args():
@@ -517,6 +518,15 @@ def main():
             mind_policy_lines.append(
                 "Identity Nudge: Speak in first-person as this PMM agent. Prefer 'I' statements, reference my open commitments explicitly, avoid generic assistant voice."
             )
+        # If an identity turn commitment is active, require an explicit self-ascription early
+        try:
+            active_idents = get_identity_turn_commitments(pmm_memory.pmm)
+            if any((it or {}).get("remaining_turns", 0) > 0 for it in (active_idents or [])):
+                mind_policy_lines.append(
+                    "Identity Mode: In the first sentence, include a brief explicit self-ascription (e.g., 'I am currently …' or 'My name is …'), then continue naturally. Only once."
+                )
+        except Exception:
+            pass
         mind_policy_lines.append("— end policy —")
         mind_policy = "\n".join(mind_policy_lines)
 
@@ -596,6 +606,15 @@ def main():
                 mind_policy_lines.append(
                     "Identity Nudge: Speak in first-person as this PMM agent. Prefer 'I' statements, reference my open commitments explicitly, avoid generic assistant voice."
                 )
+            # Carry forward identity-mode instruction in trimmed header too
+            try:
+                active_idents = get_identity_turn_commitments(pmm_memory.pmm)
+                if any((it or {}).get("remaining_turns", 0) > 0 for it in (active_idents or [])):
+                    mind_policy_lines.append(
+                        "Identity Mode: In the first sentence, include a brief explicit self-ascription (e.g., 'I am currently …' or 'My name is …'), then continue naturally. Only once."
+                    )
+            except Exception:
+                pass
             mind_policy_lines.append("— end policy —")
             mind_policy = "\n".join(mind_policy_lines)
 
@@ -843,6 +862,7 @@ def main():
                     "memory": "Show cross-session memory excerpt",
                     "track": "Real-time telemetry. '--@track list' for options",
                     "probe": "Probe API: --@probe list for more information",
+                    "bandit": "Bandit utilities. '--@bandit debug' for quick test",
                 }
                 if at_cmd in ("help", "h", "?", "list"):
                     print("\n🧭 --@ commands")
@@ -859,6 +879,7 @@ def main():
                     print("  • --@probe identity    Show current identity via server")
                     print("  • --@find something    Search everywhere for text")
                     print("  • --@track on|off      Toggle real-time telemetry")
+                    print("  • --@bandit debug      Show bandit Qs/eps; simulate outcomes")
                     continue
                 # Contextual help: --@help identity|probe
                 if at_cmd.startswith("help "):
@@ -1194,9 +1215,10 @@ def main():
                         elif sub == "kind" and len(parts) > 3 and parts[3].isdigit():
                             kind = parts[2]
                             limit = max(1, min(50, int(parts[3])))
+                            # Select the same columns as recent_events so _row_to_dict works
                             rows = list(
                                 store.conn.execute(
-                                    "SELECT id,ts,kind,content,meta,prev_hash,hash FROM events WHERE kind=? ORDER BY id DESC LIMIT ?",
+                                    "SELECT id,ts,kind,content,meta,prev_hash,hash,summary,keywords,embedding FROM events WHERE kind=? ORDER BY id DESC LIMIT ?",
                                     (kind, limit),
                                 )
                             )
@@ -1324,6 +1346,187 @@ def main():
                     except Exception as e:
                         print(f"\n❌ Tasks error: {e}")
                     continue
+                elif at_cmd.startswith("bandit"):
+                    parts = at_cmd.split()
+                    sub = parts[1] if len(parts) > 1 else None
+                    if sub in {None, "list", "help"}:
+                        print("\n📘 --@bandit options")
+                        print("  • --@bandit debug  Print Qs/eps, simulate outcomes, show updated values")
+                        print("  • --@bandit runbook  Run a 12-turn verification with hot segments")
+                        continue
+                    if sub == "debug":
+                        try:
+                            # Wire bandit to chat's SQLite store
+                            pmm_bandit.set_store(pmm_memory.pmm.sqlite_store)
+                            # Read current status
+                            pol_before = pmm_bandit.load_policy()
+                            stat_before = pmm_bandit.get_status(pmm_memory.pmm.sqlite_store)
+                            def _row(name):
+                                r = pol_before.get(name, {"value": 0.0, "pulls": 0})
+                                return float(r.get("value", 0.0)), int(r.get("pulls", 0))
+                            qr_b, nr_b = _row("reflect_now")
+                            qc_b, nc_b = _row("continue")
+                            print("\n[bandit] BEFORE:")
+                            print(f"  q_reflect={qr_b:.3f} pulls={nr_b} | q_continue={qc_b:.3f} pulls={nc_b} | eps={stat_before.get('eps'):.3f}")
+
+                            # Simulate outcomes: one strong reflect win (+0.7/+0.3), one inert2 (-0.15)
+                            import os as _os
+                            def _f(name, default):
+                                try:
+                                    return float(_os.getenv(name, str(default)))
+                                except Exception:
+                                    return default
+                            pos_acc = _f("PMM_BANDIT_POS_ACCEPTED", 0.7)
+                            pos_close = _f("PMM_BANDIT_POS_CLOSE", 0.3)
+                            neg_in2 = _f("PMM_BANDIT_NEG_INERT2", 0.15)
+                            # Good reflect
+                            pmm_bandit.record_outcome({"debug": True}, "reflect_now", pos_acc + pos_close, horizon=int(_os.getenv("PMM_BANDIT_HORIZON_TURNS", "5")), notes="debug: accepted=True close=True")
+                            # Inert2
+                            pmm_bandit.record_outcome({"debug": True}, "reflect_now", -neg_in2, horizon=int(_os.getenv("PMM_BANDIT_HORIZON_TURNS", "5")), notes="debug: inert2=True")
+
+                            # Read updated status
+                            pol_after = pmm_bandit.load_policy()
+                            stat_after = pmm_bandit.get_status(pmm_memory.pmm.sqlite_store)
+                            def _row2(name):
+                                r = pol_after.get(name, {"value": 0.0, "pulls": 0})
+                                return float(r.get("value", 0.0)), int(r.get("pulls", 0))
+                            qr_a, nr_a = _row2("reflect_now")
+                            qc_a, nc_a = _row2("continue")
+                            print("[bandit] AFTER:")
+                            print(f"  q_reflect={qr_a:.3f} pulls={nr_a} | q_continue={qc_a:.3f} pulls={nc_a} | eps={stat_after.get('eps'):.3f}")
+                            print("  (Inserted: +accepted+close, -inert2)")
+                        except Exception as e:
+                            print(f"\n❌ Bandit debug error: {e}")
+                        continue
+                    if sub == "runbook":
+                        # Step 10 – verification loop (simulated)
+                        try:
+                            import os as _os
+                            from pmm.logging_config import pmm_tlog as _tlog
+                            from pmm.policy.bandit import build_context as _bctx
+
+                            # 1) Set envs for the run
+                            env_overrides = {
+                                "PMM_BANDIT_ENABLED": "1",
+                                "PMM_TELEMETRY": "1",
+                                "PMM_IAS_IDENTITY_EXTENDED": "1",
+                                "PMM_IAS_IDENTITY_EVIDENCE_MULT": "0.02",
+                                "PMM_IAS_IDENTITY_MAX_BOOST": "0.12",
+                                "PMM_IAS_ID_COMMIT_BONUS": "0.03",
+                                "PMM_REFLECTION_COOLDOWN_SECONDS": "30",
+                                "PMM_REFLECTION_HOT_FACTOR": "0.35",
+                            }
+                            for k, v in env_overrides.items():
+                                _os.environ[k] = v
+
+                            # Wire bandit to our store
+                            pmm_bandit.set_store(pmm_memory.pmm.sqlite_store)
+
+                            # Helper: add a commitment.close event
+                            def _append_close(note: str = "runbook"):
+                                try:
+                                    pmm_memory.pmm.sqlite_store.append_event(
+                                        kind="commitment.close",
+                                        content=note,
+                                        meta={"source": "runbook"},
+                                    )
+                                    # Let bandit index recent close
+                                    pmm_memory._bandit_scan_commit_closes()
+                                except Exception:
+                                    pass
+
+                            # 2) Run 12 simulated turns
+                            turns = 12
+                            # Craft three hot segments at turns 1, 5, 9
+                            hot_turns = {1, 5, 9}
+                            # Ensure horizon comes due by the end
+                            try:
+                                horizon = int(_os.getenv("PMM_BANDIT_HORIZON_TURNS", "5"))
+                            except Exception:
+                                horizon = 5
+
+                            for t in range(1, turns + 1):
+                                # Increment turn counter like save_context would
+                                pmm_memory._bandit_turn_id = int(
+                                    getattr(pmm_memory, "_bandit_turn_id", 0) or 0
+                                ) + 1
+
+                                # Build a synthetic context snapshot
+                                is_hot = t in hot_turns
+                                ctx = _bctx(
+                                    gas=0.92 if is_hot else 0.50,
+                                    ias=0.40,
+                                    close=0.80 if is_hot else 0.30,
+                                    hot=is_hot,
+                                    identity_signal_count=3,
+                                    time_since_last_reflection_sec=25,
+                                    dedup_threshold=0.94,
+                                    inert_streak=0,
+                                )
+
+                                # Select and record action into ring buffer
+                                try:
+                                    action, eps, qrf, qct = pmm_bandit.select_action_info(ctx)
+                                except Exception:
+                                    action = pmm_bandit.select_action(ctx)
+                                    eps = float(_os.getenv("PMM_BANDIT_EPSILON", "0.10"))
+                                    qrf = qct = 0.0
+                                rec = {
+                                    "turn": int(pmm_memory._bandit_turn_id),
+                                    "action": action,
+                                    "ctx": dict(ctx),
+                                    "finalized": False,
+                                    "events": [],
+                                }
+                                pmm_memory._bandit_events.append(rec)
+                                _tlog(
+                                    f"[PMM_TELEMETRY] bandit_select: action={action}, eps={eps:.3f}, q_reflect={qrf:.3f}, q_continue={qct:.3f}, ctx={ctx}"
+                                )
+
+                                # Orchestrate outcomes:
+                                # - Turn 1 hot: reflect_now accepted, and a commitment close
+                                if t == 1:
+                                    # Force accepted; if action was continue, still tag accepted to show positive update
+                                    pmm_memory._bandit_note_event("reflection_accepted")
+                                    _append_close("runbook: close after accepted")
+                                # - Turn 2 and 3: two inert events to trigger inert2 penalty for a reflect_now action
+                                if t in (2, 3):
+                                    pmm_memory._bandit_note_event("reflection_inert")
+                                # - Turn 5 hot: ensure a close without acceptance to reward 'continue' restraint if it happens
+                                if t == 5:
+                                    _append_close("runbook: close without acceptance")
+
+                                # Periodically evaluate rewards so earlier actions cross horizon
+                                pmm_memory._bandit_evaluate_rewards()
+
+                            # Final evaluation pass
+                            pmm_memory._bandit_evaluate_rewards()
+
+                            # Print final status and recent rewards
+                            stat = pmm_bandit.get_status(pmm_memory.pmm.sqlite_store)
+                            print("\n[bandit] FINAL STATUS:")
+                            print(
+                                f"  q_reflect={stat.get('q_reflect'):.3f} | q_continue={stat.get('q_continue'):.3f} | eps={stat.get('eps'):.3f}"
+                            )
+                            # Show last few reward rows
+                            try:
+                                rows = list(
+                                    pmm_memory.pmm.sqlite_store.conn.execute(
+                                        "SELECT id, ts, action, reward, horizon, notes FROM bandit_rewards ORDER BY id DESC LIMIT 5"
+                                    )
+                                )
+                                print("[bandit] recent outcomes:")
+                                for r in rows[::-1]:
+                                    print(
+                                        f"  • #{r[0]} {r[1]} {r[2]} reward={float(r[3]):.3f} horizon={r[4]} notes={r[5]}"
+                                    )
+                            except Exception:
+                                pass
+
+                            print("\nRunbook complete. Check console for bandit_reward lines and /autonomy/status for bandit_q_*")
+                        except Exception as e:
+                            print(f"\n❌ Bandit runbook error: {e}")
+                        continue
                 elif at_cmd.startswith("find"):
                     # Unified search across events (content/summary), commitment events, and open commitments
                     if len(at_cmd.split(None, 1)) < 2:
@@ -1964,6 +2167,10 @@ def main():
 
         except KeyboardInterrupt:
             print("\n\n👋 Chat interrupted. Your conversation is saved!")
+            break
+        except EOFError:
+            # Gracefully exit when running noninteractive or stdin is exhausted
+            print("\n👋 End of input. Exiting chat.")
             break
         except Exception as e:
             print(f"\n❌ Error: {e}")

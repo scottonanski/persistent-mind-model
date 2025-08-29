@@ -708,6 +708,34 @@ class AutonomyLoop:
         except Exception:
             pass
 
+        # ---- Integrations: drift watch, experiments, policy evolution ----
+        track_snapshot = {
+            "IAS": float(ias or 0.0),
+            "GAS": float(gas or 0.0),
+            "stage": scores.get("stage", "Unknown"),
+        }
+        # Drift Watch + Self-Heal
+        try:
+            from pmm.drift_watch import watch_and_heal
+
+            watch_and_heal(self.pmm, track_snapshot)
+        except Exception:
+            pass
+        # Run due micro-experiments (if any)
+        try:
+            from pmm.experiments import ExperimentManager
+
+            ExperimentManager(self.db).run_due()
+        except Exception:
+            pass
+        # Policy evolution (stagnation-based tuning)
+        try:
+            from pmm.policy.evolution import PolicyEvolution
+
+            PolicyEvolution(self.pmm).maybe_adjust()
+        except Exception:
+            pass
+
     # -------- minimal helpers: last user prompt + intent detection --------
     def _get_last_user_prompt(self) -> str:
         """Return content of the most recent 'prompt' event (user input)."""

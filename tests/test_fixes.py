@@ -52,21 +52,13 @@ def test_concurrent_id_generation():
             t.join()
 
         # Check results
-        if errors:
-            print(f"❌ Errors occurred: {errors}")
-            return False
-
-        # Check for duplicate IDs
+        # Assertions: no thread errors and no duplicate IDs
+        assert not errors, f"Thread errors occurred: {errors}"
         unique_ids = set(results)
-        if len(unique_ids) != len(results):
-            print(
-                f"❌ Duplicate IDs found! Generated: {len(results)}, Unique: {len(unique_ids)}"
-            )
-            print(f"IDs: {sorted(results)}")
-            return False
-
+        assert len(unique_ids) == len(results), (
+            f"Duplicate IDs found! Generated: {len(results)}, Unique: {len(unique_ids)}"
+        )
         print(f"✅ Generated {len(results)} unique IDs across 3 threads")
-        return True
 
 
 def test_hash_chain_integrity():
@@ -87,22 +79,18 @@ def test_hash_chain_integrity():
         # Get all events and check chain
         events = manager.sqlite_store.all_events()
 
-        if len(events) < 3:
-            print(f"❌ Expected at least 3 events, got {len(events)}")
-            return False
+        assert len(events) >= 3, f"Expected at least 3 events, got {len(events)}"
 
         # Check chain linkage
         prev_hash = None
         for i, event in enumerate(events):
             if event["prev_hash"] != prev_hash:
-                print(
-                    f"❌ Chain break at event {i}: expected prev_hash={prev_hash}, got {event['prev_hash']}"
+                assert False, (
+                    f"Chain break at event {i}: expected prev_hash={prev_hash}, got {event['prev_hash']}"
                 )
-                return False
             prev_hash = event["hash"]
 
         print(f"✅ Hash chain verified for {len(events)} events")
-        return True
 
 
 def test_field_parity():
@@ -141,9 +129,7 @@ def test_field_parity():
                 json_event = event
                 break
 
-        if not json_event:
-            print(f"❌ Event {ev_id} not found in JSON model")
-            return False
+        assert json_event is not None, f"Event {ev_id} not found in JSON model"
 
         # Get from SQLite
         sqlite_events = manager.sqlite_store.all_events()
@@ -153,20 +139,16 @@ def test_field_parity():
                 sqlite_event = event
                 break
 
-        if not sqlite_event:
-            print(f"❌ Event {ev_id} not found in SQLite")
-            return False
+        assert sqlite_event is not None, f"Event {ev_id} not found in SQLite"
 
         # Check tag parity
         json_tags = set(json_event.tags)
         sqlite_tags = set(sqlite_event["meta"].get("tags", []))
 
-        if json_tags != sqlite_tags:
-            print(f"❌ Tag mismatch: JSON={json_tags}, SQLite={sqlite_tags}")
-            return False
-
+        assert json_tags == sqlite_tags, (
+            f"Tag mismatch: JSON={json_tags}, SQLite={sqlite_tags}"
+        )
         print(f"✅ Field parity verified for event {ev_id}")
-        return True
 
 
 def test_identity_logging():
@@ -187,30 +169,25 @@ def test_identity_logging():
 
         # Check JSON model (identity_evolution in meta_cognition)
         json_changes = manager.model.meta_cognition.identity_evolution
-        if not json_changes:
-            print("❌ No identity changes in JSON model")
-            return False
+        assert json_changes, "No identity changes in JSON model"
 
         latest_change = json_changes[-1]
-        if new_name not in latest_change.change:
-            print(f"❌ JSON identity change incorrect: {latest_change}")
-            return False
+        assert new_name in latest_change.change, (
+            f"JSON identity change incorrect: {latest_change}"
+        )
 
         # Check SQLite
         sqlite_events = manager.sqlite_store.all_events()
         identity_events = [e for e in sqlite_events if e["kind"] == "identity_change"]
 
-        if not identity_events:
-            print("❌ No identity_change events in SQLite")
-            return False
+        assert identity_events, "No identity_change events in SQLite"
 
         latest_sqlite = identity_events[-1]
-        if latest_sqlite["meta"].get("new_value") != new_name:
-            print(f"❌ SQLite identity change incorrect: {latest_sqlite}")
-            return False
+        assert latest_sqlite["meta"].get("new_value") == new_name, (
+            f"SQLite identity change incorrect: {latest_sqlite}"
+        )
 
         print(f"✅ Identity change logged consistently: {old_name} → {new_name}")
-        return True
 
 
 def main():
@@ -227,13 +204,12 @@ def main():
     passed = 0
     for test in tests:
         try:
-            if test():
-                passed += 1
-            else:
-                print()
+            test()
+            passed += 1
+        except AssertionError as e:
+            print(f"❌ Test {test.__name__} failed: {e}")
         except Exception as e:
             print(f"❌ Test {test.__name__} failed with exception: {e}")
-            print()
 
     print(f"📊 Results: {passed}/{len(tests)} tests passed")
 

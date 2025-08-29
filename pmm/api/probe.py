@@ -5,6 +5,7 @@ from fastapi import FastAPI, Query, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from pmm.storage.sqlite_store import SQLiteStore
+from pmm.policy import bandit as pmm_bandit
 from pmm.emergence import EmergenceAnalyzer, EmergenceEvent
 from pmm.semantic_analysis import get_semantic_analyzer
 from pmm.meta_reflection import get_meta_reflection_analyzer
@@ -224,6 +225,62 @@ def _fold_tasks(store: SQLiteStore, limit: int = 200) -> dict:
     return {"open": open_tasks, "closed": closed_tasks}
 
 
+def _fold_experiments(store: SQLiteStore, limit: int = 200) -> dict:
+    rows = list(
+        store.conn.execute(
+            "SELECT id,ts,kind,content,meta FROM events WHERE kind IN ('experiment_scheduled','experiment_executed') ORDER BY id DESC LIMIT ?",
+            (int(limit),),
+        )
+    )
+    exps: dict[str, dict] = {}
+    import json
+
+    for rid, ts, kind, content, meta in rows[::-1]:  # oldest->newest
+        try:
+            m = json.loads(meta) if isinstance(meta, str) else (meta or {})
+        except Exception:
+            m = {}
+        eid = str(m.get("experiment_id", ""))
+        if not eid and isinstance(content, str):
+            try:
+                ctmp = json.loads(content)
+                eid = ctmp.get("id") or eid
+            except Exception:
+                pass
+        if not eid:
+            continue
+        rec = exps.setdefault(
+            eid,
+            {
+                "id": eid,
+                "status": "scheduled",
+                "created_at": ts,
+                "hypothesis": None,
+                "knobs": None,
+                "schedule_at": None,
+                "executions": [],
+            },
+        )
+        if kind == "experiment_scheduled":
+            try:
+                c = json.loads(content) if isinstance(content, str) else (content or {})
+            except Exception:
+                c = {}
+            rec.update(
+                {
+                    "hypothesis": c.get("hypothesis"),
+                    "knobs": c.get("knobs"),
+                    "schedule_at": c.get("schedule_at"),
+                }
+            )
+        elif kind == "experiment_executed":
+            rec["status"] = "executed"
+            rec["executions"].append({"ts": ts, "content": content})
+    scheduled = [e for e in exps.values() if e.get("status") == "scheduled"]
+    executed = [e for e in exps.values() if e.get("status") == "executed"]
+    return {"scheduled": scheduled, "executed": executed}
+
+
 @app.get("/autonomy/tasks")
 def autonomy_tasks(
     db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
@@ -246,15 +303,67 @@ def autonomy_status(
         # Count open tasks without calling the FastAPI handler
         folded = _fold_tasks(store, 200)
         open_count = len(folded.get("open", []))
+        # Bandit status (db-backed; epsilon from runtime core if available)
+        try:
+            pmm_bandit.set_store(store)
+        except Exception:
+            pass
+        bstat = {}
+        try:
+            bstat = pmm_bandit.get_status(store)
+        except Exception:
+            bstat = {}
+        try:
+            winr = pmm_bandit.get_winrate_reflect(50, store)
+        except Exception:
+            winr = None
+
+        # Get hot_strength from recent context
+        hot_strength = 0.0
+        try:
+            gas = float(scores.get("GAS", 0.0) or 0.0)
+            ias = float(scores.get("IAS", 0.0) or 0.0)
+            close_rate = float(scores.get("commit_close_rate", 0.0) or 0.0)
+            identity_signals = float(scores.get("identity_signal_count", 0.0) or 0.0)
+            
+            # Build context to get hot_strength (same logic as _auto_reflect)
+            ctx = pmm_bandit.build_context(
+                gas=gas,
+                ias=ias,
+                close=close_rate,
+                hot=bool(gas >= 0.85 and close_rate >= 0.60),
+                identity_signal_count=identity_signals,
+                time_since_last_reflection_sec=0.0,  # Not critical for hot_strength
+                dedup_threshold=0.94,
+                inert_streak=0.0,
+            )
+            hot_strength = float(ctx.get("hot_strength", 0.0))
+        except Exception:
+            hot_strength = 0.0
+
         return {
             "stage": scores.get("stage"),
             "IAS": scores.get("IAS"),
             "GAS": scores.get("GAS"),
             "commit_close_rate": scores.get("commit_close_rate"),
             "open_tasks": open_count,
+            "bandit_q_reflect": (bstat.get("q_reflect") if bstat else None),
+            "bandit_q_continue": (bstat.get("q_continue") if bstat else None),
+            "bandit_eps": (bstat.get("eps") if bstat else None),
+            "bandit_winrate_reflect": winr,
+            "hot_strength": hot_strength,
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/autonomy/experiments")
+def autonomy_experiments(
+    db: str = Query("pmm.db", description="Path to PMM SQLite DB"),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    store = SQLiteStore(db)
+    return _fold_experiments(store, int(limit))
 
 
 def _get_emergence_events(
@@ -336,6 +445,21 @@ def endpoints() -> dict:
             "path": "/emergence",
             "desc": "Emergence snapshot (IAS/GAS/stage)",
             "example": "/emergence",
+        },
+        {
+            "path": "/autonomy/status",
+            "desc": "Compact autonomy snapshot + open tasks",
+            "example": "/autonomy/status",
+        },
+        {
+            "path": "/autonomy/tasks",
+            "desc": "Folded dev tasks (open/closed)",
+            "example": "/autonomy/tasks",
+        },
+        {
+            "path": "/autonomy/experiments",
+            "desc": "Scheduled and executed experiments",
+            "example": "/autonomy/experiments",
         },
         {
             "path": "/reflection/quality",
@@ -1582,6 +1706,15 @@ def meta_cognition(
 
 def create_probe_app(db_path: str = "pmm.db") -> FastAPI:
     """Create and configure the probe FastAPI app."""
+    # Ensure bandit tables exist as a safety migration (idempotent)
+    try:
+        flag = os.getenv("PMM_BANDIT_ENABLED")
+        enabled = True if flag is None else flag.lower() in ("1", "true", "yes", "on")
+        if enabled:
+            store = SQLiteStore(db_path)
+            pmm_bandit.set_store(store)
+    except Exception:
+        pass
     return app
 
 
