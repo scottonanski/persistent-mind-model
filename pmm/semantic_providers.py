@@ -48,25 +48,32 @@ class OpenAIEmbeddingProvider:
         try:
             client = self._get_client()
             # Skip OpenAI calls in CI if no real API key
-            api_key = os.getenv('OPENAI_API_KEY', '')
-            if api_key.startswith('sk-fake-') or os.getenv('PMM_SKIP_OPENAI_TESTS') == 'true':
+            api_key = os.getenv("OPENAI_API_KEY", "")
+            if (
+                api_key.startswith("sk-fake-")
+                or os.getenv("PMM_SKIP_OPENAI_TESTS") == "true"
+            ):
                 # Return deterministic fake embedding for testing
                 import hashlib
+
                 hash_obj = hashlib.md5(text.encode())
                 seed = int(hash_obj.hexdigest()[:8], 16)
                 import random
+
                 random.seed(seed)
                 return [random.uniform(-1, 1) for _ in range(1536)]
-                
+
             response = client.embeddings.create(model=self.model, input=text)
             return response.data[0].embedding
         except Exception as e:
-            if 'OPENAI_API_KEY environment variable not set' in str(e):
+            if "OPENAI_API_KEY environment variable not set" in str(e):
                 # Return deterministic fake embedding for missing API key
                 import hashlib
+
                 hash_obj = hashlib.md5(text.encode())
                 seed = int(hash_obj.hexdigest()[:8], 16)
                 import random
+
                 random.seed(seed)
                 return [random.uniform(-1, 1) for _ in range(1536)]
             print(f"Warning: OpenAI embedding failed: {e}")
