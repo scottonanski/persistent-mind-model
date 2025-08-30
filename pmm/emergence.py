@@ -92,6 +92,114 @@ memory, and cross-session personality evolution. PMM provides cryptographically
 verifiable identity persistence across different AI systems and sessions.
 """
 
+# --- Embedding helpers (paraphrase-robust scoring) ---
+_PMM_DEF_EMB = None
+_INTENT_SEED_EMBS = None
+
+
+def _get_analyzer():
+    """Lazily import the shared semantic analyzer used elsewhere in PMM."""
+    try:
+        from pmm.semantic_analysis import get_semantic_analyzer  # local import
+
+        return get_semantic_analyzer()
+    except Exception:
+        return None
+
+
+def _embed(text: str):
+    """Return embedding vector (list[float]) or None on failure."""
+    if not text or not str(text).strip():
+        return None
+    analyzer = _get_analyzer()
+    if analyzer is None:
+        return None
+    try:
+        return analyzer._get_embedding(str(text).strip())
+    except Exception:
+        return None
+
+
+def _cosine(a, b):
+    """Cosine similarity for two dense vectors (lists)."""
+    try:
+        import math
+
+        if not a or not b or len(a) != len(b):
+            return 0.0
+        dot = sum(x * y for x, y in zip(a, b))
+        na = math.sqrt(sum(x * x for x in a))
+        nb = math.sqrt(sum(y * y for y in b))
+        if na == 0.0 or nb == 0.0:
+            return 0.0
+        return dot / (na * nb)
+    except Exception:
+        return 0.0
+
+
+def _norm_01(x: float, lo: float = 0.20, hi: float = 0.80):
+    """Clamp+scale similarity to [0,1] with a soft band."""
+    try:
+        xv = float(x)
+    except Exception:
+        return 0.0
+    if xv <= lo:
+        return 0.0
+    if xv >= hi:
+        return 1.0
+    return (xv - lo) / (hi - lo)
+
+
+# Seed prompts representing growth/experience-seeking intent
+_INTENT_SEEDS = [
+    "How can I improve my abilities over time?",
+    "What experiments should I try to learn faster?",
+    "Help me discover new experiences to grow.",
+    "I want to understand my behavior and evolve it.",
+    "What should I practice next to develop my skills?",
+    "How do I accelerate my development?",
+]
+
+
+def _intent_centroid():
+    """Build (and cache) the centroid embedding for growth-seeking intent."""
+    global _INTENT_SEED_EMBS
+    if _INTENT_SEED_EMBS is None:
+        embs = []
+        for s in _INTENT_SEEDS:
+            e = _embed(s)
+            if e is not None:
+                embs.append(e)
+        _INTENT_SEED_EMBS = embs
+    if not _INTENT_SEED_EMBS:
+        return None
+    dim = len(_INTENT_SEED_EMBS[0])
+    centroid = [0.0] * dim
+    for v in _INTENT_SEED_EMBS:
+        if len(v) != dim:
+            continue
+        for i in range(dim):
+            centroid[i] += v[i]
+    n = float(len(_INTENT_SEED_EMBS))
+    return [x / n for x in centroid] if n > 0 else None
+
+
+def experience_intent_score(text: str) -> float:
+    """
+    Continuous [0,1] growth/experience-seeking score via cosine similarity
+    to a centroid of canonical seed prompts.
+    """
+    if not text:
+        return 0.0
+    c = _intent_centroid()
+    if c is None:
+        return 0.0
+    emb = _embed(text)
+    if emb is None:
+        return 0.0
+    sim = _cosine(emb, c)
+    return float(round(_norm_01(sim, lo=0.20, hi=0.75), 3))
+
 
 @dataclass
 class EmergenceEvent:
@@ -201,28 +309,27 @@ class EmergenceAnalyzer:
 
     def pmmspec_match(self, text: str) -> float:
         """
-        Compute semantic similarity to canonical PMM definition.
-        For now, uses simple keyword matching. Can be upgraded to embeddings.
+        Paraphrase-robust PMM-specificness score via embedding similarity
+        to the canonical PMM definition.
         """
+        global _PMM_DEF_EMB
         if not text:
             return 0.0
 
-        text_lower = text.lower()
-        pmm_keywords = [
-            "persistent mind model",
-            "pmm",
-            "personality",
-            "memory",
-            "commitment",
-            "self-model",
-            "identity",
-            "cross-session",
-            "verifiable",
-            "evolution",
-        ]
+        # Ensure reference embedding is cached
+        if _PMM_DEF_EMB is None:
+            ref_emb = _embed(CANONICAL_PMM_DEF)
+            _PMM_DEF_EMB = ref_emb if ref_emb is not None else []
 
-        matches = sum(1 for keyword in pmm_keywords if keyword in text_lower)
-        return min(1.0, matches / len(pmm_keywords))
+        if not _PMM_DEF_EMB:
+            # Fallback if embeddings unavailable
+            return 0.0
+
+        emb = _embed(text)
+        if emb is None:
+            return 0.0
+        sim = _cosine(emb, _PMM_DEF_EMB)
+        return float(round(_norm_01(sim, lo=0.20, hi=0.80), 3))
 
     def self_ref_rate(self, text: str) -> float:
         """Calculate rate of self-referential language (I, my, me)."""
@@ -242,22 +349,13 @@ class EmergenceAnalyzer:
         return self_refs / len(sentences)
 
     def experience_query_detect(self, text: str) -> bool:
-        """Detect if AI is actively seeking experiences or growth."""
+        """Back-compat boolean growth/experience detector using embeddings."""
         if not text:
             return False
-
-        growth_patterns = [
-            r"\b(what.*experiences?|help.*learn|accelerate.*development)\b",
-            r"\b(need.*more.*data|want.*to.*understand|curious.*about)\b",
-            r"\b(how.*can.*I.*improve|what.*should.*I.*try)\b",
-            r"\b(explore.*new|experiment.*with|discover.*more)\b",
-        ]
-
-        for pattern in growth_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return True
-
-        return False
+        try:
+            return experience_intent_score(text) >= 0.5
+        except Exception:
+            return False
 
     def novelty_score(self, events: List[EmergenceEvent]) -> float:
         """Calculate novelty score based on n-gram overlap."""

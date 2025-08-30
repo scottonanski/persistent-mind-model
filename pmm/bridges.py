@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 import time
+import os
 from typing import Optional
 from dataclasses import dataclass
 from .model_config import ModelConfig
@@ -93,25 +94,15 @@ class BridgeManager:
             curr = self.factory.get_active_config()
         except (RuntimeError, AttributeError):
             # Fallback if no active config
-            return self._apply_stance_filter(canonical_text)
+            return self._apply_stance_filter(
+                canonical_text, stage=self._resolve_stage_label("unknown")
+            )
 
         # Get adapter for current family
         adapter = get_adapter(curr.family, self.adapters)
 
-        # Compute stage once for this rendering path
-        stage_label = None
-        try:
-            from pmm.emergence import compute_emergence_scores
-
-            scores = compute_emergence_scores(
-                window=5, storage_manager=getattr(self, "storage", None)
-            )
-            ias = float(scores.get("IAS", 0.0) or 0.0)
-            gas = float(scores.get("GAS", 0.0) or 0.0)
-            profile = self.stages.calculate_emergence_profile(curr.name, ias, gas)
-            stage_label = getattr(profile.stage, "value", None) or str(profile.stage)
-        except Exception:
-            stage_label = None
+        # Resolve stage once for this rendering path (env override or computed)
+        stage_label = self._resolve_stage_label(curr.name)
 
         # Render through family adapter (stage-aware)
         styled = adapter.render(canonical_text, stage=stage_label)
@@ -136,20 +127,7 @@ class BridgeManager:
                     model_name = (
                         curr.name if curr and hasattr(curr, "name") else "unknown"
                     )
-
-                    from pmm.emergence import compute_emergence_scores
-
-                    scores = compute_emergence_scores(
-                        window=5, storage_manager=getattr(self, "storage", None)
-                    )
-                    ias = float(scores.get("IAS", 0.0) or 0.0)
-                    gas = float(scores.get("GAS", 0.0) or 0.0)
-                    profile = self.stages.calculate_emergence_profile(
-                        model_name, ias, gas
-                    )
-                    stage_label = getattr(profile.stage, "value", None) or str(
-                        profile.stage
-                    )
+                    stage_label = self._resolve_stage_label(model_name)
                 except Exception:
                     stage_label = None
 
@@ -164,6 +142,32 @@ class BridgeManager:
         except Exception:
             # Fallback if stance filter fails
             return text
+
+    def _resolve_stage_label(self, model_name: str) -> Optional[str]:
+        """Resolve stage label using env override first, else compute from emergence scores.
+
+        Env override: PMM_HARD_STAGE can be set to short code (e.g., "S1", "S4") or full label
+        (e.g., "S4: Growth-Seeking"). If short code is provided, map to canonical label when known.
+        """
+        # 1) Environment hard override
+        hard = os.getenv("PMM_HARD_STAGE")
+        if hard:
+            mapping = {"S1": "S1: Resistance", "S4": "S4: Growth-Seeking"}
+            return mapping.get(hard, hard)
+
+        # 2) Compute via emergence scores if storage is available
+        try:
+            from pmm.emergence import compute_emergence_scores
+
+            scores = compute_emergence_scores(
+                window=5, storage_manager=getattr(self, "storage", None)
+            )
+            ias = float(scores.get("IAS", 0.0) or 0.0)
+            gas = float(scores.get("GAS", 0.0) or 0.0)
+            profile = self.stages.calculate_emergence_profile(model_name, ias, gas)
+            return getattr(profile.stage, "value", None) or str(profile.stage)
+        except Exception:
+            return None
 
     def create_event(self, kind: str, canonical_text: str) -> PMMEvent:
         """Create a new PMM event with proper provenance."""

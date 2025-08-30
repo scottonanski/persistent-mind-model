@@ -1005,7 +1005,9 @@ class CommitmentTracker:
             target_commitment.closed_at = datetime.now(timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             )
-            target_commitment.close_note = f"Evidence: {description} | artifact={artifact}"
+            target_commitment.close_note = (
+                f"Evidence: {description} | artifact={artifact}"
+            )
             return True
 
         return False

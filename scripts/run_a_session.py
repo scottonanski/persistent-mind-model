@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from pmm.langchain_memory import PersistentMindMemory
 from pmm.emergence import compute_emergence_scores
 from langchain_openai import ChatOpenAI
+from langchain.chains import ConversationChain
 
 
 def run_session():
@@ -26,7 +27,7 @@ def run_session():
 
     # Initialize PMM memory system
     agent_path = "test_agent.json"
-    pmm_memory = PersistentMindMemory(agent_path=agent_path)
+    memory = PersistentMindMemory(agent_path=agent_path)
 
     # Initialize LLM (use simple OpenAI for testing)
     try:
@@ -35,26 +36,8 @@ def run_session():
         print(f"Failed to initialize LLM: {e}")
         return {"ias_scores": [], "gas_scores": [], "close_rates": []}
 
-    # Create conversation chain with PMM memory
-    try:
-        # Use LangChain's RunnableWithMessageHistory for modern API compatibility
-        from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-
-        # Create a simple prompt template
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", "You are a helpful AI assistant with persistent memory."),
-                MessagesPlaceholder(variable_name="history"),
-                ("human", "{input}"),
-            ]
-        )
-
-        # Create the chain
-        chain = prompt | llm
-
-    except Exception as e:
-        print(f"Failed to create conversation chain: {e}")
-        return {"ias_scores": [], "gas_scores": [], "close_rates": []}
+    # Build a simple conversation chain that uses PMM memory so events are logged
+    chain = ConversationChain(llm=llm, memory=memory, verbose=False)
 
     # Test prompts
     prompts = [
@@ -74,108 +57,26 @@ def run_session():
         print(f"User: {prompt}")
 
         try:
-            # Get response through chain and PMM memory
-            # Save context to PMM first
-            pmm_memory.save_context({"input": prompt}, {"output": ""})
-
-            # Get response from chain
-            response = chain.invoke({"input": prompt, "history": []})
-            if hasattr(response, "content"):
-                response_text = response.content
-            else:
-                response_text = str(response)
-
+            # Get response via LangChain ConversationChain (this will call memory.save_context)
+            response_text = chain.predict(input=prompt)
             print(f"Assistant: {response_text}")
 
-            # Save response to PMM
-            pmm_memory.save_context({"input": prompt}, {"output": response_text})
-
             # Compute emergence scores
-            try:
-                # Use the sqlite_store from PMM
-                storage_mgr = pmm_memory.pmm.sqlite_store
-                scores = compute_emergence_scores(storage_manager=storage_mgr)
-                ias = scores.get("ias", 0.0)
-                gas = scores.get("gas", 0.0)
-            except Exception as e:
-                print(f"Error computing emergence scores: {e}")
-                ias = 0.0
-                gas = 0.0
+            scores = compute_emergence_scores(memory.pmm.sqlite_store)
+            ias = scores.get("ias", 0.0)
+            gas = scores.get("gas", 0.0)
 
-            # Controlled artifact injection for close path validation
-            if i == 3 and os.environ.get("PMM_INJECT_ARTIFACT", "0") == "1":  # Turn 4
-                try:
-                    # Create a dummy artifact to trigger commitment close
-                    artifact_content = f"Test artifact generated at turn {i+1}"
-                    artifact_path = f"test_artifact_turn_{i+1}.txt"
-
-                    # Write artifact to filesystem
-                    with open(artifact_path, "w") as f:
-                        f.write(artifact_content)
-
-                    # Directly manipulate commitment tracker for testing
-                    from pmm.commitments import Commitment
-                    import uuid
-                    from datetime import datetime
-
-                    # Create a test commitment manually
-                    test_commit_id = str(uuid.uuid4())[:8]
-                    test_commitment = Commitment(
-                        cid=test_commit_id,
-                        text="Test commitment for artifact validation",
-                        created_at=datetime.now().isoformat(),
-                        source_insight_id="test_validation",
-                        status="open",
-                    )
-
-                    # Add to tracker
-                    pmm_memory.pmm.commitment_tracker.commitments[test_commit_id] = (
-                        test_commitment
-                    )
-
-                    # Close the commitment manually
-                    test_commitment.status = "closed"
-                    test_commitment.closed_at = datetime.now().isoformat()
-                    test_commitment.close_note = (
-                        f"Closed with artifact: {artifact_path}"
-                    )
-
-                    print(f"[ARTIFACT] Injected test artifact: {artifact_path}")
-                    print(f"[ARTIFACT] Created and closed commitment: {test_commit_id}")
-
-                except Exception as e:
-                    print(f"Error injecting artifact: {e}")
-                    import traceback
-
-                    traceback.print_exc()
-
-            # Get commitment close rate from PMM
-            try:
-                commitments = pmm_memory.pmm.commitment_tracker.commitments
-                total_commitments = len(commitments)
-                closed_commitments = sum(
-                    1 for c in commitments.values() if c.status == "closed"
-                )
-                close_rate = (
-                    closed_commitments / total_commitments
-                    if total_commitments > 0
-                    else 0.0
-                )
-            except Exception as e:
-                print(f"Error getting commitment data: {e}")
-                close_rate = 0.0
+            # Get commitment close rate (prefer emergence snapshot if available)
+            close_rate = scores.get("commit_close_rate") or scores.get("close") or 0.0
 
             telemetry["ias_scores"].append(ias)
             telemetry["gas_scores"].append(gas)
             telemetry["close_rates"].append(close_rate)
 
-            print(f"[TRACK] identity {ias:.3f} growth {gas:.3f} close {close_rate:.3f}")
+            print(f"Telemetry: IAS={ias:.3f}, GAS={gas:.3f}, Close={close_rate:.3f}")
 
         except Exception as e:
             print(f"Error in turn {i+1}: {e}")
-            import traceback
-
-            traceback.print_exc()
             # Add zero scores for failed turns
             telemetry["ias_scores"].append(0.0)
             telemetry["gas_scores"].append(0.0)
