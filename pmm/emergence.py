@@ -345,23 +345,36 @@ class EmergenceAnalyzer:
             return round(min(1.0, matched / float(len(keywords))), 3)
 
         emb = _embed(text)
+        # Heuristic keyword score (used as fallback and safety-net)
+        t = str(text).lower()
+        keywords = [
+            "persistent mind model",
+            "pmm",
+            "memory",
+            "commitment",
+            "commitments",
+            "verifiable",
+            "identity",
+            "self-model",
+        ]
+        heuristic = round(
+            min(
+                1.0,
+                (
+                    (sum(1 for k in keywords if k in t) / float(len(keywords)))
+                    if keywords
+                    else 0.0
+                ),
+            ),
+            3,
+        )
         if emb is None:
             # Embedding path failed at runtime; use heuristic fallback
-            t = str(text).lower()
-            keywords = [
-                "persistent mind model",
-                "pmm",
-                "memory",
-                "commitment",
-                "commitments",
-                "verifiable",
-                "identity",
-                "self-model",
-            ]
-            matched = sum(1 for k in keywords if k in t)
-            return round(min(1.0, matched / float(len(keywords))), 3)
+            return heuristic
         sim = _cosine(emb, _PMM_DEF_EMB)
-        return float(round(_norm_01(sim, lo=0.20, hi=0.80), 3))
+        normed = float(round(_norm_01(sim, lo=0.20, hi=0.80), 3))
+        # Safety net: if embeddings are degenerate/low, prefer heuristic when higher
+        return max(normed, float(heuristic))
 
     def self_ref_rate(self, text: str) -> float:
         """Calculate rate of self-referential language (I, my, me)."""
