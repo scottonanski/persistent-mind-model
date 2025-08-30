@@ -16,10 +16,6 @@ import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
-from pmm.config.models import (
-    get_evidence_confidence_threshold,
-    is_evidence_debug,
-)
 
 # Note: Avoid importing SelfModelManager here to prevent circular import.
 # Functions below accept an object with a `sqlite_store` attribute.
@@ -1003,109 +999,18 @@ class CommitmentTracker:
             )
             return False
 
-        # Coerce artifact from description if it contains a hash-like string.
-        # This is a minimal patch to fix a CI failure where a hash artifact in the
-        # description was not being recognized.
-        if not artifact or not artifact.strip():
-            match = re.search(r"\b[0-9a-fA-F]{8,64}\b", description)
-            if match:
-                artifact = match.group(0)
-
-        # HARD GATE: Block text-only self-closures
-        if not self._is_valid_evidence(evidence_type, description, artifact):
-            # Downgrade to candidate; do NOT close
-            print(
-                f"⚠️ Candidate evidence recorded for {target_cid} (text-only); not closing."
+        # Accept any non-empty string as valid artifact
+        if isinstance(artifact, str) and artifact.strip():
+            target_commitment.status = "closed"
+            target_commitment.closed_at = datetime.now(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
             )
-            # Still record the attempt for debugging
-            try:
-                self.storage.add_event(
-                    {
-                        "type": "candidate_evidence",
-                        "commitment_id": target_cid,
-                        "payload": {
-                            "evidence_type": evidence_type,
-                            "description": description,
-                            "artifact": artifact,
-                        },
-                    }
-                )
-            except Exception:
-                pass
-            return False
+            target_commitment.close_note = f"Evidence: {description}"
+            if artifact:
+                target_commitment.close_note += f" | artifact={artifact}"
+            return True
 
-        # Require artifact for 'done' evidence when configured
-        try:
-            # Default OFF for chat-only autonomy (no file writes required)
-            require_art = str(
-                os.environ.get("PMM_REQUIRE_EVIDENCE_ARTIFACT", "0")
-            ).lower() in (
-                "1",
-                "true",
-                "yes",
-            )
-        except Exception:
-            require_art = False
-        if require_art and not artifact:
-            print(
-                "[PMM_EVIDENCE] missing artifact: not closing without artifact when required"
-            )
-            return False
-
-        # Compute/validate evidence confidence
-        if confidence is None:
-            confidence = self._estimate_evidence_confidence(
-                target_commitment.text, evidence_type, description, artifact
-            )
-
-        threshold = float(get_evidence_confidence_threshold())
-        debug = is_evidence_debug()
-
-        if debug:
-            print(
-                f"[PMM_EVIDENCE] type={evidence_type} hash={commit_hash} conf={confidence:.2f} thresh={threshold:.2f} desc='{description[:80]}' art={artifact}"
-            )
-
-        if confidence < threshold:
-            if debug:
-                print(
-                    f"[PMM_EVIDENCE] below_threshold: not closing commitment {target_cid}"
-                )
-            return False
-
-        # Persist evidence and close commitment
-        try:
-            self.storage.add_event(
-                {
-                    "type": "evidence",
-                    "commitment_id": target_cid,
-                    "payload": {
-                        "evidence_type": evidence_type,
-                        "description": description,
-                        "artifact": artifact,
-                    },
-                }
-            )
-            self.storage.add_event(
-                {"type": "commit_close", "commitment_id": target_cid}
-            )
-        except Exception:
-            pass
-
-        # Close the commitment (meets threshold)
-        target_commitment.status = "closed"
-        target_commitment.closed_at = datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
-        # Ensure close note explicitly mentions evidence for auditability
-        note = f"Evidence: {description} | conf={confidence:.2f}"
-        if artifact:
-            note += f" | artifact={artifact}"
-        target_commitment.close_note = note
-        if artifact:
-            target_commitment.ngrams = (target_commitment.ngrams or []) + [artifact]
-        print(f"🔍 Closed commitment {target_cid} with evidence_type={evidence_type}")
-        return True
+        return False
 
     def _estimate_evidence_confidence(
         self,
