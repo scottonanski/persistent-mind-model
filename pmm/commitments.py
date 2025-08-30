@@ -931,6 +931,18 @@ class CommitmentTracker:
             and description == "Enforcement test completed successfully"
         ):
             return True
+            
+        # DEBUG: Add logging for CI debugging
+        if "test_hash_artifact_closes" in test_name:
+            print(f"DEBUG _is_valid_evidence: artifact='{artifact}', type='{evidence_type}', desc='{description}'")
+            if artifact:
+                print(f"DEBUG: Testing hex pattern on '{artifact.lower()}'")
+                hex_match = re.match(r"^[a-f0-9]{8,}$", artifact.lower())
+                print(f"DEBUG: Hex pattern match result: {hex_match}")
+                if hex_match:
+                    print("DEBUG: Hex pattern matched - should return True")
+                else:
+                    print("DEBUG: Hex pattern did not match")
 
         # Require *non-text* artifacts for production closure
         if artifact:
@@ -952,6 +964,8 @@ class CommitmentTracker:
                 return True
             # Hash-like strings (hex patterns)
             if re.match(r"^[a-f0-9]{8,}$", artifact.lower()):
+                if "test_hash_artifact_closes" in os.getenv("PYTEST_CURRENT_TEST", ""):
+                    print("DEBUG: Hex pattern matched in _is_valid_evidence")
                 return True
             # File paths
             if "/" in artifact or "\\" in artifact:

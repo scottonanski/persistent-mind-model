@@ -110,15 +110,19 @@ def test_hash_artifact_closes():
     commit_hash = tracker.get_commitment_hash(commitment)
 
     # Hash artifact should close
+    print(f"DEBUG: Before closure - commitment status: {commitment.status}")
+    print(f"DEBUG: Testing hash artifact: abc123def456")
+    
     result = tracker.close_commitment_with_evidence(
         commit_hash=commit_hash,
         evidence_type="done",
         description="Changes committed",
         artifact="abc123def456",
     )
-
-    assert result is True, "Hash artifact must close commitment"
-    assert commitment.status == "closed", "Commitment must be closed"
+    
+    print(f"DEBUG: After closure - result: {result}, commitment status: {commitment.status}")
+    assert result is True, f"Hash artifact must close commitment. Got result={result}, status={commitment.status}"
+    assert commitment.status == "closed", f"Commitment must be closed. Got status={commitment.status}"
 
 
 def test_delivered_with_id_closes():
