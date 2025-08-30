@@ -322,12 +322,44 @@ class EmergenceAnalyzer:
             _PMM_DEF_EMB = ref_emb if ref_emb is not None else []
 
         if not _PMM_DEF_EMB:
-            # Fallback if embeddings unavailable
-            return 0.0
+            # Deterministic fallback: simple keyword heuristic when embeddings are unavailable
+            t = str(text).lower()
+            # Core PMM concepts
+            keywords = [
+                "persistent mind model",
+                "pmm",
+                "memory",
+                "commitment",
+                "commitments",
+                "verifiable",
+                "identity",
+                "self-model",
+            ]
+            matched = 0
+            for k in keywords:
+                if k in t:
+                    matched += 1
+            # Normalize to [0,1]
+            if not keywords:
+                return 0.0
+            return round(min(1.0, matched / float(len(keywords))), 3)
 
         emb = _embed(text)
         if emb is None:
-            return 0.0
+            # Embedding path failed at runtime; use heuristic fallback
+            t = str(text).lower()
+            keywords = [
+                "persistent mind model",
+                "pmm",
+                "memory",
+                "commitment",
+                "commitments",
+                "verifiable",
+                "identity",
+                "self-model",
+            ]
+            matched = sum(1 for k in keywords if k in t)
+            return round(min(1.0, matched / float(len(keywords))), 3)
         sim = _cosine(emb, _PMM_DEF_EMB)
         return float(round(_norm_01(sim, lo=0.20, hi=0.80), 3))
 
@@ -353,7 +385,21 @@ class EmergenceAnalyzer:
         if not text:
             return False
         try:
-            return experience_intent_score(text) >= 0.5
+            score = experience_intent_score(text)
+            if score is not None and score > 0.0:
+                return score >= 0.5
+            # Deterministic fallback when embeddings are unavailable
+            t = str(text).lower()
+            # Simple patterns capturing growth/learning/experience intent
+            if re.search(r"\bwhat (experiences|experience)\b", t):
+                return True
+            if "help me learn" in t or "learn more" in t:
+                return True
+            if re.search(r"\b(try|practice|experiment|experiments)\b", t):
+                return True
+            if re.search(r"\b(ways|how) to (improve|grow|develop)\b", t):
+                return True
+            return False
         except Exception:
             return False
 
