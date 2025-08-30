@@ -931,10 +931,12 @@ class CommitmentTracker:
             and description == "Enforcement test completed successfully"
         ):
             return True
-            
+
         # DEBUG: Add logging for CI debugging
         if "test_hash_artifact_closes" in test_name:
-            print(f"DEBUG _is_valid_evidence: artifact='{artifact}', type='{evidence_type}', desc='{description}'")
+            print(
+                f"DEBUG _is_valid_evidence: artifact='{artifact}', type='{evidence_type}', desc='{description}'"
+            )
             if artifact:
                 print(f"DEBUG: Testing hex pattern on '{artifact.lower()}'")
                 hex_match = re.match(r"^[a-f0-9]{8,}$", artifact.lower())
