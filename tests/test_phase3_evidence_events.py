@@ -183,7 +183,7 @@ def test_evidence_event_integration():
         )
 
         final_events = len(memory.pmm.model.self_knowledge.autobiographical_events)
-        added_events = final_events - initial_events
+        _ = final_events - initial_events
 
         # Assert via counts/structures instead of prints
 
@@ -196,7 +196,9 @@ def test_evidence_event_integration():
 
         if evidence_events:
             evidence_event = evidence_events[0]
-            assert evidence_event.type.startswith("evidence:"), "Evidence event type expected"
+            assert evidence_event.type.startswith(
+                "evidence:"
+            ), "Evidence event type expected"
             assert evidence_event.summary, "Evidence event should have summary"
             if evidence_event.evidence:
                 assert evidence_event.evidence.commit_ref, "Evidence needs commit_ref"
@@ -238,9 +240,9 @@ def test_artifact_extraction():
         extracted = tracker._extract_artifact(description)
         if extracted == expected_artifact:
             passed += 1
-            status = "✅"
+            _ = "✅"
         else:
-            status = "❌"
+            _ = "❌"
 
     success_rate = passed / len(test_cases)
     assert (
@@ -388,10 +390,7 @@ def test_phase3_acceptance_criteria():
     # 2. Commit close rate calculation
     total_commitments = len(tracker.commitments)
     closed_with_evidence = len(commitments_with_evidence)
-    commit_close_rate = (
-        closed_with_evidence / total_commitments if total_commitments else 0
-    )
-
+    _ = closed_with_evidence / total_commitments if total_commitments else 0
 
     # 3. Evidence events should have correct commit_ref hash round-trip
     for cid, commitment in tracker.commitments.items():

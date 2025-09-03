@@ -272,11 +272,15 @@ def main():
 
     # Only require OpenAI key when using an OpenAI provider
     if model_config.provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-        print("❌ OPENAI_API_KEY not set for OpenAI provider. Set it or choose a local Ollama model.")
+        print(
+            "❌ OPENAI_API_KEY not set for OpenAI provider. Set it or choose a local Ollama model."
+        )
         return
 
     # Use explicit agent path (CLI or PMM_AGENT_PATH) so chat shares the same store as harness
-    agent_path = getattr(args, "agent", None) or os.environ.get("PMM_AGENT_PATH", ".data/pmm.json")
+    agent_path = getattr(args, "agent", None) or os.environ.get(
+        "PMM_AGENT_PATH", ".data/pmm.json"
+    )
     # Ensure parent directory exists to avoid silent fallback
     try:
         parent = os.path.dirname(agent_path) or "."
@@ -440,8 +444,6 @@ def main():
         )
         return long or codey or keywords or low_emergence
 
-
-
     # Create enhanced system prompt with PMM context
     def get_pmm_system_prompt(
         identity_nudge: bool = False,
@@ -455,7 +457,7 @@ def main():
         def _messages_to_text(msgs) -> str:
             try:
                 out = []
-                for m in (msgs or []):
+                for m in msgs or []:
                     # LangChain BaseMessage typically has .type and .content
                     mtype = getattr(m, "type", None) or getattr(m, "role", "")
                     if mtype == "system":
@@ -750,9 +752,13 @@ def main():
     debug_on = bool(getattr(args, "debug", False))
     telemetry_flag = bool(getattr(args, "telemetry", False))
     # If telemetry is enabled, print the actual SQLite store path for verification
-    if telemetry_flag or (os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")):
+    if telemetry_flag or (
+        os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
+    ):
         try:
-            conn = getattr(getattr(pmm_memory.pmm, "sqlite_store", object()), "conn", None)
+            conn = getattr(
+                getattr(pmm_memory.pmm, "sqlite_store", object()), "conn", None
+            )
             if conn:
                 rows = conn.execute("PRAGMA database_list").fetchall()
                 if rows:
@@ -1196,7 +1202,11 @@ def main():
                     if sub == "close" and len(parts) > 2:
                         user_token = parts[2].strip()
                         # Optional evidence text after ID/hash
-                        evidence_text = at_cmd.split(" ", 3)[3].strip() if len(at_cmd.split(" ")) >= 4 else ""
+                        evidence_text = (
+                            at_cmd.split(" ", 3)[3].strip()
+                            if len(at_cmd.split(" ")) >= 4
+                            else ""
+                        )
 
                         # Resolve to canonical commit hash when possible
                         def resolve_commit_ref(token: str) -> str:
@@ -1257,23 +1267,37 @@ def main():
                                         }
                                         smm.sqlite_store.append_event(
                                             kind="evidence",
-                                            content=json.dumps(evidence_content, ensure_ascii=False),
-                                            meta={"commit_ref": commit_ref, "subsystem": "chat"},
+                                            content=json.dumps(
+                                                evidence_content, ensure_ascii=False
+                                            ),
+                                            meta={
+                                                "commit_ref": commit_ref,
+                                                "subsystem": "chat",
+                                            },
                                         )
                                         # Append commitment.close event
                                         smm.sqlite_store.append_event(
                                             kind="commitment.close",
-                                            content=json.dumps({"reason": "chat"}, ensure_ascii=False),
-                                            meta={"commit_ref": commit_ref, "subsystem": "chat"},
+                                            content=json.dumps(
+                                                {"reason": "chat"}, ensure_ascii=False
+                                            ),
+                                            meta={
+                                                "commit_ref": commit_ref,
+                                                "subsystem": "chat",
+                                            },
                                         )
                                     except Exception as ee:
                                         print(f"\n⚠️ SQLite mirror failed: {ee}")
-                                    print(f"\n✅ Closed commitment {user_token} (ref {commit_ref[:8]}) with evidence")
+                                    print(
+                                        f"\n✅ Closed commitment {user_token} (ref {commit_ref[:8]}) with evidence"
+                                    )
                                     continue
                                 else:
                                     # Fall back to legacy close by CID (if user_token is a cid)
                                     pmm_memory.pmm.mark_commitment(
-                                        user_token, "closed", "Closed via --@commitments"
+                                        user_token,
+                                        "closed",
+                                        "Closed via --@commitments",
                                     )
                                     print(f"\n✅ Closed commitment {user_token}")
                                     continue
@@ -1321,7 +1345,7 @@ def main():
                                 tier = c.get("tier", "permanent")
                                 h = (c.get("hash", "") or "")[:8]
                                 txt = (c.get("text", "") or "").replace("\n", " ")
-                                preview = (txt[:160] + ("…" if len(txt) > 160 else ""))
+                                preview = txt[:160] + ("…" if len(txt) > 160 else "")
                                 print(f"  • {cid} [{status}/{tier}] #{h} :: {preview}")
                             except Exception:
                                 print(f"  • {c.get('text','')}")

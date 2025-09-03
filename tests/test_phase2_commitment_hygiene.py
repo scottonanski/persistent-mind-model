@@ -72,7 +72,9 @@ def test_5_point_validation():
     for text, should_accept, reason in test_cases:
         commitment_text, ngrams = tracker.extract_commitment(text)
         is_accepted = commitment_text is not None
-        assert is_accepted == should_accept, f"Mismatch for '{text}': expected {should_accept} because {reason}, got {is_accepted}"
+        assert (
+            is_accepted == should_accept
+        ), f"Mismatch for '{text}': expected {should_accept} because {reason}, got {is_accepted}"
 
 
 def test_duplicate_detection():

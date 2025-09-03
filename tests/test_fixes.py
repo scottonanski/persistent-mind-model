@@ -159,7 +159,7 @@ def test_identity_logging():
         manager.sqlite_store = SQLiteStore(db_path)
 
         # Change name
-        old_name = manager.model.core_identity.name
+        _ = manager.model.core_identity.name
         new_name = "TestAgent"
         manager.set_name(new_name)
 

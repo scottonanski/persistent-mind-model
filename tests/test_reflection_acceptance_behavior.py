@@ -1,4 +1,6 @@
-import importlib, inspect, dataclasses, pytest
+import importlib
+import pytest
+
 
 def _find_reflection_mgr():
     # Prefer AtomicReflectionManager if present
@@ -11,11 +13,7 @@ def _find_reflection_mgr():
         pass
 
     # Fallback: look for classes with acceptance-like methods
-    candidates = ["pmm.reflection", "pmm.reflection.manager"]
-    import importlib
-    import inspect
-    import pytest
-
+    _ = ["pmm.reflection", "pmm.reflection.manager"]
 
     def _find_class(module_name: str, class_name: str):
         try:
@@ -23,7 +21,6 @@ def _find_reflection_mgr():
             return getattr(mod, class_name, None)
         except Exception:
             return None
-
 
     def test_reject_below_threshold(tmp_path):
         SelfModelManager = _find_class("pmm.self_model_manager", "SelfModelManager")
@@ -48,7 +45,6 @@ def _find_reflection_mgr():
         res = arm.add_insight("tiny thought", model_config={}, epoch=epoch)
         assert res is False, "Below-threshold reflection should be rejected"
 
-
     def test_accept_with_evidence_and_similarity(tmp_path):
         SelfModelManager = _find_class("pmm.self_model_manager", "SelfModelManager")
         AtomicReflectionManager = _find_class(
@@ -67,12 +63,9 @@ def _find_reflection_mgr():
         except Exception:
             epoch = 0
 
-        content = (
-            "commitment improved; evidence cmt:abc. Please update the docs and publish the README by Friday."
-        )
+        content = "commitment improved; evidence cmt:abc. Please update the docs and publish the README by Friday."
         res = arm.add_insight(content, model_config={}, epoch=epoch)
         assert res in (True, False)
-
 
     def test_reject_near_duplicate(tmp_path):
         SelfModelManager = _find_class("pmm.self_model_manager", "SelfModelManager")
@@ -93,7 +86,7 @@ def _find_reflection_mgr():
             epoch = 0
 
         content = "duplicate idea: unique-test-12345"
-        first = arm.add_insight(content, model_config={}, epoch=epoch)
+        _ = arm.add_insight(content, model_config={}, epoch=epoch)
         # second, identical insight should be considered duplicate and likely rejected
         second = arm.add_insight(content, model_config={}, epoch=epoch)
         assert second in (False, True)

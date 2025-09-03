@@ -3,7 +3,6 @@
 Test the improved commitment detection patterns.
 """
 
-import pytest
 from pmm.commitments import CommitmentTracker
 
 

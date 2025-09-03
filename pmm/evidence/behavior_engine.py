@@ -264,7 +264,7 @@ def process_reply_for_evidence(smm, reply_text: str) -> Optional[str]:
         try:
             s_cref2, _, s_sim2 = _best_open_commitment_semantic(smm, text)
         except Exception:
-            s_cref2, s_sim2 = None, 0.0
+            s_sim2 = 0.0
         base = 0.65
         if s_sim2 > 0:
             # Map sim [0.6..0.9+] to boost [0..0.15]
@@ -284,7 +284,9 @@ def process_reply_for_evidence(smm, reply_text: str) -> Optional[str]:
         conf = base + (0.1 if art else 0.0)
         conf = min(0.92, conf)
         content = {
-            "type": "done" if DONE_RX.search(text) or SYN_RX.search(text) else "implicit",
+            "type": (
+                "done" if DONE_RX.search(text) or SYN_RX.search(text) else "implicit"
+            ),
             "summary": summary,
             "artifact": art,
             "confidence": round(conf, 2),

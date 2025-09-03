@@ -3,7 +3,6 @@
 PMM Session Runner - Executes real PMM sessions with telemetry capture
 """
 import os
-from datetime import datetime
 import sys
 import json
 from pathlib import Path
@@ -91,10 +90,16 @@ def run_session():
             # After turn 3, simulate closing a commitment to test evidence mechanism
             if i == 2:  # After the 3rd turn (0-indexed)
                 try:
-                    tracker = memory.pmm.commitment_tracker  # CommitmentTracker instance
-                    open_list = tracker.get_open_commitments()  # returns dicts with "hash" keys
+                    tracker = (
+                        memory.pmm.commitment_tracker
+                    )  # CommitmentTracker instance
+                    open_list = (
+                        tracker.get_open_commitments()
+                    )  # returns dicts with "hash" keys
                     if open_list:
-                        commit_hash = open_list[-1]["hash"]  # close the most recent open one
+                        commit_hash = open_list[-1][
+                            "hash"
+                        ]  # close the most recent open one
                         ok = tracker.close_commitment_with_evidence(
                             commit_hash,
                             evidence_type="done",
@@ -114,14 +119,24 @@ def run_session():
                             }
                             smm.sqlite_store.append_event(
                                 kind="evidence",
-                                content=json.dumps(evidence_content, ensure_ascii=False),
-                                meta={"commit_ref": commit_hash, "subsystem": "harness"},
+                                content=json.dumps(
+                                    evidence_content, ensure_ascii=False
+                                ),
+                                meta={
+                                    "commit_ref": commit_hash,
+                                    "subsystem": "harness",
+                                },
                             )
                             # Append commitment.close event
                             smm.sqlite_store.append_event(
                                 kind="commitment.close",
-                                content=json.dumps({"reason": "harness"}, ensure_ascii=False),
-                                meta={"commit_ref": commit_hash, "subsystem": "harness"},
+                                content=json.dumps(
+                                    {"reason": "harness"}, ensure_ascii=False
+                                ),
+                                meta={
+                                    "commit_ref": commit_hash,
+                                    "subsystem": "harness",
+                                },
                             )
                         except Exception as ee:
                             print("SYSTEM: sqlite mirror failed:", ee)
@@ -133,7 +148,9 @@ def run_session():
             # Print the actual SQLite file path via PRAGMA database_list
             store_path = "?"
             try:
-                conn = getattr(getattr(memory.pmm, "sqlite_store", object()), "conn", None)
+                conn = getattr(
+                    getattr(memory.pmm, "sqlite_store", object()), "conn", None
+                )
                 if conn:
                     rows = conn.execute("PRAGMA database_list").fetchall()
                     if rows:
@@ -149,7 +166,9 @@ def run_session():
 
             # Compute emergence scores from the same sqlite store
             scores = compute_emergence_scores(storage_manager=memory.pmm.sqlite_store)
-            print("ANALYZER CONTEXT:", scores.get("events_analyzed"), scores.get("stage"))
+            print(
+                "ANALYZER CONTEXT:", scores.get("events_analyzed"), scores.get("stage")
+            )
             print("ANALYZER DB:", store_path)
             ias = scores.get("ias", 0.0)
             gas = scores.get("gas", 0.0)
@@ -160,9 +179,10 @@ def run_session():
             # Assert alignment between tracker and analyzer close rate when available
             try:
                 if snapshot and isinstance(snapshot, dict) and "close_rate" in snapshot:
-                    assert abs((snapshot.get("close_rate") or 0.0) - (close_rate or 0.0)) < 1e-6, (
-                        f"Close mismatch: tracker {snapshot.get('close_rate')} vs analyzer {close_rate}"
-                    )
+                    assert (
+                        abs((snapshot.get("close_rate") or 0.0) - (close_rate or 0.0))
+                        < 1e-6
+                    ), f"Close mismatch: tracker {snapshot.get('close_rate')} vs analyzer {close_rate}"
             except AssertionError as ae:
                 print("ALIGNMENT WARNING:", ae)
 

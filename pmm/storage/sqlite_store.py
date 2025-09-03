@@ -50,9 +50,7 @@ class SQLiteStore:
         self.conn.execute("PRAGMA foreign_keys=ON")
         # Migrate existing databases that still have a FK on directives.parent_id
         try:
-            fk_rows = list(
-                self.conn.execute("PRAGMA foreign_key_list('directives')")
-            )
+            fk_rows = list(self.conn.execute("PRAGMA foreign_key_list('directives')"))
             if fk_rows:  # any FK present -> rebuild without FK
                 with self._lock:
                     self.conn.execute("BEGIN IMMEDIATE")
@@ -84,10 +82,18 @@ class SQLiteStore:
                     self.conn.execute("DROP TABLE directives")
                     self.conn.execute("ALTER TABLE directives_new RENAME TO directives")
                     # Recreate indexes
-                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_directives_type ON directives(type)")
-                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_directives_status ON directives(status)")
-                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_directives_parent ON directives(parent_id)")
-                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_directives_created ON directives(created_at)")
+                    self.conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_directives_type ON directives(type)"
+                    )
+                    self.conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_directives_status ON directives(status)"
+                    )
+                    self.conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_directives_parent ON directives(parent_id)"
+                    )
+                    self.conn.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_directives_created ON directives(created_at)"
+                    )
                     self.conn.commit()
         except Exception:
             # Best-effort migration; continue even if it fails (DB may already be correct)
@@ -160,7 +166,9 @@ class SQLiteStore:
                         pass
             if inserted > 0:
                 try:
-                    print(f"[PMM][Exemplar] Auto-backfilled {inserted} closure exemplar(s)")
+                    print(
+                        f"[PMM][Exemplar] Auto-backfilled {inserted} closure exemplar(s)"
+                    )
                 except Exception:
                     pass
 

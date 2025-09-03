@@ -43,18 +43,17 @@ def test_identity_persistence():
             if e.type == "identity_change"
         ]
 
-
         # Test 2: Check probe endpoint (if running)
 
         try:
             response = requests.get("http://localhost:8000/identity", timeout=2)
             if response.status_code == 200:
-                data = response.json()
-                probe_working = True
+                _ = response.json()
+                _ = True
             else:
-                probe_working = False
+                _ = False
         except requests.exceptions.RequestException:
-            probe_working = False
+            _ = False
 
         # Test 3: Validate identity consistency
 
@@ -72,7 +71,7 @@ def test_identity_persistence():
         )
 
         # Probe is optional; core assertions below are deterministic
-        
+
         assert success, "Identity persistence tests failed"
 
     finally:

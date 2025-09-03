@@ -105,7 +105,9 @@ class PMMRuntime:
         reply = self.adapter.generate(messages, max_tokens=max_tokens)
 
         # Log response to hash chain
-        response_event = self._append("response", reply, {"role": "assistant", "model": self.model_name})
+        response_event = self._append(
+            "response", reply, {"role": "assistant", "model": self.model_name}
+        )
 
         # Update PMM mind state after response
         self._update_pmm_state(user_text, reply, response_event)
@@ -117,7 +119,9 @@ class PMMRuntime:
         self._evaluate_commitments(reply)
 
         # Self-directed triggers: adaptive micro/macro reflection and directive evolution
-        self._internal_autonomy_triggers(user_text=user_text, reply=reply, response_event=response_event)
+        self._internal_autonomy_triggers(
+            user_text=user_text, reply=reply, response_event=response_event
+        )
 
         return reply
 
@@ -217,7 +221,9 @@ RECENT INSIGHTS:
 
         return prompt
 
-    def _update_pmm_state(self, user_text: str, reply: str, response_event: Dict) -> None:
+    def _update_pmm_state(
+        self, user_text: str, reply: str, response_event: Dict
+    ) -> None:
         """Update PMM mind state after generating response."""
         # Check for identity updates (name changes) using strict detector + cooldown
         try:
@@ -474,7 +480,9 @@ RECENT INSIGHTS:
             # Never block on identity adoption
             pass
 
-    def _internal_autonomy_triggers(self, user_text: str, reply: str, response_event: Dict) -> None:
+    def _internal_autonomy_triggers(
+        self, user_text: str, reply: str, response_event: Dict
+    ) -> None:
         """Run adaptive, self-directed triggers after each exchange.
 
         Decides whether to micro-reflect recursively, macro-reflect, and evolve autonomy directives.
@@ -554,7 +562,9 @@ RECENT INSIGHTS:
         except Exception:
             pass
 
-    def macro_reflect(self, source_event: Dict, session_days: int = 3, max_events: int = 200) -> str | None:
+    def macro_reflect(
+        self, source_event: Dict, session_days: int = 3, max_events: int = 200
+    ) -> str | None:
         """Synthesize high-level insights over recent events and persist autonomy directives."""
         try:
             events = self.store.all_events()
@@ -598,7 +608,7 @@ RECENT INSIGHTS:
                 {"role": "user", "content": prompt},
             ]
             reply = self.adapter.generate(messages, max_tokens=256)
-            reflection_event = self._append(
+            self._append(
                 "reflection", reply, {"role": "assistant", "tag": "macro_reflection"}
             )
 

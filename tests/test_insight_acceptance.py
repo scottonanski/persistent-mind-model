@@ -12,9 +12,7 @@ def _arm(threshold=0.94):
 
 def _decide(sim, content, refs=None, threshold=0.94):
     arm = _arm(threshold)
-    return arm.should_accept_insight(
-        content=content, best_sim=sim, candidate_refs=refs
-    )
+    return arm.should_accept_insight(content=content, best_sim=sim, candidate_refs=refs)
 
 
 def test_reject_under_threshold_band():

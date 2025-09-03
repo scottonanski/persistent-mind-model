@@ -1,13 +1,16 @@
-import importlib, inspect, pytest
-from pathlib import Path
+import importlib
+import inspect
+import pytest
 
 # --- utilities ---------------------------------------------------------------
+
 
 def _first_attr(obj, *names):
     for n in names:
         if hasattr(obj, n):
             return getattr(obj, n)
     raise AttributeError(f"None of {names} on {obj}")
+
 
 def _get_or_key(rec, *names):
     for name in names:
@@ -16,6 +19,7 @@ def _get_or_key(rec, *names):
         if isinstance(rec, dict) and name in rec:
             return rec[name]
     raise AttributeError(f"record has no attr/key in {names}: {rec!r}")
+
 
 def _find_storage_class():
     """Prefer the repo's SQLiteStore if present, else fall back to discovery."""
@@ -40,7 +44,9 @@ def _find_storage_class():
                 return cls
     pytest.skip("No storage class with required methods found under pmm.storage.*")
 
+
 # --- tests -------------------------------------------------------------------
+
 
 def test_hash_chain_integrity(tmp_path):
     Store = _find_storage_class()
@@ -70,8 +76,9 @@ def test_hash_chain_integrity(tmp_path):
     # Each event after the first must link to the previous hash
     for prev, cur in zip(chain, chain[1:]):
         prev_hash = _get_or_key(prev, "hash", "event_hash", "digest")
-        cur_prev  = _get_or_key(cur, "prev_hash", "previous_hash", "parent_hash")
+        cur_prev = _get_or_key(cur, "prev_hash", "previous_hash", "parent_hash")
         assert cur_prev == prev_hash, "Hash chain broken between consecutive events"
+
 
 def test_event_order_is_stable(tmp_path):
     Store = _find_storage_class()

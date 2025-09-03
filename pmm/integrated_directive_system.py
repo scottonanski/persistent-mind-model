@@ -229,7 +229,9 @@ class IntegratedDirectiveSystem:
             ]
             has_time = 1 if any(w in lower for w in time_words) else 0
 
-            structure_bonus = 0.04 * (first_person + has_number + has_percent + has_time)
+            structure_bonus = 0.04 * (
+                first_person + has_number + has_percent + has_time
+            )
 
             # Final confidence favors commitment similarity minus non-directive and adds structure
             confidence = (c_max - n_max) + structure_bonus

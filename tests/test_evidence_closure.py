@@ -1,6 +1,6 @@
-import pytest
 from unittest.mock import MagicMock
 from pmm.langchain_memory import PersistentMindMemory
+
 
 def test_evidence_closes_commitment(tmp_path):
     """Verify that a 'done' evidence string closes the correct commitment."""
@@ -32,6 +32,7 @@ def test_evidence_closes_commitment(tmp_path):
         description="Completed the task",
         artifact=None,
     )
+
 
 def test_placeholder_for_evidence_closure():
     """A placeholder test for the evidence closure mechanism."""

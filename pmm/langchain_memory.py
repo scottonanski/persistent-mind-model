@@ -716,7 +716,7 @@ class PersistentMindMemory(BaseChatMemory):
             non_behavioral_exemplars = [
                 "DEBUG: initialized service; pid=4321; ts=2025-08-29T12:00:00Z",
                 "Traceback (most recent call last):\n  File 'x.py', line 10, in <module>\n  raise ValueError('oops')",
-                "{\"event\":\"metrics\",\"values\":[1,2,3],\"ok\":true}",
+                '{"event":"metrics","values":[1,2,3],"ok":true}',
                 "[LOG] GET /health 200 in 12ms",
                 "ERROR: connection refused at 10.0.0.2:5432",
                 "INFO 2025-08-30T09:00:00Z Job completed successfully",
@@ -1781,6 +1781,7 @@ class PersistentMindMemory(BaseChatMemory):
             # Best-effort; never crash memory flow on evidence detection
             pass
         return detected
+
     def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Return history buffer with prepended PMM context."""
         # Get the chat history messages from the buffer
@@ -1803,21 +1804,33 @@ class PersistentMindMemory(BaseChatMemory):
                     try:
                         if isinstance(x, dict):
                             return x.get("content") or x.get("text") or str(x)
-                        return getattr(x, "content", None) or getattr(x, "text", None) or str(x)
+                        return (
+                            getattr(x, "content", None)
+                            or getattr(x, "text", None)
+                            or str(x)
+                        )
                     except Exception:
                         return str(x)
 
                 meta_principles = self.directive_system.get_meta_principles()
                 if meta_principles:
                     pmm_context_parts.append(
-                        "\n".join([f"[Meta-Principle] {_content_of(p)}" for p in meta_principles])
+                        "\n".join(
+                            [
+                                f"[Meta-Principle] {_content_of(p)}"
+                                for p in meta_principles
+                            ]
+                        )
                     )
 
                 active_principles = self.directive_system.get_active_principles()
                 if active_principles:
                     pmm_context_parts.append(
                         "\n".join(
-                            [f"[Guiding Principle] {_content_of(p)}" for p in active_principles]
+                            [
+                                f"[Guiding Principle] {_content_of(p)}"
+                                for p in active_principles
+                            ]
                         )
                     )
 
@@ -1825,7 +1838,10 @@ class PersistentMindMemory(BaseChatMemory):
                 if active_commitments:
                     pmm_context_parts.append(
                         "\n".join(
-                            [f"[Commitment] {_content_of(c)}" for c in active_commitments]
+                            [
+                                f"[Commitment] {_content_of(c)}"
+                                for c in active_commitments
+                            ]
                         )
                     )
                 else:
@@ -1837,9 +1853,17 @@ class PersistentMindMemory(BaseChatMemory):
                             else None
                         )
                         if commitments:
+
                             def _get_content(c):
-                                return getattr(c, "content", c.get("content", str(c))) if isinstance(c, dict) or hasattr(c, "content") else str(c)
-                            formatted = [f"[Commitment] {_get_content(c)}" for c in commitments]
+                                return (
+                                    getattr(c, "content", c.get("content", str(c)))
+                                    if isinstance(c, dict) or hasattr(c, "content")
+                                    else str(c)
+                                )
+
+                            formatted = [
+                                f"[Commitment] {_get_content(c)}" for c in commitments
+                            ]
                             if formatted:
                                 pmm_context_parts.append("\n".join(formatted))
                     except Exception:
@@ -1847,12 +1871,24 @@ class PersistentMindMemory(BaseChatMemory):
             else:
                 # No directive system: best-effort to surface commitments from PMM model
                 try:
-                    if hasattr(self.pmm, "model") and hasattr(self.pmm.model, "self_knowledge"):
-                        commitments = getattr(self.pmm.model.self_knowledge, "commitments", None)
+                    if hasattr(self.pmm, "model") and hasattr(
+                        self.pmm.model, "self_knowledge"
+                    ):
+                        commitments = getattr(
+                            self.pmm.model.self_knowledge, "commitments", None
+                        )
                         if commitments:
+
                             def _get_content(c):
-                                return getattr(c, "content", c.get("content", str(c))) if isinstance(c, dict) or hasattr(c, "content") else str(c)
-                            formatted = [f"[Commitment] {_get_content(c)}" for c in commitments]
+                                return (
+                                    getattr(c, "content", c.get("content", str(c)))
+                                    if isinstance(c, dict) or hasattr(c, "content")
+                                    else str(c)
+                                )
+
+                            formatted = [
+                                f"[Commitment] {_get_content(c)}" for c in commitments
+                            ]
                             if formatted:
                                 pmm_context_parts.append("\n".join(formatted))
                 except Exception:

@@ -105,9 +105,9 @@ def test_behavioral_event_counting():
 
         # Check event counts
         all_events = memory.pmm.model.self_knowledge.autobiographical_events
-        behavioral_events = [e for e in all_events if e.type != "non_behavioral"]
+        _ = [e for e in all_events if e.type != "non_behavioral"]
 
-    # Should have added events and at least one non-behavioral and one behavioral
+        # Should have added events and at least one non-behavioral and one behavioral
         assert len(all_events) > initial_event_count, "Should have added events"
         assert (
             len([e for e in all_events if e.type == "non_behavioral"]) > 0
@@ -119,7 +119,9 @@ def test_behavioral_event_counting():
 def test_commitment_extraction_skipping():
     """Test that commitments aren't extracted from non-behavioral inputs."""
     # PMM does not currently implement a debug-line filter; mark as expected failure
-    pytest.xfail("No debug-line filter implemented; debug inputs may still trigger commitments.")
+    pytest.xfail(
+        "No debug-line filter implemented; debug inputs may still trigger commitments."
+    )
 
     with tempfile.TemporaryDirectory() as temp_dir:
         agent_path = os.path.join(temp_dir, "test_agent.json")
@@ -135,7 +137,7 @@ def test_commitment_extraction_skipping():
 
         final_commitments = len(memory.pmm.model.self_knowledge.commitments)
 
-    # Should not have extracted commitment from debug input
+        # Should not have extracted commitment from debug input
         assert (
             final_commitments == initial_commitments
         ), f"Should not extract commitments from debug input. Before: {initial_commitments}, After: {final_commitments}"

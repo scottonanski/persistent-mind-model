@@ -19,11 +19,14 @@ def query_events(kind: str, limit: int):
     # We can query it directly using the internal sqlite_store connection.
     try:
         cursor = store.conn.cursor()
-        if kind == 'all':
+        if kind == "all":
             cursor.execute("SELECT * FROM events ORDER BY ts DESC LIMIT ?", (limit,))
         else:
-            cursor.execute("SELECT * FROM events WHERE kind = ? ORDER BY ts DESC LIMIT ?", (kind, limit))
-        
+            cursor.execute(
+                "SELECT * FROM events WHERE kind = ? ORDER BY ts DESC LIMIT ?",
+                (kind, limit),
+            )
+
         rows = cursor.fetchall()
         if not rows:
             print(f"No events of kind '{kind}' found.")
@@ -31,7 +34,7 @@ def query_events(kind: str, limit: int):
 
         # Get column names from cursor description
         column_names = [description[0] for description in cursor.description]
-        
+
         print(f"--- Last {len(rows)} '{kind}' events ---")
         for row in rows:
             event_data = dict(zip(column_names, row))
@@ -43,10 +46,21 @@ def query_events(kind: str, limit: int):
         # The PMM object handles its own DB connection lifecycle, so we don't close it here.
         pass
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Query the PMM event log.")
-    parser.add_argument("kind", type=str, help="The kind of event to query (e.g., 'commitment', 'evidence', 'all').")
-    parser.add_argument("limit", type=int, nargs='?', default=5, help="The maximum number of events to return.")
+    parser.add_argument(
+        "kind",
+        type=str,
+        help="The kind of event to query (e.g., 'commitment', 'evidence', 'all').",
+    )
+    parser.add_argument(
+        "limit",
+        type=int,
+        nargs="?",
+        default=5,
+        help="The maximum number of events to return.",
+    )
     args = parser.parse_args()
 
     query_events(args.kind, args.limit)

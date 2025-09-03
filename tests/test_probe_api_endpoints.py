@@ -1,7 +1,13 @@
 import pytest
 
-fastapi = pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient
+try:
+    import fastapi  # noqa: F401
+    from fastapi.testclient import TestClient
+except Exception:  # FastAPI not available; skip entire module
+    pytest.skip(
+        "fastapi not installed; skipping probe API tests", allow_module_level=True
+    )
+
 
 def _import_app():
     # accept multiple possible module paths
@@ -13,6 +19,7 @@ def _import_app():
         except Exception:
             continue
     pytest.skip("FastAPI probe app not found (pmm.api.probe:app).")
+
 
 def test_probe_endpoints_up():
     app = _import_app()
@@ -26,6 +33,9 @@ def test_probe_endpoints_up():
     # sanity on a couple of core endpoints if present
     for path in ("/identity", "/emergence", "/health"):
         resp = client.get(path)
-        assert resp.status_code in (200, 404), f"{path} should exist or be intentionally absent"
+        assert resp.status_code in (
+            200,
+            404,
+        ), f"{path} should exist or be intentionally absent"
         if resp.status_code == 200:
             assert resp.json() is not None

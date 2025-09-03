@@ -110,7 +110,9 @@ def _validate_insight_references(
     return is_accepted, referenced_ids
 
 
-def validate_insight_references(content: str, mgr: SelfModelManager) -> Tuple[bool, List[str]]:
+def validate_insight_references(
+    content: str, mgr: SelfModelManager
+) -> Tuple[bool, List[str]]:
     """
     Public wrapper exposing insight reference validation.
 
@@ -665,18 +667,25 @@ def reflect_once(
             print(f"[DEBUG] Recent events count: {len(recent_events)}")
         for event in recent_events:
             if os.getenv("PMM_DEBUG") == "1":
-                print(f"[DEBUG] Event kind: {event.get('kind')}, content preview: {event.get('content', '')[:100]}")
+                print(
+                    f"[DEBUG] Event kind: {event.get('kind')}, content preview: {event.get('content', '')[:100]}"
+                )
             if event.get("kind") == "event":
                 content = event.get("content", "")
                 if "User said:" in content:
                     user_message = content.split("User said:", 1)[1].strip()
                     if os.getenv("PMM_DEBUG") == "1":
                         print(f"[DEBUG] Checking user message: '{user_message}'")
-                    user_commitment, _ = mgr.commitment_tracker.extract_commitment(user_message)
+                    user_commitment, _ = mgr.commitment_tracker.extract_commitment(
+                        user_message
+                    )
                     if user_commitment:
                         cid = mgr.add_commitment(user_commitment, ins_id)
                         if cid:
-                            _log("commitment", f"Added commitment from user message {cid}: {user_commitment[:50]}...")
+                            _log(
+                                "commitment",
+                                f"Added commitment from user message {cid}: {user_commitment[:50]}...",
+                            )
                     elif os.getenv("PMM_DEBUG") == "1":
                         print(f"[DEBUG] No commitment extracted from: '{user_message}'")
                 elif os.getenv("PMM_DEBUG") == "1":

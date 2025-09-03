@@ -66,6 +66,7 @@ class CommitmentTracker:
             return False
         # Structural checks (timeframe, artifact, number)
         import re
+
         has_time = bool(
             re.search(
                 r"\b(today|tomorrow|tonight|now|asap|soon|this\s+week|next\s+week|by\s+\w+|within\s+\d+\s+(?:days?|hours?|weeks?))\b",
@@ -73,7 +74,13 @@ class CommitmentTracker:
                 re.IGNORECASE,
             )
         )
-        has_artifact = bool(re.search(r"\b(\.py|\.md|\.json|\.yaml|\.yml|pr\s*#?\d+|issue\s*#?\d+|report|dataset|docs?/\S+|/\S+\.(?:py|md|json|yaml|yml))\b", t, re.IGNORECASE))
+        has_artifact = bool(
+            re.search(
+                r"\b(\.py|\.md|\.json|\.yaml|\.yml|pr\s*#?\d+|issue\s*#?\d+|report|dataset|docs?/\S+|/\S+\.(?:py|md|json|yaml|yml))\b",
+                t,
+                re.IGNORECASE,
+            )
+        )
         has_number = bool(re.search(r"\b\d+\b", t))
         if not (has_time or has_artifact or has_number):
             # Semantic fallback (commit vs principle exemplar)
@@ -91,8 +98,6 @@ class CommitmentTracker:
             except Exception:
                 return False
         return True
-
-    
 
     def _score_commitment(self, text: str) -> Dict[str, Any]:
         """Score a commitment against the 5 criteria to support tentative acceptance.
@@ -256,10 +261,18 @@ class CommitmentTracker:
                 "i acknowledge",
             )
         ) and not any(
-            e in t for e in ("someone should", "we should", "they should", "it would be good")
+            e in t
+            for e in ("someone should", "we should", "they should", "it would be good")
         )
 
-        score = sum((1 if actionable else 0, 1 if context else 0, 1 if time_ok else 0, 1 if owned else 0))
+        score = sum(
+            (
+                1 if actionable else 0,
+                1 if context else 0,
+                1 if time_ok else 0,
+                1 if owned else 0,
+            )
+        )
         return {
             "actionable": actionable,
             "context": context,
@@ -282,7 +295,11 @@ class CommitmentTracker:
             if not cand:
                 continue
             sc = self._score_commitment(cand)
-            if sc.get("score", 0) >= min_score and sc.get("owned") and sc.get("actionable"):
+            if (
+                sc.get("score", 0) >= min_score
+                and sc.get("owned")
+                and sc.get("actionable")
+            ):
                 # Normalize into a first-person commitment if missing leading pronoun
                 normalized = cand if cand.lower().startswith("i ") else f"I will {cand}"
                 return normalized, self._generate_ngrams(normalized)
@@ -516,10 +533,15 @@ class CommitmentTracker:
                 c._just_reinforced = True
                 # Auto-promote tentative -> open/permanent upon first reinforcement
                 try:
-                    promote_after = int(os.getenv("PMM_TENTATIVE_PROMOTE_REINFORCEMENTS", "1"))
+                    promote_after = int(
+                        os.getenv("PMM_TENTATIVE_PROMOTE_REINFORCEMENTS", "1")
+                    )
                 except Exception:
                     promote_after = 1
-                if getattr(c, "status", "open") == "tentative" and c.reinforcements >= promote_after:
+                if (
+                    getattr(c, "status", "open") == "tentative"
+                    and c.reinforcements >= promote_after
+                ):
                     c.status = "open"
                     try:
                         c.tier = "permanent"
@@ -602,7 +624,10 @@ class CommitmentTracker:
         """Promote a tentative commitment to open/permanent when evidence references it."""
         for c in self.commitments.values():
             try:
-                if self.get_commitment_hash(c) == commit_hash and getattr(c, "status", "open") == "tentative":
+                if (
+                    self.get_commitment_hash(c) == commit_hash
+                    and getattr(c, "status", "open") == "tentative"
+                ):
                     c.status = "open"
                     try:
                         c.tier = "permanent"
@@ -611,7 +636,9 @@ class CommitmentTracker:
                     try:
                         from pmm.logging_config import pmm_dlog
 
-                        pmm_dlog(f"[COMMIT^] promoted tentative -> open via evidence {c.cid}")
+                        pmm_dlog(
+                            f"[COMMIT^] promoted tentative -> open via evidence {c.cid}"
+                        )
                     except Exception:
                         pass
                     return
