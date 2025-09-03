@@ -70,7 +70,7 @@ class _MockOpenAI:
         return _MockEmbeddingsResp(vec)
 
 
-def test_dedup_parity_with_memory_path(monkeypatch):
+def test_dedup_parity_with_memory_path(monkeypatch, tmp_path):
     """`PersistentMindMemory` path should match AtomicReflectionManager decisions.
 
     We construct recent insights, mock embeddings to make the new content a duplicate,
@@ -104,8 +104,8 @@ def test_dedup_parity_with_memory_path(monkeypatch):
         sys.modules, "openai", types.SimpleNamespace(OpenAI=_mock_openai_constructor)
     )
 
-    # Build memory wrapper but inject our DummyPMM
-    mem = PersistentMindMemory(agent_path=":memory:")
+    # Build memory wrapper at a valid temp path and inject our DummyPMM
+    mem = PersistentMindMemory(agent_path=str(tmp_path / "agent.json"))
     mem.pmm = pmm_mgr
 
     arm = AtomicReflectionManager(pmm_mgr, embedding_threshold=0.90)

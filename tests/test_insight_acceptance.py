@@ -5,14 +5,14 @@ from pmm.atomic_reflection import AtomicReflectionManager
 def _arm(threshold=0.94):
     # Bypass __init__ so we don't need a full PMM manager
     arm = object.__new__(AtomicReflectionManager)
-    # Minimal attributes used by _should_accept_insight
+    # Minimal attributes used by should_accept_insight
     arm._effective_threshold = threshold
     return arm
 
 
 def _decide(sim, content, refs=None, threshold=0.94):
     arm = _arm(threshold)
-    return arm._should_accept_insight(
+    return arm.should_accept_insight(
         content=content, best_sim=sim, candidate_refs=refs
     )
 

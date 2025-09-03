@@ -683,13 +683,20 @@ class EmergenceAnalyzer:
         window_env = self._env_int("PMM_EMERGENCE_WINDOW", window)
         kinds = self._env_csv(
             "PMM_EMERGENCE_TYPES",
-            ["self_expression", "response", "reflection", "commitment", "evidence"],
+            [
+                "self_expression",
+                "response",
+                "event",  # Treat generic PMM 'event' rows as conversational content
+                "reflection",
+                "commitment",
+                "evidence",
+            ],
         )
 
-        # We compute metrics from self_expression events (actual AI responses) and responses
-        # PMM stores conversational responses as "self_expression" not "response"
+        # We compute metrics from conversational outputs. Prefer 'self_expression' and 'response',
+        # and include 'event' because PMM commonly logs conversational turns as generic 'event' rows.
         primary_events = self.get_recent_events(
-            ["self_expression", "response"], limit=window_env
+            ["self_expression", "response", "event"], limit=window_env
         )
         all_events = self.get_recent_events(kinds, limit=window_env)
         events = primary_events

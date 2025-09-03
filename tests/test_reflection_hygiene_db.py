@@ -2,7 +2,7 @@ import types
 
 import pytest
 
-from pmm.reflection import _validate_insight_references
+from pmm.reflection import validate_insight_references
 
 
 class FakeEvent:
@@ -44,7 +44,7 @@ def test_validate_insight_references_event_and_commit_matches():
     # Content references both an event id and a short commit hash
     content = "I noticed from event ev202 that my memory improved. Also see abcdef12."
 
-    accepted, refs = _validate_insight_references(content, mgr)
+    accepted, refs = validate_insight_references(content, mgr)
 
     assert accepted is True
     # Should capture ev202 and commit short hash expanded to 16 chars
@@ -63,7 +63,7 @@ def test_validate_insight_references_soft_accept_self_anchor():
         "I think my identity is shifting towards better commitment follow-through."
     )
 
-    accepted, refs = _validate_insight_references(content, mgr)
+    accepted, refs = validate_insight_references(content, mgr)
 
     assert accepted is True
     assert any(str(r).startswith("unverified:") for r in refs)
@@ -78,7 +78,7 @@ def test_validate_insight_references_reject_plaintext():
     # No IDs and no anchors -> reject
     content = "This is a generic statement without references."
 
-    accepted, refs = _validate_insight_references(content, mgr)
+    accepted, refs = validate_insight_references(content, mgr)
 
     assert accepted is False
     assert refs == []

@@ -48,9 +48,15 @@ class SelfModelManager:
         if not db_path:
             try:
                 model_dir = os.path.dirname(os.path.abspath(self.model_path))
-                db_path = os.path.join(model_dir, "pmm.db")
+                # Avoid nesting .data/.data when model_path already resides under .data
+                if os.path.basename(model_dir) == ".data":
+                    data_dir = model_dir
+                else:
+                    data_dir = os.path.join(model_dir, ".data")
+                os.makedirs(data_dir, exist_ok=True)
+                db_path = os.path.join(data_dir, "pmm.db")
             except Exception:
-                db_path = "pmm.db"
+                db_path = ".data/pmm.db"
         self.sqlite_store = SQLiteStore(db_path)
 
         self.model = self.load_model()
@@ -364,7 +370,7 @@ class SelfModelManager:
             # Include all relevant data in hash computation
             event_payload = {
                 "ts": ts,
-                "kind": "event",
+                "kind": etype,
                 "summary": summary,
                 "id": ev_id,
                 "tags": tags,
@@ -377,7 +383,7 @@ class SelfModelManager:
 
             # Write to SQLite with consistent fields
             self.sqlite_store.append_event(
-                kind="event",
+                kind=etype,
                 content=summary,
                 meta={
                     "id": ev_id,

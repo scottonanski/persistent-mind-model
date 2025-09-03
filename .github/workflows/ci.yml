@@ -6,6 +6,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,7 +33,7 @@ jobs:
         run: |
           python -m pip install -U pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest black ruff
+          pip install pytest pytest-timeout black ruff
       - name: Black
         if: steps.changes.outputs.code == 'true'
         run: black --check .
@@ -44,4 +45,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-fake-key-for-testing' }}
           PMM_SKIP_OPENAI_TESTS: ${{ secrets.OPENAI_API_KEY == '' && 'true' || 'false' }}
-        run: pytest -q
+          PYTHONFAULTHANDLER: "1"
+        run: pytest -vv -ra --maxfail=1 --durations=25 \
+          --timeout=300 --timeout-method=thread \
+          -m "not slow and not integration and not network"

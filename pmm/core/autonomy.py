@@ -126,7 +126,6 @@ class AutonomyLoop:
         )
         self.trigger_state = TriggerState(
             last_reflection_at=last_dt,
-            last_event_id=None,
             events_since_reflection=int(events_since),
         )
 

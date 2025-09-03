@@ -113,7 +113,8 @@ class PersistentMindMemory(BaseChatMemory):
             personality_config: Optional initial personality configuration
         """
         super().__init__()
-        self.pmm = SelfModelManager(agent_path)
+        model_file_path = os.path.join(agent_path, "persistent_self_model.json")
+        self.pmm = SelfModelManager(model_file_path)
         self.directive_system = IntegratedDirectiveSystem(
             storage_manager=self.pmm.sqlite_store
         )
@@ -691,6 +692,74 @@ class PersistentMindMemory(BaseChatMemory):
         except Exception:
             self.commitment_context = ""
 
+    def _semantic_intent_is_non_behavioral(self, text: str) -> Optional[bool]:
+        """Lightweight semantic intent classifier.
+
+        Returns True if input is semantically non-behavioral (logs/debug/pastes),
+        False if behavioral (questions/requests/dialogue), or None if uncertain.
+        """
+        try:
+            raw = (text or "").strip()
+            if not raw:
+                return None
+
+            # Quick structure signals
+            # High symbol density and long length suggests paste/log
+            symbol_ratio = sum(ch in "{}[]<>:=#;/\\|`~$%^&*()" for ch in raw) / max(
+                1, len(raw)
+            )
+            if len(raw) > 1200 and symbol_ratio > 0.03:
+                return True
+
+            analyzer = get_semantic_analyzer()
+
+            non_behavioral_exemplars = [
+                "DEBUG: initialized service; pid=4321; ts=2025-08-29T12:00:00Z",
+                "Traceback (most recent call last):\n  File 'x.py', line 10, in <module>\n  raise ValueError('oops')",
+                "{\"event\":\"metrics\",\"values\":[1,2,3],\"ok\":true}",
+                "[LOG] GET /health 200 in 12ms",
+                "ERROR: connection refused at 10.0.0.2:5432",
+                "INFO 2025-08-30T09:00:00Z Job completed successfully",
+                "npm ERR! code ERESOLVE",
+                "[API] POST /v1/items payload size=3",
+                "<html><body>500 Internal Server Error</body></html>",
+                "2025-08-30 10:12:01,233 | module | level=INFO | message=started",
+            ]
+
+            behavioral_exemplars = [
+                "Can you help me summarize this?",
+                "What should we try next to improve performance?",
+                "Let's plan the next step and assign an action.",
+                "I have a question about the results.",
+                "Please analyze this output and suggest changes.",
+                "How do I fix this bug?",
+            ]
+
+            def max_sim(text: str, refs: List[str]) -> float:
+                best = 0.0
+                for r in refs:
+                    best = max(best, analyzer.cosine_similarity(text, r))
+                return best
+
+            nb_score = max_sim(raw, non_behavioral_exemplars)
+            b_score = max_sim(raw, behavioral_exemplars)
+
+            # Margin decision: require clear separation
+            margin = 0.12
+            if nb_score - b_score > margin:
+                return True
+            if b_score - nb_score > margin:
+                return False
+
+            # Additional signal: many newlines typical of pastes/logs
+            if raw.count("\n") > 12 and symbol_ratio > 0.01:
+                return True
+
+            return None
+        except Exception:
+            # Fail open to heuristic path
+            return None
+
     def _is_non_behavioral_input(self, text: str) -> bool:
         """
         Determine if input should be treated as non-behavioral (debug/log/paste).
@@ -701,6 +770,14 @@ class PersistentMindMemory(BaseChatMemory):
         if not text or not text.strip():
             return False
 
+        # 1) Semantic classifier first
+        decision = self._semantic_intent_is_non_behavioral(text)
+        if decision is True:
+            return True
+        if decision is False:
+            return False
+
+        # 2) Fallback heuristics
         lines = text.strip().split("\n")
 
         # Single line checks
@@ -742,6 +819,15 @@ class PersistentMindMemory(BaseChatMemory):
 
         # If >50% are debug lines, treat as non-behavioral
         return debug_lines > len(lines) * 0.5
+
+    def is_non_behavioral_input(self, text: str) -> bool:
+        """
+        Public wrapper for `_is_non_behavioral_input`.
+
+        Exposes input hygiene classification as a stable API for tests and clients
+        without relying on private methods.
+        """
+        return self._is_non_behavioral_input(text)
 
     def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
         """
@@ -967,10 +1053,10 @@ class PersistentMindMemory(BaseChatMemory):
                         tags.append("identity")
                 except Exception:
                     pass
-                self.pmm.add_event(
+                response_event_id = self.pmm.add_event(
                     summary=f"I responded: {ai_output[:200]}{'...' if len(ai_output) > 200 else ''}",
                     effects=[],
-                    etype="self_expression",
+                    etype="response",
                     tags=tags,
                 )
 
@@ -1021,54 +1107,53 @@ class PersistentMindMemory(BaseChatMemory):
             except Exception:
                 pass
 
-            # ---- 3) Commitments: extract + add from USER INPUT and AI RESPONSE ----
-            # Skip commitment extraction and behavioral processing for non-behavioral inputs
+            # ---- 3) Commitments: extract + add from AI RESPONSE (always) and USER INPUT (gated) ----
             new_commitment_text = None
-            if not is_non_behavioral:
-                try:
-                    # Use integrated directive system instead of old CommitmentTracker
-                    detected_directives = self.directive_system.process_response(
-                        user_message=human_input,
-                        ai_response=ai_output,
-                        event_id=f"langchain_{self.conversation_count}",
-                    )
+            # Always analyze assistant output for directives/commitments regardless of user input being behavioral
+            try:
+                # Use integrated directive system instead of old CommitmentTracker
+                detected_directives = self.directive_system.process_response(
+                    user_message=human_input,
+                    ai_response=ai_output,
+                    event_id=response_event_id,
+                )
 
-                    if detected_directives:
+                if detected_directives:
+                    pmm_dlog(
+                        f"🔍 DEBUG: Detected {len(detected_directives)} directives:"
+                    )
+                    for directive in detected_directives:
                         pmm_dlog(
-                            f"🔍 DEBUG: Detected {len(detected_directives)} directives:"
+                            f"  - {directive.__class__.__name__}: {directive.content[:80]}..."
                         )
-                        for directive in detected_directives:
-                            pmm_dlog(
-                                f"  - {directive.__class__.__name__}: {directive.content[:80]}..."
+
+                        # Add to PMM for backward compatibility
+                        if hasattr(directive, "content"):
+                            self.pmm.add_commitment(
+                                text=directive.content,
+                                source_insight_id="langchain_interaction",
                             )
+                            new_commitment_text = directive.content
+                else:
+                    pmm_dlog("🔍 DEBUG: No directives found in conversation")
 
-                            # Add to PMM for backward compatibility
-                            if hasattr(directive, "content"):
-                                self.pmm.add_commitment(
-                                    text=directive.content,
-                                    source_insight_id="langchain_interaction",
-                                )
-                                new_commitment_text = directive.content
-                    else:
-                        pmm_dlog("🔍 DEBUG: No directives found in conversation")
+                # Check for evolution triggers
+                evolution_triggered = (
+                    self.directive_system.trigger_evolution_if_needed()
+                )
+                if evolution_triggered:
+                    pmm_dlog("🔍 DEBUG: Meta-principle triggered natural evolution")
 
-                    # Check for evolution triggers
-                    evolution_triggered = (
-                        self.directive_system.trigger_evolution_if_needed()
+            except Exception as e:
+                pmm_dlog(f"🔍 DEBUG: Directive processing error: {e}")
+                # Fallback to old system
+                tracker = CommitmentTracker()
+                new_commitment_text, _ = tracker.extract_commitment(ai_output)
+                if new_commitment_text:
+                    self.pmm.add_commitment(
+                        text=new_commitment_text,
+                        source_insight_id="langchain_interaction",
                     )
-                    if evolution_triggered:
-                        pmm_dlog("🔍 DEBUG: Meta-principle triggered natural evolution")
-
-                except Exception as e:
-                    pmm_dlog(f"🔍 DEBUG: Directive processing error: {e}")
-                    # Fallback to old system
-                    tracker = CommitmentTracker()
-                    new_commitment_text, _ = tracker.extract_commitment(ai_output)
-                    if new_commitment_text:
-                        self.pmm.add_commitment(
-                            text=new_commitment_text,
-                            source_insight_id="langchain_interaction",
-                        )
 
                 try:
                     evidence_events = self._process_evidence_events(human_input)
@@ -1082,6 +1167,17 @@ class PersistentMindMemory(BaseChatMemory):
                         )
                 except Exception as e:
                     pmm_dlog(f"🔍 DEBUG: Evidence processing failed: {e}")
+                    pass
+
+                # Also process evidence in assistant output
+                try:
+                    evidence_events_ai = self._process_evidence_events(ai_output)
+                    if evidence_events_ai:
+                        pmm_dlog(
+                            f"🔍 DEBUG: Found {len(evidence_events_ai)} evidence events in assistant output"
+                        )
+                except Exception as e:
+                    pmm_dlog(f"🔍 DEBUG: Assistant evidence processing failed: {e}")
                     pass
 
                 try:
@@ -1126,11 +1222,11 @@ class PersistentMindMemory(BaseChatMemory):
                     # Calculate emergence scores in real-time for adaptive triggers
                     try:
                         from pmm.emergence import EmergenceAnalyzer, EmergenceEvent
-                        from pmm.storage.sqlite_store import SQLiteStore
 
-                        # Use same database access pattern as probe API
-                        db_path = "pmm.db"  # Standard PMM database path
-                        store = SQLiteStore(db_path)
+                        # Reuse the existing PMM SQLite store to avoid DB drift
+                        store = getattr(self.pmm, "sqlite_store", None)
+                        if not store or not getattr(store, "conn", None):
+                            raise RuntimeError("PMM sqlite_store is not available")
 
                         # Get recent events with comprehensive filtering like probe API
                         conn = store.conn
@@ -1415,11 +1511,7 @@ class PersistentMindMemory(BaseChatMemory):
         # super().save_context(inputs, outputs)
 
         # ---- 10) Behavior-based evidence (heuristic) ----
-        try:
-            if ai_output and not is_non_behavioral:
-                _ = process_reply_for_evidence(self.pmm, ai_output)
-        except Exception:
-            pass
+        # Duplicate evidence processing removed; assistant evidence is already handled earlier
 
         # ---- 10.1) Tick identity TTL commitments (turn-scoped) ----
         try:
@@ -1660,30 +1752,19 @@ class PersistentMindMemory(BaseChatMemory):
                     except Exception:
                         pass
 
-                rec["finalized"] = True
+            rec["finalized"] = True
         except Exception:
             pass
 
-    def _process_evidence_events(self, text: str) -> None:
-        """Process evidence events from text and emit them to PMM system."""
+    def _process_evidence_events(self, text: str) -> List[tuple]:
+        """Process evidence events from text and emit them to PMM system.
+
+        Returns a list of detected evidence tuples for observability.
+        """
+        detected: List[tuple] = []
         try:
-            evidence_events = self.pmm.commitment_tracker.detect_evidence_events(text)
-            for evidence_type, commit_ref, description, artifact in evidence_events:
-                # Create evidence event data
-                evidence_data = {
-                    "evidence_type": evidence_type,
-                    "commit_ref": commit_ref,
-                    "description": description,
-                    "artifact": artifact,
-                }
-
-                # Add evidence event to PMM
-                self.pmm.add_event(
-                    summary=f"Evidence: {description}",
-                    etype=f"evidence:{evidence_type}",
-                    evidence=evidence_data,
-                )
-
+            detected = self.pmm.commitment_tracker.detect_evidence_events(text) or []
+            for evidence_type, commit_ref, description, artifact in detected:
                 # If it's a 'done' evidence, close the commitment (pass named args)
                 if evidence_type == "done" and commit_ref:
                     try:
@@ -1694,292 +1775,114 @@ class PersistentMindMemory(BaseChatMemory):
                             artifact=artifact,
                         )
                     except Exception:
+                        # Best-effort; never crash memory flow on evidence persistence
                         pass
-
-        except Exception as e:
-            pmm_dlog(f"🔍 DEBUG: Evidence event processing error: {e}")
-
-    def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, str]:
-        """
-                Load memory variables for LLM prompts.
-
-        {{ ... }}
-                Returns personality context, commitments, and conversation history
-                formatted for optimal LLM performance.
-        """
-        # Get base memory variables from LangChain
-        # Ensure we always have a dict to augment
-        try:
-            base_variables = super().load_memory_variables(inputs)
-            if not isinstance(base_variables, dict):
-                base_variables = {}
         except Exception:
-            base_variables = {}
-
-        # Collect PMM-rendered context chunks to prepend later
-        pmm_context_parts: List[str] = []
-
-        try:
-            self.directive_system.get_directive_summary()
-
-            # Add meta-principles
-            meta_principles = self.directive_system.get_meta_principles()
-            if meta_principles:
-                mp_text = "Core Meta-Principles (evolutionary self-rules):\n"
-                for mp in meta_principles[:3]:  # Top 3 most important
-                    mp_text += f"• {mp['content']}\n"
-                pmm_context_parts.append(mp_text)
-
-            # Add active principles
-            principles = self.directive_system.get_active_principles()
-            if principles:
-                p_text = "Active Guiding Principles:\n"
-                for p in principles[:5]:  # Top 5 most important
-                    p_text += f"• {p['content']}\n"
-                pmm_context_parts.append(p_text)
-
-            # Add active commitments with new format
-            commitments = self.directive_system.get_active_commitments()
-            if commitments:
-                c_text = "Current Behavioral Commitments:\n"
-                for c in commitments[:8]:  # Top 8 most recent
-                    c_text += f"• {c['text']}\n"
-                pmm_context_parts.append(c_text)
-
-        except Exception as e:
-            pmm_dlog(f"🔍 DEBUG: Failed to load directive context: {e}")
-            # Fallback to legacy commitment loading
+            # Best-effort; never crash memory flow on evidence detection
             pass
+        return detected
+    def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """Return history buffer with prepended PMM context."""
+        # Get the chat history messages from the buffer
+        from langchain.schema.messages import HumanMessage, SystemMessage
 
-        # Load conversation history using priority recall: similarity × recency × stage weighting
+        messages = self.chat_memory.messages
+
+        # Assemble PMM context parts
+        pmm_context_parts = []
         try:
-            if hasattr(self.pmm, "sqlite_store"):
-                key_facts: List[str] = []
+            # Core personality context
+            self._update_personality_context()
+            if self.personality_context:
+                pmm_context_parts.append(self.personality_context)
 
-                # Stage-aware weights
-                try:
-                    from pmm.emergence import compute_emergence_scores
-
-                    scores = compute_emergence_scores(
-                        window=15, storage_manager=self.pmm.sqlite_store
-                    )
-                    stage = str(scores.get("stage", "S2: Adoption"))
-                except Exception:
-                    stage = "S2: Adoption"
-
-                def _weights_for_stage(stage_label: str) -> dict:
-                    if stage_label.startswith("S0"):
-                        return {"w_sim": 0.3, "w_rec": 0.2, "w_cmt": 0.5, "w_ref": 0.1}
-                    if stage_label.startswith("S1"):
-                        return {
-                            "w_sim": 0.35,
-                            "w_rec": 0.25,
-                            "w_cmt": 0.4,
-                            "w_ref": 0.1,
-                        }
-                    if stage_label.startswith("S3"):
-                        return {
-                            "w_sim": 0.55,
-                            "w_rec": 0.25,
-                            "w_cmt": 0.2,
-                            "w_ref": 0.15,
-                        }
-                    if stage_label.startswith("S4"):
-                        return {"w_sim": 0.6, "w_rec": 0.2, "w_cmt": 0.2, "w_ref": 0.2}
-                    return {"w_sim": 0.5, "w_rec": 0.3, "w_cmt": 0.2, "w_ref": 0.1}
-
-                W = _weights_for_stage(stage)
-
-                # Gather candidates from semantic search and recent recency window
-                current_input = inputs.get(self.input_key, "")
-                sem_events = []
-                if current_input and self.enable_embeddings:
+            # Directives: Meta-principles, Guiding Principles, and Commitments
+            if hasattr(self, "directive_system") and self.directive_system:
+                # Helper to safely extract text from dicts or objects
+                def _content_of(x):
                     try:
-                        from pmm.semantic_analysis import get_semantic_analyzer
-                        import numpy as np
-
-                        emb = get_semantic_analyzer()._get_embedding(current_input)
-                        q = np.array(emb, dtype=np.float32).tobytes()
-                        sem_events = self.pmm.sqlite_store.semantic_search(q, limit=12)
+                        if isinstance(x, dict):
+                            return x.get("content") or x.get("text") or str(x)
+                        return getattr(x, "content", None) or getattr(x, "text", None) or str(x)
                     except Exception:
-                        sem_events = []
+                        return str(x)
 
-                recent_events = self.pmm.sqlite_store.recent_events(limit=60)
-                max_id = max((e.get("id", 1) for e in recent_events), default=1)
-
-                # Index candidates by event id and accumulate best score
-                candidates: dict[int, dict] = {}
-
-                def _kind_bonus(kind: str) -> float:
-                    k = kind or ""
-                    if k == "commitment":
-                        return W["w_cmt"]
-                    if k == "reflection":
-                        return W["w_ref"]
-                    if k in ("response", "prompt", "event"):
-                        return 0.05
-                    return 0.0
-
-                # Seed from semantic search
-                for ev in sem_events:
-                    ev_id = int(ev.get("id", 0) or 0)
-                    sim = float(ev.get("similarity", 0.0) or 0.0)
-                    rec = (ev_id / max_id) if max_id else 0.0
-                    k = ev.get("kind", "")
-                    score = W["w_sim"] * sim + W["w_rec"] * rec + _kind_bonus(k)
-                    ev_copy = dict(ev)
-                    ev_copy["_score"] = score
-                    candidates[ev_id] = ev_copy
-
-                # Add recent recency-only candidates
-                for idx, ev in enumerate(recent_events):
-                    ev_id = int(ev.get("id", 0) or 0)
-                    k = ev.get("kind", "")
-                    rec = (
-                        (ev_id / max_id)
-                        if max_id
-                        else (1.0 - idx / max(1, len(recent_events)))
+                meta_principles = self.directive_system.get_meta_principles()
+                if meta_principles:
+                    pmm_context_parts.append(
+                        "\n".join([f"[Meta-Principle] {_content_of(p)}" for p in meta_principles])
                     )
-                    base = candidates.get(ev_id, dict(ev))
-                    sim = float(base.get("similarity", 0.0) or 0.0)
-                    score = max(
-                        base.get("_score", 0.0),
-                        W["w_sim"] * sim + W["w_rec"] * rec + _kind_bonus(k),
+
+                active_principles = self.directive_system.get_active_principles()
+                if active_principles:
+                    pmm_context_parts.append(
+                        "\n".join(
+                            [f"[Guiding Principle] {_content_of(p)}" for p in active_principles]
+                        )
                     )
-                    base.update({"_score": score})
-                    candidates[ev_id] = base
 
-                # Sort by score and format into lines
-                scored = sorted(
-                    candidates.values(),
-                    key=lambda d: d.get("_score", 0.0),
-                    reverse=True,
-                )
-                lines: List[str] = []
-                seen: set[str] = set()
-
-                def _fmt(ev: dict) -> str:
-                    kind = ev.get("kind", "")
-                    display_text = (
-                        ev.get("summary") or ev.get("content") or ""
-                    ).strip()
-                    if "User said:" in display_text:
-                        return "Human: " + display_text.replace("User said: ", "")
-                    if "I responded:" in display_text:
-                        return "Assistant: " + display_text.replace("I responded: ", "")
-                    if kind == "commitment":
-                        return "[Commitment] " + display_text
-                    if kind == "reflection":
-                        return "[Insight] " + display_text
-                    return "Context: " + display_text
-
-                for ev in scored:
-                    line = _fmt(ev)
-                    if not line:
-                        continue
-                    key = line[:160].lower()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    lines.append(line)
-                    if len(lines) >= 18:  # cap base pool
-                        break
-
-                # Promote key facts from selected lines
-                for line in lines:
-                    low = line.lower()
-                    if "human:" in low and (
-                        "my name is" in low or low.startswith("human: i am ")
-                    ):
-                        key_facts.append("IMPORTANT: " + line.replace("Human: ", ""))
-                    if "commitment" in low or "identity" in low:
-                        key_facts.append("COMMITMENT/IDENTITY: " + line)
-
-                # Keep token budget steady: stage-aware cap for lines
-                cap = 15
-                if stage.startswith("S1"):
-                    cap = 14
-                elif stage.startswith("S3"):
-                    cap = 12
-                elif stage.startswith("S4"):
-                    cap = 10
-                # If we already have scenes, tighten further by 2 lines to save tokens
+                active_commitments = self.directive_system.get_active_commitments()
+                if active_commitments:
+                    pmm_context_parts.append(
+                        "\n".join(
+                            [f"[Commitment] {_content_of(c)}" for c in active_commitments]
+                        )
+                    )
+                else:
+                    # Fallback: include commitments directly from PMM model if available
+                    try:
+                        commitments = (
+                            getattr(self.pmm.model.self_knowledge, "commitments", None)
+                            if hasattr(self.pmm, "model") and hasattr(self.pmm, "model")
+                            else None
+                        )
+                        if commitments:
+                            def _get_content(c):
+                                return getattr(c, "content", c.get("content", str(c))) if isinstance(c, dict) or hasattr(c, "content") else str(c)
+                            formatted = [f"[Commitment] {_get_content(c)}" for c in commitments]
+                            if formatted:
+                                pmm_context_parts.append("\n".join(formatted))
+                    except Exception:
+                        pass
+            else:
+                # No directive system: best-effort to surface commitments from PMM model
                 try:
-                    if getattr(self.pmm.model.narrative_identity, "scenes", None):
-                        if len(self.pmm.model.narrative_identity.scenes) > 0:
-                            cap = max(6, cap - 2)
+                    if hasattr(self.pmm, "model") and hasattr(self.pmm.model, "self_knowledge"):
+                        commitments = getattr(self.pmm.model.self_knowledge, "commitments", None)
+                        if commitments:
+                            def _get_content(c):
+                                return getattr(c, "content", c.get("content", str(c))) if isinstance(c, dict) or hasattr(c, "content") else str(c)
+                            formatted = [f"[Commitment] {_get_content(c)}" for c in commitments]
+                            if formatted:
+                                pmm_context_parts.append("\n".join(formatted))
                 except Exception:
                     pass
 
-                chosen = lines[:cap]
-                if key_facts:
-                    pmm_context_parts.append(
-                        "Key Information to Remember:\n" + "\n".join(key_facts[-5:])
-                    )
-                if chosen:
-                    # S3/S4: show last 1–2 scene summaries (compact) before history
-                    try:
-                        if stage.startswith("S3") or stage.startswith("S4"):
-                            scenes = self.pmm.model.narrative_identity.scenes
-                            if scenes:
-                                last = scenes[-2:] if len(scenes) >= 2 else scenes[-1:]
-                                scene_lines = []
-                                for sc in last[::-1]:  # newest first
-                                    line = f"[Scene] {getattr(sc,'t','')}: " + (
-                                        getattr(sc, "summary", "") or ""
-                                    )
-                                    scene_lines.append(line[:200])
-                                if scene_lines:
-                                    pmm_context_parts.append(
-                                        "Recent scenes:\n" + "\n".join(scene_lines)
-                                    )
-                    except Exception:
-                        pass
-                    # Ensure early-stage commitment emphasis within history block
-                    try:
-                        need_commitment_emphasis = stage.startswith(
-                            "S0"
-                        ) or stage.startswith("S1")
-                    except Exception:
-                        need_commitment_emphasis = False
-
-                    if need_commitment_emphasis:
-                        have = sum(1 for ln in chosen if "[Commitment]" in ln)
-                        if have < 2:
-                            # Pull top open commitments and prepend as lines
-                            added = []
-                            try:
-                                active = (
-                                    self.directive_system.get_active_commitments() or []
-                                )
-                                for c in active[: 2 - have]:
-                                    added.append(
-                                        "[Commitment] " + c.get("text", "")[:200]
-                                    )
-                            except Exception:
-                                pass
-                            if added:
-                                chosen = added + chosen
-
-                    pmm_context_parts.append(
-                        "Recent conversation history:\n" + "\n".join(chosen)
-                    )
         except Exception as e:
-            pmm_dlog(f"Warning: Failed to load conversation history from SQLite: {e}")
+            pmm_dlog(f"[error] Failed to load PMM context: {e}")
 
-        # Combine PMM context with conversation history
+        # Prepend the PMM context to the first message in the buffer
         if pmm_context_parts:
             pmm_context = "\n\n".join(pmm_context_parts)
-
-            # Inject personality context into the conversation
-            if self.memory_key in base_variables:
-                base_variables[self.memory_key] = (
-                    f"{pmm_context}\n\n{base_variables[self.memory_key]}"
-                )
+            # Ensure there is at least one message to prepend to
+            if messages:
+                first_message = messages[0]
+                # It's safest to prepend to a human message
+                if first_message.type == "human":
+                    # Create a new message with the combined content
+                    new_content = f"{pmm_context}\n\n{first_message.content}"
+                    # Create a new list of messages with the updated first message
+                    messages = [HumanMessage(content=new_content)] + messages[1:]
+                else:
+                    # If the first message isn't human, insert a new system message
+                    # This is a safe fallback to avoid losing context
+                    messages.insert(0, SystemMessage(content=pmm_context))
             else:
-                base_variables[self.memory_key] = pmm_context
+                # If there are no messages, create a new system message with the context
+                messages = [SystemMessage(content=pmm_context)]
 
-        return base_variables
+        # Return the messages in the format expected by LangChain
+        return {self.memory_key: messages}
 
     def get_personality_summary(self) -> Dict[str, Any]:
         """Get current personality state for debugging/monitoring."""
