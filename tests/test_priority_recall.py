@@ -13,12 +13,35 @@ def _make_memory(tmpdir: Path, embeddings: bool = False) -> PersistentMindMemory
     )
 
 
-def _count_recent_history_lines(history_blob: str) -> int:
+def _history_to_str(history_val) -> str:
+    """Coerce history into a single string for assertions.
+
+    Supports either a raw string or a list of LangChain messages.
+    """
+    if isinstance(history_val, str):
+        return history_val
+    try:
+        # Likely a list of BaseMessage (e.g., HumanMessage/SystemMessage)
+        parts = []
+        for m in history_val or []:
+            content = getattr(m, "content", None)
+            if isinstance(content, list):
+                # Some message content can be a list of chunks; join text chunks
+                parts.append(" ".join(str(getattr(c, "text", c)) for c in content))
+            elif content is not None:
+                parts.append(str(content))
+        return "\n".join(parts)
+    except Exception:
+        return str(history_val)
+
+
+def _count_recent_history_lines(history_blob) -> int:
     """Extract the Recent conversation history section and count lines."""
+    text = _history_to_str(history_blob)
     marker = "Recent conversation history:\n"
-    if marker not in history_blob:
+    if marker not in text:
         return 0
-    section = history_blob.split(marker, 1)[1]
+    section = text.split(marker, 1)[1]
     # Stop at a double newline or end
     # Keep it simple: count up to next blank line
     lines = []
@@ -68,4 +91,5 @@ def test_priority_recall_budget_caps_s0():
         n = _count_recent_history_lines(history)
         assert n <= 15
         # ensure a commitment shows up somewhere in the history block
-        assert "[Commitment]" in history or "COMMITMENT/IDENTITY:" in history
+        htxt = _history_to_str(history)
+        assert "[Commitment]" in htxt or "COMMITMENT/IDENTITY:" in htxt

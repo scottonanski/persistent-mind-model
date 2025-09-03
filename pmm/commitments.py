@@ -30,7 +30,9 @@ class Commitment:
     text: str
     created_at: str
     source_insight_id: str
-    status: str = "open"  # open, closed, expired
+    status: str = "open"  # open, closed, expired, tentative
+    # Tier indicates permanence; tentative items can be promoted on reinforcement/evidence
+    tier: str = "permanent"  # permanent, tentative
     due: Optional[str] = None
     closed_at: Optional[str] = None
     close_note: Optional[str] = None
@@ -53,19 +55,63 @@ class CommitmentTracker:
 
     def _is_valid_commitment(self, text: str) -> bool:
         """
-        Validate commitment against 5 criteria:
-        1. Actionable: concrete verb + object
-        2. Context-bound: references current topic/artifact/goal
-        3. Time/trigger: includes when or clear trigger
-        4. Non-duplicate: not semantically near open commitments
-        5. Owned: first-person agent ownership
+        Replace brittle heuristics with structural checks and a semantic fallback.
+        """
+        if not text or len(text.strip()) < 12:
+            return False
+        t = text.strip()
+        tl = t.lower()
+        # Ownership: keep simple start-with check
+        if not tl.startswith("i will"):
+            return False
+        # Structural checks (timeframe, artifact, number)
+        import re
+        has_time = bool(
+            re.search(
+                r"\b(today|tomorrow|tonight|now|asap|soon|this\s+week|next\s+week|by\s+\w+|within\s+\d+\s+(?:days?|hours?|weeks?))\b",
+                t,
+                re.IGNORECASE,
+            )
+        )
+        has_artifact = bool(re.search(r"\b(\.py|\.md|\.json|\.yaml|\.yml|pr\s*#?\d+|issue\s*#?\d+|report|dataset|docs?/\S+|/\S+\.(?:py|md|json|yaml|yml))\b", t, re.IGNORECASE))
+        has_number = bool(re.search(r"\b\d+\b", t))
+        if not (has_time or has_artifact or has_number):
+            # Semantic fallback (commit vs principle exemplar)
+            try:
+                from pmm.semantic_analysis import get_semantic_analyzer
+
+                analyzer = get_semantic_analyzer()
+                commit_ex = "I will write a test file and push a PR by tomorrow."
+                principle_ex = "I will improve decision-making and clarify objectives."
+                sim_commit = analyzer.cosine_similarity(t, commit_ex)
+                sim_principle = analyzer.cosine_similarity(t, principle_ex)
+                # Require a small margin to avoid borderline generic phrasing slipping through
+                if sim_commit + 0.05 < sim_principle:
+                    return False
+            except Exception:
+                return False
+        return True
+
+    
+
+    def _score_commitment(self, text: str) -> Dict[str, Any]:
+        """Score a commitment against the 5 criteria to support tentative acceptance.
+
+        Returns dict with boolean flags and total score.
         """
         if not text or len(text.strip()) < 10:
-            return False
+            return {
+                "actionable": False,
+                "context": False,
+                "time": False,
+                "owned": False,
+                "non_generic": True,
+                "score": 0,
+            }
 
-        text_lower = text.lower().strip()
+        t = text.lower().strip()
 
-        # 1. Actionable: Must contain concrete verb + object
+        # Actionable
         action_verbs = [
             "draft",
             "create",
@@ -93,12 +139,7 @@ class CommitmentTracker:
             "deliver",
             "complete",
             "finish",
-        ]
-
-        has_action_verb = any(verb in text_lower for verb in action_verbs)
-
-        # Add more action verbs that were missing
-        additional_verbs = [
+            # Additional verbs
             "strive",
             "recognize",
             "acknowledge",
@@ -108,29 +149,17 @@ class CommitmentTracker:
             "foster",
             "utilize",
             "convey",
-            "outline",
             "focus",
             "enhance",
             "improve",
-            "develop",
             "strengthen",
             "refine",
         ]
-        action_verbs.extend(additional_verbs)
-        has_action_verb = any(verb in text_lower for verb in action_verbs)
+        actionable = any(v in t for v in action_verbs) and not any(
+            v in t for v in ("consider", "think about", "look into")
+        )
 
-        # Only reject truly vague verbs when used alone
-        vague_verbs = [
-            "consider",
-            "think about",
-            "look into",
-        ]
-        has_vague_verb = any(verb in text_lower for verb in vague_verbs)
-
-        if not has_action_verb or has_vague_verb:
-            return False
-
-        # 2. Context-bound: Must reference specific topic/artifact
+        # Context
         context_indicators = [
             "pmm",
             "onboarding",
@@ -156,46 +185,24 @@ class CommitmentTracker:
             "evidence",
             "phase",
             "closure",
-            # Add conversational AI contexts
+            # Conversational contexts
             "conversation",
             "interaction",
             "response",
             "engagement",
             "dialogue",
-            "emotional",
-            "intelligence",
-            "empathy",
-            "listening",
             "feedback",
             "creativity",
-            "storytelling",
             "awareness",
-            "understanding",
-            "connection",
             "communication",
-            "skill",
-            "ability",
-            "approach",
-            "technique",
-            "method",
-            "process",
-            "system",
-            "experience",
-            "quality",
             "specific",
             "concrete",
         ]
+        context = any(k in t for k in context_indicators) and not any(
+            g in t for g in ("stuff", "things", "whatever", "anything", "everything")
+        )
 
-        has_context = any(indicator in text_lower for indicator in context_indicators)
-
-        # Reject only truly generic contexts
-        generic_contexts = ["stuff", "things", "whatever", "anything", "everything"]
-        has_generic = any(generic in text_lower for generic in generic_contexts)
-
-        if not has_context or has_generic:
-            return False
-
-        # 3. Time/trigger: Must include when or trigger (relaxed for conversational AI)
+        # Time/trigger
         time_triggers = [
             "tonight",
             "today",
@@ -214,8 +221,6 @@ class CommitmentTracker:
             "following",
             "subsequent",
             "upon",
-            "after reviewing",
-            "after completing",
             "right now",
             "now",
             "immediately",
@@ -223,127 +228,84 @@ class CommitmentTracker:
             "soon",
             "shortly",
             "quickly",
-            # Add conversational triggers
             "going forward",
             "moving forward",
             "from now on",
-            "in future",
-            "next time",
-            "in our",
-            "during our",
             "each",
             "every",
-            "ongoing",
-            "continuously",
-            "regularly",
-            "consistently",
-            "always",
             "will",
             "shall",
             "aim to",
         ]
+        time_ok = any(tr in t for tr in time_triggers)
 
-        has_time_trigger = any(trigger in text_lower for trigger in time_triggers)
-
-        if not has_time_trigger:
-            return False
-
-        # 4. Non-duplicate: Check against open commitments (simplified for now)
-        # This will be enhanced when we have access to existing commitments
-
-        # 5. Owned: Must be first-person
-        ownership_indicators = [
-            "i will",
-            "i plan to",
-            "i commit to",
-            "next, i will",
-            "i aim to",
-            "i intend to",
-            "i shall",
-            "my goal is to",
-            "going forward, i will",
-            "moving forward, i will",
-            "i acknowledge",  # Add for acknowledgment-based commitments
-        ]
-        has_ownership = any(
-            indicator in text_lower for indicator in ownership_indicators
+        # Owned
+        owned = any(
+            p in t
+            for p in (
+                "i will",
+                "i plan to",
+                "i commit to",
+                "next, i will",
+                "i aim to",
+                "i intend to",
+                "i shall",
+                "my goal is to",
+                "going forward, i will",
+                "moving forward, i will",
+                "i acknowledge",
+            )
+        ) and not any(
+            e in t for e in ("someone should", "we should", "they should", "it would be good")
         )
 
-        # Reject external ownership
-        external_indicators = [
-            "someone should",
-            "we should",
-            "they should",
-            "it would be good",
-        ]
-        has_external = any(external in text_lower for external in external_indicators)
+        score = sum((1 if actionable else 0, 1 if context else 0, 1 if time_ok else 0, 1 if owned else 0))
+        return {
+            "actionable": actionable,
+            "context": context,
+            "time": time_ok,
+            "owned": owned,
+            "non_generic": True,
+            "score": score,
+        }
 
-        if not has_ownership or has_external:
-            return False
+    def _find_tentative_commitment(self, text: str) -> Tuple[Optional[str], List[str]]:
+        """Attempt to extract a tentative commitment when strict validation fails.
 
-        return True
+        Accept if at least 3 of 4 core criteria pass. Tier is 'tentative'.
+        """
+        clean_text = self._strip_markdown(text)
+        candidates = [clean_text] + self._split_into_commitment_candidates(clean_text)
+        min_score = int(os.getenv("PMM_COMMIT_TENTATIVE_MIN_SCORE", "3"))
+        for cand in candidates:
+            cand = cand.strip()
+            if not cand:
+                continue
+            sc = self._score_commitment(cand)
+            if sc.get("score", 0) >= min_score and sc.get("owned") and sc.get("actionable"):
+                # Normalize into a first-person commitment if missing leading pronoun
+                normalized = cand if cand.lower().startswith("i ") else f"I will {cand}"
+                return normalized, self._generate_ngrams(normalized)
+        return None, []
 
     def extract_commitment(self, text: str) -> Tuple[Optional[str], List[str]]:
         """Extract and validate commitment from text using 5-point criteria."""
-        # Strip markdown formatting first
+
         clean_text = self._strip_markdown(text)
 
-        # Expanded commitment patterns including imperative forms
-        commitment_patterns = [
-            "i will",
-            "next, i will",
-            "next:",
-            "i plan to",
-            "i commit to",
-            "i aim to",
-            "my goal is to",
-            "by committing to",
-            "i intend to",
-            "i shall",
-            "going forward, i will",
-            "moving forward, i will",
-            # Add patterns for acknowledgment-based commitments
-            "i acknowledge",
-            "registered!",
-            "as a permanent commitment",
-            "as a permanent directive",
-            "permanent commitment",
-            "permanent directive",
-            "guiding principle",
-        ]
+        # Build evaluation candidates from whole text and segmented parts
+        candidates = [clean_text] + self._split_into_commitment_candidates(clean_text)
 
-        # Imperative commitment patterns (user requesting AI to make commitment)
-        imperative_patterns = [
-            r"\b(?:make|set)\s+(?:a\s+)?commitment\s+(?:to\s+yourself\s+)?to\s+(.+?)(?:[.!?]|$)",
-        ]
+        # Evaluate candidates using structural validator only (no brittle keywords)
+        for cand in candidates:
+            cand = cand.strip()
+            if not cand:
+                continue
+            # Normalize into first-person form if not already
+            normalized = cand if cand.lower().startswith("i ") else f"I will {cand}"
 
-        # Check for imperative commitment requests first
-        import re
-
-        for pattern in imperative_patterns:
-            match = re.search(pattern, clean_text, re.IGNORECASE)
-            if match:
-                imperative_text = match.group(1).strip()
-                # Convert to first person commitment
-                commitment_text = f"I will {imperative_text}"
-                if self._is_valid_commitment(commitment_text):
-                    return commitment_text, self._generate_ngrams(commitment_text)
-
-        # First, try to extract commitment from the whole text
-        if any(starter in clean_text.lower() for starter in commitment_patterns):
-            commitment = self._clean_commitment_text(clean_text, commitment_patterns)
-            if commitment and self._is_valid_commitment(commitment):
-                return commitment, self._generate_ngrams(commitment)
-
-        # Fallback: split by markdown bullets and numbered lists, then sentences
-        candidates = self._split_into_commitment_candidates(clean_text)
-
-        for candidate in candidates:
-            candidate = candidate.strip()
-            if any(starter in candidate.lower() for starter in commitment_patterns):
-                commitment = self._clean_commitment_text(candidate, commitment_patterns)
-                if commitment and self._is_valid_commitment(commitment):
-                    return commitment, self._generate_ngrams(commitment)
+            if self._is_valid_commitment(normalized):
+                return normalized, self._generate_ngrams(normalized)
 
         return None, []
 
@@ -533,8 +495,13 @@ class CommitmentTracker:
     ) -> str:
         """Add a new commitment and return its ID."""
         commitment_text, ngrams = self.extract_commitment(text)
+        tentative = False
         if not commitment_text:
-            return ""
+            # Try tentative extraction with relaxed criteria
+            commitment_text, ngrams = self._find_tentative_commitment(text)
+            if not commitment_text:
+                return ""
+            tentative = True
 
         # Check for duplicates -> convert to reinforcement signal
         dup_cid = self._is_duplicate_commitment(commitment_text)
@@ -547,6 +514,23 @@ class CommitmentTracker:
                     "%Y-%m-%dT%H:%M:%SZ"
                 )
                 c._just_reinforced = True
+                # Auto-promote tentative -> open/permanent upon first reinforcement
+                try:
+                    promote_after = int(os.getenv("PMM_TENTATIVE_PROMOTE_REINFORCEMENTS", "1"))
+                except Exception:
+                    promote_after = 1
+                if getattr(c, "status", "open") == "tentative" and c.reinforcements >= promote_after:
+                    c.status = "open"
+                    try:
+                        c.tier = "permanent"
+                    except Exception:
+                        pass
+                    try:
+                        from pmm.logging_config import pmm_dlog
+
+                        pmm_dlog(f"[COMMIT^] promoted tentative -> open {dup_cid}")
+                    except Exception:
+                        pass
             try:
                 from pmm.logging_config import pmm_dlog
 
@@ -567,6 +551,8 @@ class CommitmentTracker:
             created_at=ts,
             source_insight_id=source_insight_id,
             due=due,
+            status=("tentative" if tentative else "open"),
+            tier=("tentative" if tentative else "permanent"),
             ngrams=ngrams or [],
         )
 
@@ -611,6 +597,26 @@ class CommitmentTracker:
                 closed_cids.append(cid)
 
         return closed_cids
+
+    def promote_tentative_on_evidence(self, commit_hash: str) -> None:
+        """Promote a tentative commitment to open/permanent when evidence references it."""
+        for c in self.commitments.values():
+            try:
+                if self.get_commitment_hash(c) == commit_hash and getattr(c, "status", "open") == "tentative":
+                    c.status = "open"
+                    try:
+                        c.tier = "permanent"
+                    except Exception:
+                        pass
+                    try:
+                        from pmm.logging_config import pmm_dlog
+
+                        pmm_dlog(f"[COMMIT^] promoted tentative -> open via evidence {c.cid}")
+                    except Exception:
+                        pass
+                    return
+            except Exception:
+                continue
 
     def auto_close_from_reflection(self, reflection_text: str) -> List[str]:
         """Auto-close commitments based on reflection completion signals."""
@@ -691,9 +697,11 @@ class CommitmentTracker:
                 "due": c.due if hasattr(c, "due") else None,
                 # Provide canonical hash for UI/probe linkage
                 "hash": self.get_commitment_hash(c) if hasattr(c, "text") else "",
+                "status": getattr(c, "status", "open"),
+                "tier": getattr(c, "tier", "permanent"),
             }
             for c in self.commitments.values()
-            if hasattr(c, "status") and c.status == "open"
+            if hasattr(c, "status") and c.status in ("open", "tentative")
         ]
 
     def get_commitment_metrics(self) -> Dict:
@@ -820,7 +828,7 @@ class CommitmentTracker:
                 # For now, we'll need to match this to open commitments
                 # This is a simplified version - in practice we'd need better matching
                 for cid, commitment in self.commitments.items():
-                    if commitment.status == "open":
+                    if commitment.status in ("open", "tentative"):
                         commit_hash = self.get_commitment_hash(commitment)
                         # Simple keyword matching - could be enhanced
                         if any(
@@ -830,6 +838,11 @@ class CommitmentTracker:
                             evidence_events.append(
                                 ("done", commit_hash, description, artifact)
                             )
+                            # Promote tentative if referenced by evidence
+                            try:
+                                self.promote_tentative_on_evidence(commit_hash)
+                            except Exception:
+                                pass
                             break
 
         # Pattern 2: Blocked statements
@@ -849,7 +862,7 @@ class CommitmentTracker:
 
                 # Match to open commitments
                 for cid, commitment in self.commitments.items():
-                    if commitment.status == "open":
+                    if commitment.status in ("open", "tentative"):
                         commit_hash = self.get_commitment_hash(commitment)
                         if any(
                             word in reason_lc
@@ -858,6 +871,10 @@ class CommitmentTracker:
                             evidence_events.append(
                                 ("blocked", commit_hash, reason, next_action)
                             )
+                            try:
+                                self.promote_tentative_on_evidence(commit_hash)
+                            except Exception:
+                                pass
                             break
 
         # Pattern 3: Delegated statements

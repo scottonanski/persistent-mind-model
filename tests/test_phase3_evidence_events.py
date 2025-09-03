@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+import pytest
 
 # Add PMM to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -24,9 +25,9 @@ from pmm.langchain_memory import PersistentMindMemory
 from pmm.model import EvidenceEvent
 
 
+@pytest.mark.unit
 def test_evidence_event_detection():
     """Test that evidence events are detected from text patterns."""
-    print("🧪 Testing evidence event detection...")
 
     tracker = CommitmentTracker()
 
@@ -60,28 +61,16 @@ def test_evidence_event_detection():
             evidence_type, commit_ref, description, artifact = evidence_events[0]
             if evidence_type == expected_type:
                 detected_count += 1
-                print(f"  ✅ '{text[:30]}...' -> {evidence_type}")
-            else:
-                print(
-                    f"  ❌ '{text[:30]}...' -> {evidence_type} (expected {expected_type})"
-                )
-        else:
-            print(f"  ❌ '{text[:30]}...' -> no evidence detected")
 
     success_rate = detected_count / len(test_cases)
-    print(
-        f"📊 Evidence detection success rate: {success_rate:.1%} ({detected_count}/{len(test_cases)})"
-    )
-
     assert (
         success_rate >= 0.8
     ), f"Evidence detection rate {success_rate:.1%} below 80% threshold"
-    print("✅ Evidence event detection tests passed")
 
 
+@pytest.mark.unit
 def test_commitment_hash_generation():
     """Test that commitment hashes are stable and unique."""
-    print("🧪 Testing commitment hash generation...")
 
     tracker = CommitmentTracker()
 
@@ -113,16 +102,12 @@ def test_commitment_hash_generation():
     assert len(hash1a) == 16, "Hash should be 16 characters (truncated SHA-256)"
     assert all(c in "0123456789abcdef" for c in hash1a), "Hash should be hexadecimal"
 
-    print(f"  ✅ Hash stability: {hash1a} == {hash1b}")
-    print(f"  ✅ Hash uniqueness: {hash1a} != {hash2}")
-    print("  ✅ Hash format: 16-char hex")
-
-    print("✅ Commitment hash generation tests passed")
+    # Deterministic assertions above suffice
 
 
+@pytest.mark.unit
 def test_evidence_based_closure():
     """Test that commitments close only with evidence:done events."""
-    print("🧪 Testing evidence-based commitment closure...")
 
     tracker = CommitmentTracker()
 
@@ -168,17 +153,12 @@ def test_evidence_based_closure():
         "test_phase3.py" in commitment.close_note
     ), "Close note should include artifact"
 
-    print("  ✅ Blocked evidence: no closure")
-    print("  ✅ Delegated evidence: no closure")
-    print("  ✅ Done evidence: commitment closed")
-    print(f"  ✅ Close note: {commitment.close_note}")
-
-    print("✅ Evidence-based closure tests passed")
+    # No printouts; assertions check behavior
 
 
+@pytest.mark.unit
 def test_evidence_event_integration():
     """Test evidence events integration with PMM system."""
-    print("🧪 Testing evidence event integration with PMM...")
 
     with tempfile.TemporaryDirectory() as temp_dir:
         agent_path = os.path.join(temp_dir, "test_agent.json")
@@ -205,7 +185,7 @@ def test_evidence_event_integration():
         final_events = len(memory.pmm.model.self_knowledge.autobiographical_events)
         added_events = final_events - initial_events
 
-        print(f"Added {added_events} events during test")
+        # Assert via counts/structures instead of prints
 
         # Check for evidence events in the event log
         evidence_events = [
@@ -214,17 +194,12 @@ def test_evidence_event_integration():
             if e.type.startswith("evidence:")
         ]
 
-        print(f"Found {len(evidence_events)} evidence events")
-
         if evidence_events:
             evidence_event = evidence_events[0]
-            print(f"  ✅ Evidence event type: {evidence_event.type}")
-            print(f"  ✅ Evidence summary: {evidence_event.summary}")
-
+            assert evidence_event.type.startswith("evidence:"), "Evidence event type expected"
+            assert evidence_event.summary, "Evidence event should have summary"
             if evidence_event.evidence:
-                print(f"  ✅ Evidence data: {evidence_event.evidence.evidence_type}")
-                print(f"  ✅ Commit ref: {evidence_event.evidence.commit_ref}")
-                print(f"  ✅ Artifact: {evidence_event.evidence.artifact}")
+                assert evidence_event.evidence.commit_ref, "Evidence needs commit_ref"
 
         # Check that commitment was closed
         closed_commitments = [
@@ -233,25 +208,18 @@ def test_evidence_event_integration():
             if c.status == "closed"
         ]
 
-        print(f"Found {len(closed_commitments)} closed commitments")
-
         if closed_commitments:
             closed_commitment = closed_commitments[0]
-            print(f"  ✅ Closed commitment: {closed_commitment.text[:50]}...")
-            print(f"  ✅ Close note: {closed_commitment.close_note}")
-
             # Verify commitment was closed (evidence integration working)
             assert (
                 "Auto-closed" in closed_commitment.close_note
                 or "Evidence:" in closed_commitment.close_note
             ), "Closure should indicate automatic closure or evidence reference"
 
-        print("✅ Evidence event integration tests passed")
 
-
+@pytest.mark.unit
 def test_artifact_extraction():
     """Test artifact extraction from evidence descriptions."""
-    print("🧪 Testing artifact extraction...")
 
     tracker = CommitmentTracker()
 
@@ -274,24 +242,15 @@ def test_artifact_extraction():
         else:
             status = "❌"
 
-        print(
-            f"  {status} '{description}' -> {extracted} (expected: {expected_artifact})"
-        )
-
     success_rate = passed / len(test_cases)
-    print(
-        f"📊 Artifact extraction success rate: {success_rate:.1%} ({passed}/{len(test_cases)})"
-    )
-
     assert (
         success_rate >= 0.8
     ), f"Artifact extraction rate {success_rate:.1%} below 80% threshold"
-    print("✅ Artifact extraction tests passed")
 
 
+@pytest.mark.unit
 def test_evidence_event_structure():
     """Test that evidence events have correct structure and data."""
-    print("🧪 Testing evidence event structure...")
 
     from datetime import datetime, timezone
 
@@ -337,19 +296,12 @@ def test_evidence_event_structure():
         "OPENAI_API_KEY" in blocked_evidence.next_action
     ), "Next action should be specific"
 
-    print(
-        f"  ✅ Done evidence structure: {evidence.evidence_type} with artifact {evidence.artifact}"
-    )
-    print(
-        f"  ✅ Blocked evidence structure: {blocked_evidence.evidence_type} with next action"
-    )
-
-    print("✅ Evidence event structure tests passed")
+    # Structure validated via assertions above
 
 
+@pytest.mark.unit
 def test_commitment_closure_enforcement():
     """Test that commitments can only be closed with evidence."""
-    print("🧪 Testing commitment closure enforcement...")
 
     tracker = CommitmentTracker()
 
@@ -380,15 +332,12 @@ def test_commitment_closure_enforcement():
     assert commitment.status == "closed", "Commitment should be closed with evidence"
     assert "Evidence:" in commitment.close_note, "Close note should reference evidence"
 
-    print("  ✅ Evidence-based closure: success")
-    print(f"  ✅ Close note: {commitment.close_note}")
-
-    print("✅ Commitment closure enforcement tests passed")
+    # Assertions validate enforcement
 
 
+@pytest.mark.unit
 def test_phase3_acceptance_criteria():
     """Test Phase 3 acceptance criteria from ChatGPT's spec."""
-    print("🧪 Testing Phase 3 acceptance criteria...")
 
     tracker = CommitmentTracker()
 
@@ -434,10 +383,6 @@ def test_phase3_acceptance_criteria():
         if closed_commitments
         else 0
     )
-    print(
-        f"  📊 Closed commitments with evidence: {evidence_rate:.1%} ({len(commitments_with_evidence)}/{len(closed_commitments)})"
-    )
-
     assert evidence_rate == 1.0, "100% of closed commitments must have evidence"
 
     # 2. Commit close rate calculation
@@ -447,9 +392,6 @@ def test_phase3_acceptance_criteria():
         closed_with_evidence / total_commitments if total_commitments else 0
     )
 
-    print(
-        f"  📊 Commit close rate: {commit_close_rate:.1%} ({closed_with_evidence}/{total_commitments})"
-    )
 
     # 3. Evidence events should have correct commit_ref hash round-trip
     for cid, commitment in tracker.commitments.items():
@@ -462,50 +404,7 @@ def test_phase3_acceptance_criteria():
             assert all(
                 c in "0123456789abcdef" for c in commit_hash
             ), f"Hash should be hex: {commit_hash}"
-            print(f"  ✅ Commit {cid} hash: {commit_hash}")
-
-    print("✅ Phase 3 acceptance criteria tests passed")
+            # No prints; assertions enforce correctness
 
 
-if __name__ == "__main__":
-    print("🚀 Phase 3: Evidence Events Validation")
-    print("=" * 50)
-
-    try:
-        test_evidence_event_detection()
-        test_commitment_hash_generation()
-        test_evidence_based_closure()
-        test_evidence_event_integration()
-        test_artifact_extraction()
-        test_evidence_event_structure()
-        test_commitment_closure_enforcement()
-        test_phase3_acceptance_criteria()
-
-        print("\n🎉 Phase 3: Evidence Events - ALL TESTS PASSED!")
-        print("✅ Evidence event detection working (≥80% accuracy)")
-        print("✅ Commitment hashes stable and unique")
-        print("✅ Evidence-based closure enforced (only 'done' closes)")
-        print("✅ PMM integration with evidence events working")
-        print("✅ Artifact extraction from descriptions working")
-        print("✅ Evidence event structure validated")
-        print("✅ Closure enforcement prevents non-evidence closure")
-        print("✅ Phase 3 acceptance criteria met")
-
-        print("\n📋 Phase 3 Acceptance Criteria Met:")
-        print("✅ 100% of closed commitments have ≥1 linked `evidence:done`")
-        print("✅ Evidence events have correct structure and commit_ref hash")
-        print("✅ Auto-closure disabled - only evidence-based closure allowed")
-        print("✅ Evidence types (done/blocked/delegated) properly detected")
-        print("✅ Artifact extraction working for audit trail")
-
-        print("\n🔥 BREAKTHROUGH: PMM now has AUDITABLE commitment closure!")
-        print(
-            "This crosses the line from 'talks about autonomy' to 'provably autonomous'"
-        )
-
-    except Exception as e:
-        print(f"\n❌ Phase 3 Test Failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        sys.exit(1)
+# Removed demo-style __main__ runner; tests are executed via pytest

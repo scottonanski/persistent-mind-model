@@ -883,7 +883,22 @@ class AtomicReflectionManager:
             # Be conservative on any failure
             return False
 
-    # --- Adaptive threshold helpers ---
+    def should_accept_insight(
+        self,
+        content: str,
+        best_sim: float | None,
+        *,
+        candidate_refs: set[str] | None = None,
+    ) -> bool:
+        """Public wrapper for `_should_accept_insight` used by tests and tools.
+
+        This provides a stable API surface while delegating to the internal
+        implementation without changing behavior.
+        """
+        return self._should_accept_insight(
+            content=content, best_sim=best_sim, candidate_refs=candidate_refs
+        )
+
     def _on_decision(self, accepted: bool) -> None:
         """Update adaptive state on accept/reject and adjust threshold if enabled."""
         if not self._adaptive_enabled:

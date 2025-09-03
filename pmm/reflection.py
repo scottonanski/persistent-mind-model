@@ -110,6 +110,16 @@ def _validate_insight_references(
     return is_accepted, referenced_ids
 
 
+def validate_insight_references(content: str, mgr: SelfModelManager) -> Tuple[bool, List[str]]:
+    """
+    Public wrapper exposing insight reference validation.
+
+    Delegates to the internal `_validate_insight_references` while providing a
+    stable import for tests and external callers.
+    """
+    return _validate_insight_references(content, mgr)
+
+
 def _build_context(mgr: SelfModelManager) -> str:
     m = mgr.model
     name = m.core_identity.name
@@ -185,11 +195,11 @@ REFLECTION_PROMPTS = [
 
 # Additional high-novelty prompts focused on identity evolution and evidence
 EXTRA_REFLECTION_PROMPTS = [
-    """Explore a concrete shift in identity expression from CONTEXT (≤3 sentences).\nIdentify one behavior you changed and one you will now adopt. Reference 2 event IDs or a commitment hash. End with 'Next:'\n\nCONTEXT:\n""",
-    """From CONTEXT, infer one stable principle and one evolving frontier (≤3 sentences).\nName the tradeoff you’ll experiment with next and why. Reference evIDs. End with a single-line action beginning with 'I will'.\n\nCONTEXT:\n""",
-    """Diagnose a recurring constraint in your reflections from CONTEXT (≤3 sentences).\nPropose a specific novelty tactic to break it. Reference evIDs; end with 'Next:'.\n\nCONTEXT:\n""",
-    """Map one commitment to evidence from CONTEXT (≤3 sentences).\nState if closure is justified; if not, define one concrete evidence to seek. Reference commit hash or evID; end with 'Next:'.\n\nCONTEXT:\n""",
-    """Extract an emerging pattern across events in CONTEXT (≤3 sentences).\nName its upside and risk; define a micro-adjustment. Reference evIDs; end with 'Next:'.\n\nCONTEXT:\n""",
+    """Explore a concrete shift in identity expression from CONTEXT (≤3 sentences).\nIdentify one behavior you changed and one you will now adopt. Reference 2 event IDs or a commitment hash. Finish with one measurable action (timeframe, count, or percent).\n\nCONTEXT:\n""",
+    """From CONTEXT, infer one stable principle and one evolving frontier (≤3 sentences).\nName the tradeoff you’ll experiment with next and why. Reference evIDs. Finish with a single measurable action in first person.\n\nCONTEXT:\n""",
+    """Diagnose a recurring constraint in your reflections from CONTEXT (≤3 sentences).\nPropose a specific novelty tactic to break it. Reference evIDs; finish with one measurable action.\n\nCONTEXT:\n""",
+    """Map one commitment to evidence from CONTEXT (≤3 sentences).\nState if closure is justified; if not, define one concrete evidence to seek. Reference commit hash or evID; finish with one measurable action.\n\nCONTEXT:\n""",
+    """Extract an emerging pattern across events in CONTEXT (≤3 sentences).\nName its upside and risk; define a micro-adjustment. Reference evIDs; finish with one measurable action.\n\nCONTEXT:\n""",
 ]
 
 REFLECTION_PROMPTS += EXTRA_REFLECTION_PROMPTS
@@ -297,9 +307,9 @@ def reflect_once(
 
     # Template stems (primary bandit target)
     prompt_templates = [
-        "You are a terse metacognitive process. Observe your current state, then commit to one concrete micro-adjustment. Keep response to 55-80 words. End with exactly one line starting with 'Next:' that includes a number or timeframe.",
-        "You are a reflective AI system. Identify a tension or limitation in your approach, then propose a specific experiment. Keep response to 55-80 words. End with exactly one line starting with 'Next:' that includes a number or timeframe.",
-        "You are an introspective agent. Form a hypothesis about improving your effectiveness, then define a measurable test. Keep response to 55-80 words. End with exactly one line starting with 'Next:' that includes a number or timeframe.",
+        "You are a terse metacognitive process. Observe your current state, then commit to one concrete micro-adjustment. Keep response to 55-80 words. End with one measurable, first-person action (include a number, timeframe, or percent).",
+        "You are a reflective AI system. Identify a tension or limitation in your approach, then propose a specific experiment. Keep response to 55-80 words. End with one measurable, first-person action (include a number, timeframe, or percent).",
+        "You are an introspective agent. Form a hypothesis about improving your effectiveness, then define a measurable test. Keep response to 55-80 words. End with one measurable, first-person action (include a number, timeframe, or percent).",
     ]
 
     # Select template via epsilon-greedy bandit
@@ -418,8 +428,8 @@ def reflect_once(
         novelty_score = 1.0
 
     # Contract enforcement: exactly one Next: line, actionable + measurable
-    # Default ON unless explicitly disabled
-    enforce = str(os.environ.get("PMM_ENFORCE_NEXT_CONTRACT", "1")).lower() in (
+    # Default OFF to allow autonomous, semantic commitments without the literal keyword
+    enforce = str(os.environ.get("PMM_ENFORCE_NEXT_CONTRACT", "0")).lower() in (
         "1",
         "true",
         "yes",
@@ -644,16 +654,37 @@ def reflect_once(
     except Exception:
         pass
 
-    # Extract and track commitments with provenance
-    commitment_text, _ = mgr.commitment_tracker.extract_commitment(txt)
-    if commitment_text:
-        # Add commitment via manager to ensure event emission + canonical hash
-        cid = mgr.add_commitment(commitment_text, ins_id)
-        if cid:
-            refs["commitments"] = [cid]  # Store commitment ID for provenance
-            _log("commitment", f"Added commitment {cid}: {commitment_text[:50]}...")
+    # Extract and track commitments with provenance from reflection text (already done above at line 658-664)
 
-    # PHASE 3B: Validate insight references for acceptance
+    # Scan recent conversation events for user messages and extract commitments
+    try:
+        if os.getenv("PMM_DEBUG") == "1":
+            print("[DEBUG] Hook executed")
+        recent_events = mgr.sqlite_store.recent_events(limit=10)
+        if os.getenv("PMM_DEBUG") == "1":
+            print(f"[DEBUG] Recent events count: {len(recent_events)}")
+        for event in recent_events:
+            if os.getenv("PMM_DEBUG") == "1":
+                print(f"[DEBUG] Event kind: {event.get('kind')}, content preview: {event.get('content', '')[:100]}")
+            if event.get("kind") == "event":
+                content = event.get("content", "")
+                if "User said:" in content:
+                    user_message = content.split("User said:", 1)[1].strip()
+                    if os.getenv("PMM_DEBUG") == "1":
+                        print(f"[DEBUG] Checking user message: '{user_message}'")
+                    user_commitment, _ = mgr.commitment_tracker.extract_commitment(user_message)
+                    if user_commitment:
+                        cid = mgr.add_commitment(user_commitment, ins_id)
+                        if cid:
+                            _log("commitment", f"Added commitment from user message {cid}: {user_commitment[:50]}...")
+                    elif os.getenv("PMM_DEBUG") == "1":
+                        print(f"[DEBUG] No commitment extracted from: '{user_message}'")
+                elif os.getenv("PMM_DEBUG") == "1":
+                    print(f"[DEBUG] No 'User said:' in content: '{content[:100]}'")
+    except Exception as e:
+        if os.getenv("PMM_DEBUG") == "1":
+            print(f"[DEBUG] Error scanning events: {e}")
+        pass
     is_accepted, referenced_ids = _validate_insight_references(txt, mgr)
     soft_accepted = any(str(r).startswith("unverified:") for r in referenced_ids)
 

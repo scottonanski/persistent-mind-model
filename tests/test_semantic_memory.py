@@ -12,10 +12,12 @@ Tests:
 import tempfile
 import os
 import numpy as np
+import pytest
 from pmm.langchain_memory import PersistentMindMemory
 from pmm.semantic_analysis import get_semantic_analyzer
 
 
+@pytest.mark.slow
 def test_embedding_generation():
     """Test that embeddings are generated and stored correctly."""
     print("🧪 Testing embedding generation and storage...")
@@ -63,6 +65,7 @@ def test_embedding_generation():
                     raise AssertionError("Empty embedding array")
 
 
+@pytest.mark.slow
 def test_semantic_search():
     """Test semantic similarity search functionality."""
     print("🧪 Testing semantic similarity search...")
@@ -135,6 +138,7 @@ def test_semantic_search():
         assert ai_related_found, "Expected AI-related content not found in top results"
 
 
+@pytest.mark.slow
 def test_hybrid_memory_retrieval():
     """Test hybrid memory retrieval combining semantic and chronological context."""
     print("🧪 Testing hybrid memory retrieval...")
@@ -167,14 +171,20 @@ def test_hybrid_memory_retrieval():
 
         history = memory_vars.get("history", "")
 
-        assert history, "No history loaded"
+        # Normalize history to string (some providers may return a list of messages)
+        if isinstance(history, list):
+            history_text = "\n".join(map(str, history))
+        else:
+            history_text = str(history)
 
-        print(f"✅ Loaded memory context ({len(history)} characters)")
+        assert history_text.strip(), "No history loaded"
+
+        print(f"✅ Loaded memory context ({len(history_text)} characters)")
 
         # Check that programming-related content is included
         programming_terms = ["python", "programming", "code", "syntax"]
         programming_mentions = sum(
-            1 for term in programming_terms if term.lower() in history.lower()
+            1 for term in programming_terms if term.lower() in history_text.lower()
         )
 
         assert (
@@ -186,7 +196,7 @@ def test_hybrid_memory_retrieval():
         )
 
         # Check for semantic relevance markers
-        if "[Relevant]" in history:
+        if "[Relevant]" in history_text:
             print("✅ Semantic relevance markers found")
         else:
             print(
@@ -196,6 +206,7 @@ def test_hybrid_memory_retrieval():
         # Passes if assertions above hold
 
 
+@pytest.mark.slow
 def test_context_improvement():
     """Test that semantic search improves context relevance."""
     print("🧪 Testing context relevance improvement...")
@@ -245,18 +256,26 @@ def test_context_improvement():
         baseline_history = baseline_vars.get("history", "")
         semantic_history = semantic_vars.get("history", "")
 
+        # Normalize possible list outputs to strings
+        if isinstance(baseline_history, list):
+            baseline_history_text = "\n".join(map(str, baseline_history))
+        else:
+            baseline_history_text = str(baseline_history)
+
+        if isinstance(semantic_history, list):
+            semantic_history_text = "\n".join(map(str, semantic_history))
+        else:
+            semantic_history_text = str(semantic_history)
+
         # Count France-related mentions
         france_terms = ["france", "paris", "french"]
 
         baseline_mentions = sum(
-            1 for term in france_terms if term.lower() in baseline_history.lower()
+            1 for term in france_terms if term.lower() in baseline_history_text.lower()
         )
         semantic_mentions = sum(
-            1 for term in france_terms if term.lower() in semantic_history.lower()
+            1 for term in france_terms if term.lower() in semantic_history_text.lower()
         )
-
-        print(f"✅ Baseline mentions: {baseline_mentions}")
-        print(f"✅ Semantic mentions: {semantic_mentions}")
 
         # Semantic search should find more relevant content (or at least not worse)
         assert (
@@ -264,33 +283,4 @@ def test_context_improvement():
         ), "Semantic memory did not improve relevance"
 
 
-def main():
-    """Run all semantic memory tests."""
-    print("🚀 Running semantic memory search validation...\n")
-
-    tests = [
-        test_embedding_generation,
-        test_semantic_search,
-        test_hybrid_memory_retrieval,
-        test_context_improvement,
-    ]
-
-    passed = 0
-    for test in tests:
-        try:
-            test()
-            passed += 1
-            print()
-        except AssertionError as e:
-            print(f"❌ Test {test.__name__} failed: {e}")
-            print()
-
-    print(f"📊 Results: {passed}/{len(tests)} tests passed")
-    if passed == len(tests):
-        print("🎉 Semantic memory search implementation validated!")
-    else:
-        print("⚠️  Some tests failed - implementation needs attention")
-
-
-if __name__ == "__main__":
-    main()
+# Removed demo-style main runner; tests are executed via pytest

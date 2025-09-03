@@ -17,7 +17,6 @@ from pmm.storage.sqlite_store import SQLiteStore
 
 def test_concurrent_id_generation():
     """Test that concurrent add_event calls don't create duplicate IDs."""
-    print("🧪 Testing concurrent ID generation...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         model_path = os.path.join(tmpdir, "test_model.json")
@@ -58,12 +57,11 @@ def test_concurrent_id_generation():
         assert len(unique_ids) == len(
             results
         ), f"Duplicate IDs found! Generated: {len(results)}, Unique: {len(unique_ids)}"
-        print(f"✅ Generated {len(results)} unique IDs across 3 threads")
+        # Concurrent ID generation behavior asserted above
 
 
 def test_hash_chain_integrity():
     """Test that hash chain includes prev_hash and is verifiable."""
-    print("🧪 Testing hash chain integrity...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         model_path = os.path.join(tmpdir, "test_model.json")
@@ -90,12 +88,11 @@ def test_hash_chain_integrity():
                 ), f"Chain break at event {i}: expected prev_hash={prev_hash}, got {event['prev_hash']}"
             prev_hash = event["hash"]
 
-        print(f"✅ Hash chain verified for {len(events)} events")
+    # Hash chain integrity asserted above
 
 
 def test_field_parity():
     """Test that JSON and SQLite events have consistent fields."""
-    print("🧪 Testing JSON/SQLite field parity...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         model_path = os.path.join(tmpdir, "test_model.json")
@@ -148,12 +145,11 @@ def test_field_parity():
         assert (
             json_tags == sqlite_tags
         ), f"Tag mismatch: JSON={json_tags}, SQLite={sqlite_tags}"
-        print(f"✅ Field parity verified for event {ev_id}")
+    # Field parity asserted above
 
 
 def test_identity_logging():
     """Test that identity changes are logged to both JSON and SQLite."""
-    print("🧪 Testing identity change logging...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         model_path = os.path.join(tmpdir, "test_model.json")
@@ -187,38 +183,12 @@ def test_identity_logging():
             latest_sqlite["meta"].get("new_value") == new_name
         ), f"SQLite identity change incorrect: {latest_sqlite}"
 
-        print(f"✅ Identity change logged consistently: {old_name} → {new_name}")
+    # Identity logging assertions above
 
 
 def main():
     """Run all validation tests."""
-    print("🚀 Running PMM critical fixes validation...\n")
-
-    tests = [
-        test_concurrent_id_generation,
-        test_hash_chain_integrity,
-        test_field_parity,
-        test_identity_logging,
-    ]
-
-    passed = 0
-    for test in tests:
-        try:
-            test()
-            passed += 1
-        except AssertionError as e:
-            print(f"❌ Test {test.__name__} failed: {e}")
-        except Exception as e:
-            print(f"❌ Test {test.__name__} failed with exception: {e}")
-
-    print(f"📊 Results: {passed}/{len(tests)} tests passed")
-
-    if passed == len(tests):
-        print("🎉 All critical fixes validated successfully!")
-        return True
-    else:
-        print("⚠️  Some tests failed - fixes need attention")
-        return False
+    # main runner removed; pytest will execute the test functions directly
 
 
 if __name__ == "__main__":

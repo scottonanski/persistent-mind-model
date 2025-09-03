@@ -22,10 +22,8 @@ CREATE TABLE IF NOT EXISTS directives (
   created_at TEXT NOT NULL,   -- ISO timestamp
   status TEXT NOT NULL,       -- 'active' | 'inactive' | 'evolved'
   parent_id TEXT,             -- references directives.id for hierarchy
-  source_event_id TEXT,       -- references events.id
-  metadata TEXT,              -- JSON: additional properties
-  FOREIGN KEY (parent_id) REFERENCES directives(id),
-  FOREIGN KEY (source_event_id) REFERENCES events(id)
+  source_event_id TEXT,       -- optional reference to events.id (no FK to avoid brittle inserts)
+  metadata TEXT               -- JSON: additional properties
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_events_hash ON events(hash);
@@ -43,11 +41,57 @@ class SQLiteStore:
 
     def __init__(self, path: str = "pmm.db"):
         self._lock = threading.RLock()
+        # Expose DB path for debugging/telemetry alignment
+        self.path = path
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(DDL)
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
+        # Migrate existing databases that still have a FK on directives.parent_id
+        try:
+            fk_rows = list(
+                self.conn.execute("PRAGMA foreign_key_list('directives')")
+            )
+            if fk_rows:  # any FK present -> rebuild without FK
+                with self._lock:
+                    self.conn.execute("BEGIN IMMEDIATE")
+                    # Create a new directives table without FK constraints
+                    self.conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS directives_new (
+                          id TEXT PRIMARY KEY,
+                          type TEXT NOT NULL,
+                          content TEXT NOT NULL,
+                          created_at TEXT NOT NULL,
+                          status TEXT NOT NULL,
+                          parent_id TEXT,
+                          source_event_id TEXT,
+                          metadata TEXT
+                        )
+                        """
+                    )
+                    # Copy data over
+                    self.conn.execute(
+                        """
+                        INSERT OR REPLACE INTO directives_new
+                        (id, type, content, created_at, status, parent_id, source_event_id, metadata)
+                        SELECT id, type, content, created_at, status, parent_id, source_event_id, metadata
+                        FROM directives
+                        """
+                    )
+                    # Replace old table
+                    self.conn.execute("DROP TABLE directives")
+                    self.conn.execute("ALTER TABLE directives_new RENAME TO directives")
+                    # Recreate indexes
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_directives_type ON directives(type)")
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_directives_status ON directives(status)")
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_directives_parent ON directives(parent_id)")
+                    self.conn.execute("CREATE INDEX IF NOT EXISTS idx_directives_created ON directives(created_at)")
+                    self.conn.commit()
+        except Exception:
+            # Best-effort migration; continue even if it fails (DB may already be correct)
+            pass
         # Try to add optional efficient-thought columns if they do not exist yet
         try:
             self.conn.execute("ALTER TABLE events ADD COLUMN summary TEXT")
@@ -63,6 +107,79 @@ class SQLiteStore:
             self.conn.execute("ALTER TABLE events ADD COLUMN embedding BLOB")
         except Exception:
             pass
+        # Initialize closure exemplar storage table and index
+        try:
+            self.conn.execute(
+                """
+            CREATE TABLE IF NOT EXISTS closure_exemplars (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              phrase TEXT NOT NULL,
+              confidence REAL NOT NULL,
+              created_at TEXT NOT NULL
+            )"""
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_closure_phrase ON closure_exemplars(phrase)"
+            )
+        except Exception:
+            # Best-effort; continue even if creation fails
+            pass
+
+        # Auto-backfill closure_exemplars from past evidence events (safe insert-only)
+        try:
+            existing = {
+                r[0]
+                for r in self.conn.execute(
+                    "SELECT phrase FROM closure_exemplars"
+                ).fetchall()
+            }
+            rows = self.conn.execute(
+                "SELECT content FROM events WHERE kind='evidence' OR kind LIKE 'evidence:%'"
+            ).fetchall()
+            inserted = 0
+            for row in rows:
+                try:
+                    payload = json.loads(row[0]) if row and row[0] else {}
+                except Exception:
+                    payload = {}
+                phrase = (payload.get("summary") or "").strip().lower()
+                try:
+                    conf = float(payload.get("confidence") or 0.6)
+                except Exception:
+                    conf = 0.6
+                if phrase and len(phrase) > 5 and phrase not in existing:
+                    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    try:
+                        self.conn.execute(
+                            "INSERT INTO closure_exemplars (phrase, confidence, created_at) VALUES (?,?,?)",
+                            (phrase, conf, ts),
+                        )
+                        existing.add(phrase)
+                        inserted += 1
+                    except Exception:
+                        pass
+            if inserted > 0:
+                try:
+                    print(f"[PMM][Exemplar] Auto-backfilled {inserted} closure exemplar(s)")
+                except Exception:
+                    pass
+
+            # Cap exemplar table size (keep only most recent 200)
+            try:
+                self.conn.execute(
+                    """
+                    DELETE FROM closure_exemplars
+                    WHERE id NOT IN (
+                        SELECT id FROM closure_exemplars ORDER BY id DESC LIMIT 200
+                    )
+                    """
+                )
+            except Exception:
+                pass
+        except Exception:
+            # If anything goes wrong, skip backfill silently
+            pass
+
         self.conn.commit()
 
     def latest_hash(self) -> Optional[str]:

@@ -28,12 +28,7 @@ class PMMRuntime:
         # Initialize PMM personality system
         self.pmm_manager = SelfModelManager("persistent_self_model.json")
         # Initialize directive system consistent with LangChain wrapper
-        try:
-            self.directive_system = IntegratedDirectiveSystem(
-                storage_manager=self.pmm_manager.sqlite_store
-            )
-        except Exception:
-            self.directive_system = None
+        self.directive_system = IntegratedDirectiveSystem(storage_manager=self.store)
 
         # --- ALWAYS-ON AUTONOMY (no flags, no config) ---
         try:
@@ -85,8 +80,7 @@ class PMMRuntime:
         prev = self.store.latest_hash()
         meta_json = json.dumps(meta, ensure_ascii=False)
         hsh = make_linked_hash(prev, kind, content, meta_json)
-        self.store.append_event(kind, content, meta, hsh, prev)
-        return hsh
+        return self.store.append_event(kind, content, meta, hsh, prev)
 
     def ask(
         self,
@@ -111,10 +105,10 @@ class PMMRuntime:
         reply = self.adapter.generate(messages, max_tokens=max_tokens)
 
         # Log response to hash chain
-        self._append("response", reply, {"role": "assistant", "model": self.model_name})
+        response_event = self._append("response", reply, {"role": "assistant", "model": self.model_name})
 
         # Update PMM mind state after response
-        self._update_pmm_state(user_text, reply)
+        self._update_pmm_state(user_text, reply, response_event)
 
         # Allow PMM to self-adopt identity changes expressed by itself
         self._detect_self_identity_update(reply)
@@ -123,7 +117,7 @@ class PMMRuntime:
         self._evaluate_commitments(reply)
 
         # Self-directed triggers: adaptive micro/macro reflection and directive evolution
-        self._internal_autonomy_triggers(user_text=user_text, reply=reply)
+        self._internal_autonomy_triggers(user_text=user_text, reply=reply, response_event=response_event)
 
         return reply
 
@@ -223,7 +217,7 @@ RECENT INSIGHTS:
 
         return prompt
 
-    def _update_pmm_state(self, user_text: str, reply: str) -> None:
+    def _update_pmm_state(self, user_text: str, reply: str, response_event: Dict) -> None:
         """Update PMM mind state after generating response."""
         # Check for identity updates (name changes) using strict detector + cooldown
         try:
@@ -261,22 +255,13 @@ RECENT INSIGHTS:
         # Extract and track directives/commitments from assistant replies (always-on)
         try:
             if self.directive_system:
-                detected = self.directive_system.process_response(
+                self.directive_system.process_response(
                     user_message=user_text,
                     ai_response=reply,
-                    event_id="runtime_interaction",
+                    event_id=response_event["event_id"],
                 )
-                for directive in detected or []:
-                    content = getattr(directive, "content", None)
-                    if content:
-                        self.pmm_manager.add_commitment(
-                            text=content[:200],
-                            source_insight_id="runtime_interaction",
-                        )
-                        # Also evolve autonomy directives store
-                        self._persist_autonomy_directive(content)
         except Exception:
-            # Graceful degradation: skip directive extraction on error
+            # Non-fatal, never block on directive processing
             pass
 
     def _detect_and_update_identity(self, user_text: str, reply: str) -> None:
@@ -489,7 +474,7 @@ RECENT INSIGHTS:
             # Never block on identity adoption
             pass
 
-    def _internal_autonomy_triggers(self, user_text: str, reply: str) -> None:
+    def _internal_autonomy_triggers(self, user_text: str, reply: str, response_event: Dict) -> None:
         """Run adaptive, self-directed triggers after each exchange.
 
         Decides whether to micro-reflect recursively, macro-reflect, and evolve autonomy directives.
@@ -530,7 +515,7 @@ RECENT INSIGHTS:
             # Heuristic: occasional macro reflections on high growth or low identity alignment
             if gas >= 0.75 or ias <= 0.35:
                 try:
-                    self.macro_reflect(session_days=3, max_events=200)
+                    self.macro_reflect(response_event, session_days=3, max_events=200)
                 except Exception:
                     pass
 
@@ -569,7 +554,7 @@ RECENT INSIGHTS:
         except Exception:
             pass
 
-    def macro_reflect(self, session_days: int = 3, max_events: int = 200) -> str | None:
+    def macro_reflect(self, source_event: Dict, session_days: int = 3, max_events: int = 200) -> str | None:
         """Synthesize high-level insights over recent events and persist autonomy directives."""
         try:
             events = self.store.all_events()
@@ -613,7 +598,7 @@ RECENT INSIGHTS:
                 {"role": "user", "content": prompt},
             ]
             reply = self.adapter.generate(messages, max_tokens=256)
-            self._append(
+            reflection_event = self._append(
                 "reflection", reply, {"role": "assistant", "tag": "macro_reflection"}
             )
 
@@ -624,12 +609,12 @@ RECENT INSIGHTS:
                 r"^\s*Directive\s*:\s*(.+)$", reply, flags=re.IGNORECASE | re.MULTILINE
             )
             if m:
-                self._persist_autonomy_directive(m.group(1).strip())
+                self._persist_autonomy_directive(m.group(1).strip(), source_event)
             return reply
         except Exception:
             return None
 
-    def _persist_autonomy_directive(self, content: str) -> None:
+    def _persist_autonomy_directive(self, content: str, source_event: Dict) -> None:
         """Persist autonomy directive as a special event with simple dedup."""
         try:
             content = (content or "").strip()
@@ -643,7 +628,13 @@ RECENT INSIGHTS:
             texts = {e[3].strip() for e in existing[-200:]}
             if content in texts:
                 return
-            self._append("autonomy_directive", content, {"source": "runtime"})
+
+            if self.directive_system:
+                self.directive_system.add_directive(
+                    content=content,
+                    directive_type="autonomy",
+                    source_event_id=source_event["event_id"],
+                )
         except Exception:
             pass
 

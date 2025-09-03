@@ -8,6 +8,7 @@ import os
 import sys
 import argparse
 import re
+import json
 
 # Add current directory to path for PMM imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +44,11 @@ def parse_args():
         description="PMM Chat - Interactive AI personality interface"
     )
     parser.add_argument("--model", help="Model name or number from the menu")
+    parser.add_argument(
+        "--agent",
+        default=os.environ.get("PMM_AGENT_PATH", ".data/pmm.json"),
+        help="Path to agent state or directory (defaults to PMM_AGENT_PATH or .data/pmm.json)",
+    )
     parser.add_argument(
         "--noninteractive",
         action="store_true",
@@ -258,18 +264,28 @@ def main():
     if not model_name:
         return
 
-    if not os.getenv("OPENAI_API_KEY"):
-        print("❌ OPENAI_API_KEY not set")
-        return
-
     print(f"🔄 {model_name} selected... Loading model... Please wait...")
     print()
 
     # Initialize PMM with selected model
     model_config = get_model_config(model_name)
 
+    # Only require OpenAI key when using an OpenAI provider
+    if model_config.provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+        print("❌ OPENAI_API_KEY not set for OpenAI provider. Set it or choose a local Ollama model.")
+        return
+
+    # Use explicit agent path (CLI or PMM_AGENT_PATH) so chat shares the same store as harness
+    agent_path = getattr(args, "agent", None) or os.environ.get("PMM_AGENT_PATH", ".data/pmm.json")
+    # Ensure parent directory exists to avoid silent fallback
+    try:
+        parent = os.path.dirname(agent_path) or "."
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+    except Exception:
+        pass
     pmm_memory = PersistentMindMemory(
-        agent_path="persistent_self_model.json",
+        agent_path=agent_path,
         personality_config={
             "openness": 0.7,
             "conscientiousness": 0.6,
@@ -424,6 +440,8 @@ def main():
         )
         return long or codey or keywords or low_emergence
 
+
+
     # Create enhanced system prompt with PMM context
     def get_pmm_system_prompt(
         identity_nudge: bool = False,
@@ -432,6 +450,33 @@ def main():
     ):
         # Always pull fresh memory right before each call
         raw_context = pmm_memory.load_memory_variables({}).get("history", "")
+
+        # Normalize context to string: load_memory_variables may return a list of LangChain messages
+        def _messages_to_text(msgs) -> str:
+            try:
+                out = []
+                for m in (msgs or []):
+                    # LangChain BaseMessage typically has .type and .content
+                    mtype = getattr(m, "type", None) or getattr(m, "role", "")
+                    if mtype == "system":
+                        role = "System"
+                    elif mtype == "human":
+                        role = "Human"
+                    elif mtype == "ai" or mtype == "assistant":
+                        role = "Assistant"
+                    else:
+                        role = str(mtype or "Message")
+                    content = getattr(m, "content", str(m))
+                    out.append(f"{role}: {content}")
+                return "\n".join(out)
+            except Exception:
+                # Fallback best-effort
+                return "\n".join([str(x) for x in (msgs or [])])
+
+        if isinstance(raw_context, list):
+            raw_context = _messages_to_text(raw_context)
+        elif isinstance(raw_context, dict):
+            raw_context = str(raw_context)
 
         # Compact context: dedupe lines, cap each block
         def _compact(text: str, max_lines: int = 120) -> str:
@@ -509,8 +554,8 @@ def main():
             "You may propose next steps and form commitments when helpful. If the user opts out, stop.",
             "Ask clarifying questions only when necessary to proceed.",
             "Evidence rule: In substantive answers, cite at least one recent event ID (e.g., ev123) or a commitment hash when relevant.",
-            "Action rule: When you propose an action, end with a single line starting with 'Next:' that includes a measurable token (a number, percent, timeframe, or threshold). Do not add more than one Next line.",
-            "Variation rule: Vary verbs, quantities, and timeframes to avoid generating duplicate commitments; do not restate identical 'I will …' lines across turns.",
+            "Action rule: When you propose an action, make it measurable (e.g., include a timeframe, count, or percent). Avoid multiple competing actions in one reply.",
+            "Variation rule: Vary verbs, quantities, and timeframes to avoid generating duplicate commitments; do not restate identical commitments across turns.",
             f"Top Patterns (awareness only): {top_patterns_str}",
             "Open Commitments:",
             f"{open_commitments_str}",
@@ -704,6 +749,17 @@ def main():
     # CLI-controlled logging toggles (off by default)
     debug_on = bool(getattr(args, "debug", False))
     telemetry_flag = bool(getattr(args, "telemetry", False))
+    # If telemetry is enabled, print the actual SQLite store path for verification
+    if telemetry_flag or (os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")):
+        try:
+            conn = getattr(getattr(pmm_memory.pmm, "sqlite_store", object()), "conn", None)
+            if conn:
+                rows = conn.execute("PRAGMA database_list").fetchall()
+                if rows:
+                    store_path = rows[-1][2]
+                    print(f"[STORE] {store_path}")
+        except Exception as e:
+            print(f"[STORE] error: {e}")
     # Unified runtime tracking toggle (seeded from CLI or env)
     track_enabled = telemetry_flag or (
         os.getenv("PMM_TELEMETRY", "").lower() in ("1", "true", "yes", "on")
@@ -1138,14 +1194,98 @@ def main():
                             print(f"\n❌ Search error: {e}")
                         continue
                     if sub == "close" and len(parts) > 2:
-                        cid = parts[2]
+                        user_token = parts[2].strip()
+                        # Optional evidence text after ID/hash
+                        evidence_text = at_cmd.split(" ", 3)[3].strip() if len(at_cmd.split(" ")) >= 4 else ""
+
+                        # Resolve to canonical commit hash when possible
+                        def resolve_commit_ref(token: str) -> str:
+                            """Map display id (e.g., c2) or unique hash prefix to full commit hash.
+
+                            Falls back to the raw token if no mapping is found.
+                            """
+                            try:
+                                open_list = pmm_memory.pmm.get_open_commitments() or []
+                            except Exception:
+                                open_list = []
+
+                            # If looks like display id 'cN'
+                            if re.fullmatch(r"c\d+", token):
+                                for c in open_list:
+                                    if str(c.get("cid", "")) == token:
+                                        h = str(c.get("hash", ""))
+                                        if h:
+                                            return h
+                                return token
+
+                            # If looks like hex prefix -> try to expand uniquely among open hashes
+                            if re.fullmatch(r"[0-9a-fA-F]{6,64}", token):
+                                candidates = [str(c.get("hash", "")) for c in open_list]
+                                matches = [h for h in candidates if h.startswith(token)]
+                                if len(matches) == 1:
+                                    return matches[0]
+                                # If multiple or none, leave as provided (may be full hash already)
+                                return token
+
+                            return token
+
                         try:
-                            pmm_memory.pmm.mark_commitment(
-                                cid, "closed", "Closed via --@commitments"
-                            )
-                            print(f"\n✅ Closed commitment {cid}")
+                            commit_ref = resolve_commit_ref(user_token)
+
+                            if evidence_text:
+                                ok = False
+                                try:
+                                    # Use resolved commit_ref for evidence-based closure
+                                    ok = pmm_memory.pmm.commitment_tracker.close_commitment_with_evidence(
+                                        commit_ref,
+                                        evidence_type="done",
+                                        description=evidence_text,
+                                        artifact="chat.py",
+                                    )
+                                except Exception:
+                                    ok = False
+                                if ok:
+                                    # Mirror to SQLite so analyzer sees closure with evidence
+                                    try:
+                                        smm = pmm_memory.pmm
+                                        # Append evidence event
+                                        evidence_content = {
+                                            "type": "done",
+                                            "summary": evidence_text,
+                                            "artifact": {"source": "chat.py"},
+                                            "confidence": 0.85,
+                                        }
+                                        smm.sqlite_store.append_event(
+                                            kind="evidence",
+                                            content=json.dumps(evidence_content, ensure_ascii=False),
+                                            meta={"commit_ref": commit_ref, "subsystem": "chat"},
+                                        )
+                                        # Append commitment.close event
+                                        smm.sqlite_store.append_event(
+                                            kind="commitment.close",
+                                            content=json.dumps({"reason": "chat"}, ensure_ascii=False),
+                                            meta={"commit_ref": commit_ref, "subsystem": "chat"},
+                                        )
+                                    except Exception as ee:
+                                        print(f"\n⚠️ SQLite mirror failed: {ee}")
+                                    print(f"\n✅ Closed commitment {user_token} (ref {commit_ref[:8]}) with evidence")
+                                    continue
+                                else:
+                                    # Fall back to legacy close by CID (if user_token is a cid)
+                                    pmm_memory.pmm.mark_commitment(
+                                        user_token, "closed", "Closed via --@commitments"
+                                    )
+                                    print(f"\n✅ Closed commitment {user_token}")
+                                    continue
+                            else:
+                                # No evidence provided: legacy close by cid
+                                pmm_memory.pmm.mark_commitment(
+                                    user_token, "closed", "Closed via --@commitments"
+                                )
+                                print(f"\n✅ Closed commitment {user_token}")
+                                continue
                         except Exception as e:
-                            print(f"\n❌ Failed to close {cid}: {e}")
+                            print(f"\n❌ Failed to close {user_token}: {e}")
                         continue
                     if sub == "clear":
                         try:
@@ -1175,7 +1315,16 @@ def main():
                     else:
                         print("\n📌 Open Commitments:")
                         for c in open_list[:5]:
-                            print(f"  • {c.get('text','')}")
+                            try:
+                                cid = c.get("cid", "?")
+                                status = c.get("status", "open")
+                                tier = c.get("tier", "permanent")
+                                h = (c.get("hash", "") or "")[:8]
+                                txt = (c.get("text", "") or "").replace("\n", " ")
+                                preview = (txt[:160] + ("…" if len(txt) > 160 else ""))
+                                print(f"  • {cid} [{status}/{tier}] #{h} :: {preview}")
+                            except Exception:
+                                print(f"  • {c.get('text','')}")
                     try:
                         items = get_identity_turn_commitments(pmm_memory.pmm)
                         if items:
@@ -2001,36 +2150,7 @@ def main():
                 print(
                     f"{_tag('API','cyan')} Response received: {len(response_text)} chars"
                 )
-            # Guard: if reply includes a malformed Next: line, rewrite only that line
-            try:
-                import re as _re
-
-                if "Next:" in (response_text or ""):
-                    # simple measurable check consistent with reflection
-                    MEASURABLE = _re.compile(
-                        r"(\b\d+(?:\.\d+)?\s*(minutes?|minute|hours?|days?|weeks?)\b|\b\d+\s*%|\bpercent\b|\bthreshold\b|\bcount\b)",
-                        _re.IGNORECASE,
-                    )
-                    BARE_BAD = _re.compile(
-                        r"^\s*\+?\d+(?:\.\d+)?\s*(minutes?|minute|hours?|days?|weeks?)?\s*$",
-                        _re.IGNORECASE,
-                    )
-                    lines = response_text.splitlines()
-                    fixed = False
-                    for i, ln in enumerate(lines):
-                        if ln.strip().lower().startswith("next:"):
-                            nl = ln[5:].strip()
-                            if (not MEASURABLE.search(nl)) or BARE_BAD.match(nl):
-                                # rewrite with a generic safe fallback
-                                lines[i] = (
-                                    "Next: I will provide an update within 15 minutes"
-                                )
-                                fixed = True
-                                break
-                    if fixed:
-                        response_text = "\n".join(lines)
-            except Exception:
-                pass
+            # Removed: keyword enforcement/rewrites for 'Next:' to allow autonomous, semantic commitments
 
             print(response_text)
 

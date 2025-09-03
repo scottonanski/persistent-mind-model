@@ -1,7 +1,9 @@
 from __future__ import annotations
 import re
 import json
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
+from pmm.semantic_analysis import get_semantic_analyzer
 
 
 DONE_RX = re.compile(r"\bDone:\s*(.+)", re.IGNORECASE)
@@ -14,6 +16,23 @@ URL_RX = re.compile(r"https?://\S+")
 EV_RX = re.compile(r"\bev\d+\b", re.IGNORECASE)
 PR_RX = re.compile(r"(#\d+|[A-Z]{2,}-\d+)")
 FILE_RX = re.compile(r"\b[\w/\.-]+\.(py|md|txt|json|yaml|yml|ipynb)\b")
+
+# Static seed phrases for closure exemplars (kept small; dynamic table will grow)
+CLOSURE_SEEDS: List[str] = [
+    "done",
+    "it's done",
+    "all set",
+    "completed",
+    "finished",
+    "merged",
+    "shipped",
+    "deployed",
+    "published",
+    "uploaded",
+    "implemented",
+    "refactored",
+    "configured",
+]
 
 # Identity adoption patterns (e.g., "I am now officially Quest", "my name is now Quest")
 IDENTITY_NAME_RXES: List[re.Pattern] = [
@@ -57,6 +76,70 @@ def _best_open_commitment(smm, reply_text: str) -> Tuple[Optional[str], Optional
         return best[1], best[2]
     except Exception:
         return None, None
+
+
+def _best_open_commitment_semantic(
+    smm, reply_text: str
+) -> Tuple[Optional[str], Optional[dict], float]:
+    """Return (commit_ref, commit_dict, similarity) using semantic similarity."""
+    try:
+        opens = smm.get_open_commitments() or []
+        if not opens:
+            return None, None, 0.0
+        analyzer = get_semantic_analyzer()
+        best = (0.0, None, None)
+        for c in opens:
+            ctext = (c.get("text", "") or "").strip()
+            if not ctext:
+                continue
+            sim = analyzer.cosine_similarity(reply_text, ctext)
+            if sim > best[0]:
+                best = (sim, c.get("hash"), c)
+        return best[1], best[2], best[0]
+    except Exception:
+        return None, None, 0.0
+
+
+def _get_dynamic_exemplars(smm, limit: int = 200) -> List[str]:
+    """Fetch recent learned closure exemplar phrases from SQLite.
+
+    Returns lowercase phrases, newest first.
+    """
+    try:
+        rows = smm.sqlite_store.conn.execute(
+            "SELECT phrase FROM closure_exemplars ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [str(r[0]).strip().lower() for r in rows if r and r[0]]
+    except Exception:
+        return []
+
+
+def _log_closure_exemplar(smm, phrase: str, confidence: float) -> None:
+    """Insert a new closure exemplar phrase into SQLite (best-effort)."""
+    try:
+        if not phrase:
+            return
+        p = phrase.strip().lower()
+        if len(p) < 3:
+            return
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        smm.sqlite_store.conn.execute(
+            "INSERT INTO closure_exemplars (phrase, confidence, created_at) VALUES (?,?,?)",
+            (p, float(confidence or 0.6), ts),
+        )
+        # Cap to last 200 entries
+        smm.sqlite_store.conn.execute(
+            """
+            DELETE FROM closure_exemplars
+            WHERE id NOT IN (
+                SELECT id FROM closure_exemplars ORDER BY id DESC LIMIT 200
+            )
+            """
+        )
+    except Exception:
+        # best-effort only
+        pass
 
 
 def process_reply_for_evidence(smm, reply_text: str) -> Optional[str]:
@@ -140,15 +223,30 @@ def process_reply_for_evidence(smm, reply_text: str) -> Optional[str]:
                     summary = line.strip()[:240]
                     break
         if not summary:
-            # No positive completion cues — attempt high-overlap mapping as final fallback
-            cref, cdict = _best_open_commitment(smm, text)
-            if not cref:
+            # No explicit completion cues — attempt semantic alignment then fallback to token overlap
+            s_cref, s_cdict, s_sim = _best_open_commitment_semantic(smm, text)
+            t_cref, t_cdict = _best_open_commitment(smm, text)
+            # Prefer semantic if clearly stronger
+            commit_ref = None
+            if s_cref and (s_sim >= 0.70):
+                commit_ref = s_cref
+            elif t_cref:
+                commit_ref = t_cref
+
+            if not commit_ref:
                 return None
-            # Require some overlap to avoid spurious evidence
+
+            # Emit implicit evidence with lower confidence; summary from first line
             summary = (text.splitlines()[0] if text else "").strip()[:240]
-            commit_ref = cref
+            # Proceed to event emission below; confidence computed later
         else:
-            commit_ref, _ = _best_open_commitment(smm, text)
+            # Have explicit summary; map to best open commitment preferring semantic
+            s_cref, _, s_sim = _best_open_commitment_semantic(smm, text)
+            t_cref, _ = _best_open_commitment(smm, text)
+            if s_cref and s_sim >= 0.62:
+                commit_ref = s_cref
+            else:
+                commit_ref = t_cref
 
         # artifact: URL, PR/issue id, evID, or file path
         art = None
@@ -162,11 +260,31 @@ def process_reply_for_evidence(smm, reply_text: str) -> Optional[str]:
         meta = {"type": "done"}
         if commit_ref:
             meta["commit_ref"] = commit_ref
-        # Confidence: base 0.65 + 0.1 if artifact present, capped at 0.9
-        conf = 0.7 + (0.1 if art else 0.0)
-        conf = min(0.9, conf)
+        # Confidence: base weighted by semantic similarity if available
+        try:
+            s_cref2, _, s_sim2 = _best_open_commitment_semantic(smm, text)
+        except Exception:
+            s_cref2, s_sim2 = None, 0.0
+        base = 0.65
+        if s_sim2 > 0:
+            # Map sim [0.6..0.9+] to boost [0..0.15]
+            boost = max(0.0, min(0.15, (s_sim2 - 0.60) * 0.5))
+            base += boost
+        # Exemplar similarity: compare text against static+dynamic exemplar phrases
+        try:
+            analyzer = get_semantic_analyzer()
+            exemplars = CLOSURE_SEEDS + _get_dynamic_exemplars(smm)
+            ex_sim = 0.0
+            for ex in exemplars[:200]:
+                ex_sim = max(ex_sim, analyzer.cosine_similarity(text, ex))
+            if ex_sim >= 0.60:
+                base += min(0.12, (ex_sim - 0.60) * 0.6)  # up to +0.12
+        except Exception:
+            pass
+        conf = base + (0.1 if art else 0.0)
+        conf = min(0.92, conf)
         content = {
-            "type": "done",
+            "type": "done" if DONE_RX.search(text) or SYN_RX.search(text) else "implicit",
             "summary": summary,
             "artifact": art,
             "confidence": round(conf, 2),
@@ -208,6 +326,12 @@ def process_reply_for_evidence(smm, reply_text: str) -> Optional[str]:
                     )
                 except Exception:
                     pass
+        except Exception:
+            pass
+        # Learn from this evidence by logging its phrase as an exemplar (best-effort)
+        try:
+            if summary:
+                _log_closure_exemplar(smm, summary, conf)
         except Exception:
             pass
         return res.get("hash")

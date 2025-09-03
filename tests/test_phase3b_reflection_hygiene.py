@@ -16,7 +16,7 @@ from unittest.mock import Mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pmm.self_model_manager import SelfModelManager
-from pmm.reflection import reflect_once, _validate_insight_references
+from pmm.reflection import reflect_once, validate_insight_references
 from pmm.adapters.openai_adapter import OpenAIAdapter
 
 
@@ -60,7 +60,7 @@ def test_insight_validation():
         ]
 
         for content, expected_accepted in test_cases:
-            is_accepted, refs = _validate_insight_references(content, mgr)
+            is_accepted, refs = validate_insight_references(content, mgr)
             print(f"  '{content[:50]}...' -> Accepted: {is_accepted}, Refs: {refs}")
             assert (
                 is_accepted == expected_accepted
