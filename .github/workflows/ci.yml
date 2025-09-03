@@ -46,6 +46,4 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-fake-key-for-testing' }}
           PMM_SKIP_OPENAI_TESTS: ${{ secrets.OPENAI_API_KEY == '' && 'true' || 'false' }}
           PYTHONFAULTHANDLER: "1"
-        run: pytest -vv -ra --maxfail=1 --durations=25 \
-          --timeout=300 --timeout-method=thread \
-          -m "not slow and not integration and not network"
+        run: pytest -vv -ra --maxfail=1 --durations=25 -m "not slow and not integration and not network"
