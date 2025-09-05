@@ -10,6 +10,11 @@ from pmm.emergence import EmergenceAnalyzer, EmergenceEvent
 from pmm.semantic_analysis import get_semantic_analyzer
 from pmm.meta_reflection import get_meta_reflection_analyzer
 from pmm.commitments import get_identity_turn_commitments
+from pmm.struct_semantics import (
+    parse_identity_name_change,
+    detect_event_numbers,
+    detect_ev_ids_and_hashes,
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -111,8 +116,6 @@ def identity(
     1) JSON model core_identity (preferred)
     2) Fallback: latest identity change/update event content
     """
-    import re
-
     # 1) Load name/id from JSON model
     name = None
     ident = None
@@ -136,12 +139,9 @@ def identity(
                 events = _load_events(db, limit=200, kind="identity_update") or []
             if events:
                 content = events[0].get("content", "") or ""
-                m = re.search(
-                    r"Name changed from '([^']+)' to '([^']+)'\s*\(origin=.*\)|Name changed to '([^']+)'",
-                    content,
-                )
-                if m:
-                    name = m.group(2) or m.group(3)
+                _old, new = parse_identity_name_change(content)
+                if new:
+                    name = new
         except Exception:
             pass
 
@@ -740,19 +740,18 @@ def reflections(
             is_referential = False
             references = []
 
-            # Look for event ID references
-            import re
-
-            event_refs = re.findall(r"event[_\s]*(\d+)", content, re.IGNORECASE)
-            if event_refs:
+            # Look for event ID references using structural helper
+            ev_refs = detect_event_numbers(content)
+            if ev_refs:
                 is_referential = True
-                references.extend([f"event_{ref}" for ref in event_refs])
+                references.extend(ev_refs)
 
-            # Look for commitment hash references
-            hash_refs = re.findall(r"[a-f0-9]{16}", content)
-            if hash_refs:
+            # Look for commitment hash references (16-char lowercase hex) using structural helper
+            token_refs = detect_ev_ids_and_hashes(content)
+            hex_refs = [t for t in token_refs if len(t) == 16 and all(c in "0123456789abcdef" for c in t)]
+            if hex_refs:
                 is_referential = True
-                references.extend([f"hash_{ref}" for ref in hash_refs])
+                references.extend([f"hash_{ref}" for ref in hex_refs])
 
             # Check if it references evidence
             evidence_ref = any(

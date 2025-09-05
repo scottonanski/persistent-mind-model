@@ -2,7 +2,6 @@
 from __future__ import annotations
 from typing import Dict, List
 from collections import Counter
-import re
 from dataclasses import dataclass
 
 
@@ -17,8 +16,17 @@ class ModelPhraseCache:
 
     def add_text(self, text: str) -> None:
         """Add text to the cache, extracting n-grams."""
-        # Clean and tokenize
-        clean_text = re.sub(r"[^\w\s]", " ", text.lower())
+        # Clean and tokenize (regex-free): keep alnum and spaces
+        def _normalize(s: str) -> str:
+            buf = []
+            for ch in s.lower():
+                if ch.isalnum() or ch.isspace():
+                    buf.append(ch)
+                else:
+                    buf.append(" ")
+            return "".join(buf)
+
+        clean_text = _normalize(text)
         tokens = clean_text.split()
 
         # Extract bigrams and trigrams
@@ -44,7 +52,17 @@ class ModelPhraseCache:
         self, text: str, threshold: float = 0.35
     ) -> tuple[bool, List[str]]:
         """Check if text contains too many repeated n-grams."""
-        clean_text = re.sub(r"[^\w\s]", " ", text.lower())
+        # Normalize and tokenize without regex
+        def _normalize(s: str) -> str:
+            buf = []
+            for ch in s.lower():
+                if ch.isalnum() or ch.isspace():
+                    buf.append(ch)
+                else:
+                    buf.append(" ")
+            return "".join(buf)
+
+        clean_text = _normalize(text)
         tokens = clean_text.split()
 
         repeated_phrases = []
@@ -82,27 +100,34 @@ class PhraseDeduper:
     def __init__(self):
         self.model_caches: Dict[str, ModelPhraseCache] = {}
 
-        # Known problematic phrases by model family
+        # Known problematic phrases by model family (regex-free).
+        # Each entry maps to a list of detectors with a canonical key and an ordered phrase sequence.
+        # The canonical key is used for suggestions matching.
         self.model_patterns = {
             "gemma": [
-                r"that's.*extraordinary",
-                r"fascinating.*scott",
-                r"remarkable.*insight",
-                r"intriguing.*perspective",
+                {"key": "that's extraordinary", "seq": ["that's", "extraordinary"]},
+                {"key": "fascinating scott", "seq": ["fascinating", "scott"]},
+                {"key": "remarkable insight", "seq": ["remarkable", "insight"]},
+                {"key": "intriguing perspective", "seq": ["intriguing", "perspective"]},
             ],
             "gpt": [
-                r"i appreciate.*sharing",
-                r"thank you.*bringing",
-                r"that's.*interesting.*point",
-                r"i understand.*you're.*saying",
+                {"key": "i appreciate you sharing", "seq": ["i appreciate", "sharing"]},
+                {"key": "thank you for bringing", "seq": ["thank you", "bringing"]},
+                {"key": "that's an interesting point", "seq": ["that's", "interesting", "point"]},
+                {"key": "i understand you're saying", "seq": ["i understand", "you're", "saying"]},
             ],
             "claude": [
-                r"i'd be happy to",
-                r"that's.*thoughtful.*question",
-                r"i think.*important.*consider",
-                r"from my perspective",
+                {"key": "i'd be happy to", "seq": ["i'd be happy to"]},
+                {"key": "that's a thoughtful question", "seq": ["that's", "thoughtful", "question"]},
+                {"key": "i think it's important to consider", "seq": ["i think", "important", "consider"]},
+                {"key": "from my perspective", "seq": ["from my perspective"]},
             ],
         }
+
+        # Precompute lowercase canonical keys for suggestion matching
+        for fam, items in self.model_patterns.items():
+            for it in items:
+                it["key_lc"] = it["key"].lower()
 
     def get_model_family(self, model_name: str) -> str:
         """Extract model family from full model name."""
@@ -138,14 +163,24 @@ class PhraseDeduper:
         # Check n-gram repetition
         is_repetitive, repeated_phrases = cache.check_repetition(response_text)
 
-        # Check known problematic patterns
+        # Check known problematic patterns using ordered phrase detection
         model_family = self.get_model_family(model_name)
         pattern_matches = []
 
+        def _contains_ordered(text_lc: str, seq: List[str]) -> bool:
+            pos = 0
+            for part in seq:
+                idx = text_lc.find(part, pos)
+                if idx == -1:
+                    return False
+                pos = idx + len(part)
+            return True
+
+        text_lc = response_text.lower()
         if model_family in self.model_patterns:
-            for pattern in self.model_patterns[model_family]:
-                if re.search(pattern, response_text.lower()):
-                    pattern_matches.append(pattern)
+            for det in self.model_patterns[model_family]:
+                if _contains_ordered(text_lc, det["seq"]):
+                    pattern_matches.append(det["key_lc"])  # canonical phrase key
 
         # Calculate overall repetition score
         total_phrases = len(repeated_phrases) + len(pattern_matches)
@@ -205,6 +240,25 @@ class PhraseDeduper:
         }
 
         modified_text = response_text
+        # Helper: case-insensitive replace for phrases
+        def _ci_replace(haystack: str, needle: str, repl: str) -> str:
+            if not needle:
+                return haystack
+            out = []
+            i = 0
+            n = len(needle)
+            h_lc = haystack.lower()
+            ndl_lc = needle.lower()
+            while i <= len(haystack) - n:
+                if h_lc[i : i + n] == ndl_lc:
+                    out.append(repl)
+                    i += n
+                else:
+                    out.append(haystack[i])
+                    i += 1
+            out.append(haystack[i:])
+            return "".join(out)
+
         for phrase in problematic_phrases:
             # Find best replacement
             for pattern, replacements in suggestions.items():
@@ -212,13 +266,8 @@ class PhraseDeduper:
                     import random
 
                     replacement = random.choice(replacements)
-                    # Simple replacement - could be more sophisticated
-                    modified_text = re.sub(
-                        re.escape(phrase),
-                        replacement,
-                        modified_text,
-                        flags=re.IGNORECASE,
-                    )
+                    # Case-insensitive replace without regex
+                    modified_text = _ci_replace(modified_text, phrase, replacement)
                     break
 
         return modified_text

@@ -1,85 +1,95 @@
 # name_detect.py - Strict agent name detection to prevent false positives
 
-import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-# Enhanced patterns with separation of user self-intro vs agent-directed rename
-# 1a) Strict user self-introduction: only "my name is ..." (extraction only, no rename)
-USER_MY_NAME_IS_PATTERN = re.compile(
-    r"""(?ix)
-    (?:^|[^\w])
-    my\s+name\s+is\s+
-    (?!not\b)
-    ["'""]?
-    ([A-ZÀ-ÖØ-Ý][\w''\-]{0,62}(?:\s+[A-ZÀ-ÖØ-Ý][\w''\-]{1,30})?)
-    ["'""]?
-    (?=\s|[^\w]|$)
-    """,
-    re.VERBOSE | re.IGNORECASE,
-)
+# Phrase lists for structural detection (no regex)
+USER_OWN_NAME_CUES = [
+    "my name is ",
+    "call me ",
+    "you can call me ",
+]
 
-# 1b) User-own-name phrases (for user self-identification only, not agent rename)
-USER_SELF_OWN_NAME_PATTERN = re.compile(
-    r"""(?ix)
-    (?:^|[^\w])
-    (?:
-        my\s+name\s+is|
-        call\s+me|
-        you\s+can\s+call\s+me
-    )\s+
-    (?!not\b)
-    ["'""]?
-    ([A-ZÀ-ÖØ-Ý][\w''\-]{0,62}(?:\s+[A-ZÀ-ÖØ-Ý][\w''\-]{1,30})?)
-    ["'""]?
-    (?=\s|[^\w]|$)
-    """,
-    re.VERBOSE | re.IGNORECASE,
-)
+ASSISTANT_SELF_NAME_CUES = USER_OWN_NAME_CUES + [
+    "i am ",
+    "i'm ",
+    "i’m ",
+]
 
-# 1c) General self-introduction phrases (used for assistant self-declaration only)
-USER_SELF_NAME_PATTERN = re.compile(
-    r"""(?ix)
-    (?:^|[^\w])
-    (?:
-        my\s+name\s+is|
-        call\s+me|
-        you\s+can\s+call\s+me|
-        i'm|
-        i\s+am
-    )\s+
-    (?!not\b)
-    ["'""]?
-    ([A-ZÀ-ÖØ-Ý][\w''\-]{0,62}(?:\s+[A-ZÀ-ÖØ-Ý][\w''\-]{1,30})?)
-    ["'""]?
-    (?=\s|[^\w]|$)
-    """,
-    re.VERBOSE | re.IGNORECASE,
-)
+AGENT_RENAME_CUES = [
+    "your name is ",
+    "let's call you ",
+    "lets call you ",
+    "i'll call you ",
+    "i’ll call you ",
+    "from now on, you are ",
+    "from now on you are ",
+    "your name shall be ",
+]
 
-# 2) Agent-directed rename commands (ONLY these should rename the agent)
-AGENT_RENAME_PATTERN = re.compile(
-    r"""(?ix)
-    (?:^|[^\w])
-    (?:
-        your\s+name\s+is|
-        let's\s+call\s+you|
-        i['’]ll\s+call\s+you|
-        from\s+now\s+on,?\s+you\s+are|
-        your\s+name\s+shall\s+be
-    )\s+
-    (?!not\b)
-    ["'""]?
-    ([A-ZÀ-ÖØ-Ý][\w''\-]{0,62}(?:\s+[A-ZÀ-ÖØ-Ý][\w''\-]{1,30})?)
-    ["'""]?
-    (?=\s|[^\w]|$)
-    """,
-    re.VERBOSE | re.IGNORECASE,
-)
+def _strip_code_blocks(text: str) -> str:
+    """Remove fenced and inline code blocks without regex."""
+    if not text:
+        return ""
+    s = str(text)
+    out_chars = []
+    i = 0
+    n = len(s)
+    in_fence = False
+    in_inline = False
+    while i < n:
+        # Detect triple backtick fence
+        if not in_inline and s.startswith("```", i):
+            in_fence = not in_fence
+            i += 3
+            continue
+        # Detect single backtick inline code
+        if not in_fence and s[i] == "`":
+            in_inline = not in_inline
+            i += 1
+            continue
+        if not in_fence and not in_inline:
+            out_chars.append(s[i])
+        i += 1
+    return "".join(out_chars)
 
-# Pattern to detect and remove code blocks
-CODE_FENCE_PATTERN = re.compile(r"```.*?```", re.DOTALL)
-INLINE_CODE_PATTERN = re.compile(r"`[^`]+`")
+def _extract_name_after_phrase(tail: str) -> Optional[str]:
+    """Extract a candidate name from the tail following a cue phrase.
+
+    Stops at common delimiters and validates capitalization and token rules.
+    """
+    if not tail:
+        return None
+    # Disallow immediate negation (e.g., "not Scott")
+    if tail.lstrip().lower().startswith("not "):
+        return None
+    # Cut at first delimiter
+    cut_tail = tail
+    for delim in [".", "!", "?", ",", ";", ":", "\n", "\r"]:
+        pos = cut_tail.find(delim)
+        if pos != -1:
+            cut_tail = cut_tail[:pos]
+            break
+    # Also cut at common conjunction markers introducing follow-up clauses
+    low_ct = " " + cut_tail.lower() + " "
+    for marker in [" and ", " but ", " so ", " then ", " because ", " that "]:
+        mpos = low_ct.find(marker)
+        if mpos != -1:
+            # Map back to original string index; mpos is in the padded low string
+            real_pos = max(0, mpos - 1)
+            cut_tail = cut_tail[:real_pos]
+            break
+    candidate = cut_tail.strip().strip("'\" ")
+    if not candidate:
+        return None
+    # Limit tokens and enforce capitalization/alphabetic
+    parts = [p for p in candidate.split() if p]
+    if not (1 <= len(parts) <= 3):
+        return None
+    for p in parts:
+        if not p.isalpha() or not p[0].isupper():
+            return None
+    return " ".join(parts)
 
 # Stopwords to filter out common false positives (reduced set, more focused)
 _STOPWORDS = {
@@ -184,32 +194,49 @@ def extract_agent_name_command(text: str, speaker: str) -> Optional[str]:
         return None
 
     # Strip code/log blocks to avoid capturing from traces
-    text = CODE_FENCE_PATTERN.sub(" ", text)
-    text = INLINE_CODE_PATTERN.sub(" ", text)
+    text = _strip_code_blocks(text)
 
     name: Optional[str] = None
 
+    # Lower/normalize for cue scanning while preserving original for capitalization
+    raw = text
+    low = text.lower()
+
     # If this is a user message, allow extraction for user's own name via
     # 'my name is', 'call me', 'you can call me'; ignore "I'm/I am"
-    if speaker == "user" and USER_SELF_OWN_NAME_PATTERN.search(text):
-        match_own = USER_SELF_OWN_NAME_PATTERN.search(text)
-        if match_own:
-            name = match_own.group(1).strip().rstrip(".,!?;:")
+    if speaker == "user":
+        for cue in USER_OWN_NAME_CUES:
+            pos = low.find(cue)
+            if pos != -1:
+                tail = raw[pos + len(cue) :]
+                name = _extract_name_after_phrase(tail)
+                if name:
+                    break
 
     # Only accept agent-directed rename patterns from the user (unless we already
     # extracted user's own name via strict self-intro above)
     if speaker == "user":
         if name is None:
-            match = AGENT_RENAME_PATTERN.search(text)
-            if not match:
+            for cue in AGENT_RENAME_CUES:
+                pos = low.find(cue)
+                if pos != -1:
+                    tail = raw[pos + len(cue) :]
+                    name = _extract_name_after_phrase(tail)
+                    if name:
+                        break
+            if name is None:
                 return None
-            name = match.group(1).strip().rstrip(".,!?;:")
     # Allow assistant self-declaration (e.g., "I'm Echo", "I am Echo")
     elif speaker == "assistant":
-        match = USER_SELF_NAME_PATTERN.search(text)
-        if not match:
+        for cue in ASSISTANT_SELF_NAME_CUES:
+            pos = low.find(cue)
+            if pos != -1:
+                tail = raw[pos + len(cue) :]
+                name = _extract_name_after_phrase(tail)
+                if name:
+                    break
+        if name is None:
             return None
-        name = match.group(1).strip().rstrip(".,!?;:")
     else:
         return None
 
@@ -255,6 +282,12 @@ def extract_agent_name_command(text: str, speaker: str) -> Optional[str]:
         "must",
         "shall",
     ]
+    # Also cut at common conjunctions introducing follow-ups (e.g., "and that's final")
+    cut_markers = {" and ", " but ", " so ", " then ", " because ", " that "}
+    low_name_scan = " " + name.lower() + " "
+    cut_pos = min([low_name_scan.find(m) for m in cut_markers if m in low_name_scan] or [len(low_name_scan)])
+    if cut_pos < len(low_name_scan):
+        name = name[: max(0, cut_pos - 1)].strip()
     name_parts = name.split()
     while name_parts and name_parts[-1].lower() in common_words:
         name_parts.pop()

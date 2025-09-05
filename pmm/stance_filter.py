@@ -1,6 +1,5 @@
 # pmm/stance_filter.py
 from __future__ import annotations
-import re
 import os
 from typing import List, Tuple, Dict, Optional
 
@@ -15,80 +14,100 @@ class StanceFilter:
     """Filter to convert anthropomorphic language to neutral observations."""
 
     def __init__(self):
-        # Patterns to detect and replace anthropomorphic language
-        self.anthropomorphic_patterns = [
-            # First-person feelings and emotions
-            (r"\bi feel that\b", "it appears that"),
-            (r"\bi feel like\b", "it seems like"),
-            (r"\bi believe\b", "the analysis suggests"),
-            (r"\bi think that\b", "the data indicates that"),
-            (r"\bi find (?:it|this)\b", "this appears"),
-            (r"\bi\'m (?:excited|thrilled|pleased)\b", "this development is notable"),
-            (r"\bi\'m (?:concerned|worried)\b", "this raises considerations"),
-            (r"\bi\'m (?:impressed|amazed)\b", "this demonstrates"),
-            # Emotional descriptors
-            (r"\bpoignant\b", "significant"),
-            (r"\btouching\b", "notable"),
-            (r"\bheartwarming\b", "positive"),
-            (r"\bheartbreaking\b", "concerning"),
-            (r"\bfascinating\b", "interesting"),
-            (r"\bextraordinary\b", "notable"),
-            (r"\bremarkable\b", "significant"),
-            (r"\bamazing\b", "notable"),
-            (r"\bincredible\b", "substantial"),
-            # Personal preferences and desires
-            (r"\bi\'d love to\b", "it would be useful to"),
-            (r"\bi\'d like to\b", "it would be helpful to"),
-            (r"\bi want to\b", "the goal is to"),
-            (r"\bi hope\b", "the expectation is"),
-            (r"\bi wish\b", "it would be beneficial if"),
-            # Personal experiences
-            (r"\bin my experience\b", "based on the data"),
-            (r"\bfrom my perspective\b", "from this analysis"),
-            (r"\bi\'ve noticed\b", "the pattern shows"),
-            (r"\bi\'ve observed\b", "the data indicates"),
-            (r"\bi\'ve seen\b", "the evidence shows"),
-            # Empathy and understanding
-            (r"\bi understand (?:how|why|that)\b", "the analysis shows"),
-            (r"\bi can see (?:how|why|that)\b", "it's evident that"),
-            (r"\bi appreciate\b", "this acknowledges"),
-            (r"\bi\'m sorry (?:to hear|that)\b", "this situation indicates"),
-            # Certainty modifiers that sound too human
-            (r"\bi\'m confident\b", "the evidence suggests"),
-            (r"\bi\'m certain\b", "the analysis confirms"),
-            (r"\bi\'m sure\b", "the data supports"),
-            (r"\bi doubt\b", "it's unlikely"),
-            # Conversational fillers
-            (r"\bto be honest\b", ""),
-            (r"\bfrankly\b", ""),
-            (r"\bpersonally\b", ""),
-            (r"\bif i\'m being honest\b", ""),
+        # Anthropomorphic phrase replacements (case-insensitive, structural)
+        # Use short, explicit cues to avoid overreach
+        self.phrase_replacements: List[Tuple[str, str]] = [
+            ("i feel that", "it appears that"),
+            ("i feel like", "it seems like"),
+            ("i believe", "the analysis suggests"),
+            ("i think that", "the data indicates that"),
+            ("i find it", "this appears"),
+            ("i find this", "this appears"),
+            ("i'm excited", "this development is notable"),
+            ("i am excited", "this development is notable"),
+            ("i’m excited", "this development is notable"),
+            ("i'm thrilled", "this development is notable"),
+            ("i am thrilled", "this development is notable"),
+            ("i'm pleased", "this development is notable"),
+            ("i am pleased", "this development is notable"),
+            ("i'm concerned", "this raises considerations"),
+            ("i am concerned", "this raises considerations"),
+            ("i'm worried", "this raises considerations"),
+            ("i am worried", "this raises considerations"),
+            ("i'm impressed", "this demonstrates"),
+            ("i am impressed", "this demonstrates"),
+            ("i'm amazed", "this demonstrates"),
+            ("i am amazed", "this demonstrates"),
+            ("i'd love to", "it would be useful to"),
+            ("i would love to", "it would be useful to"),
+            ("i'd like to", "it would be helpful to"),
+            ("i would like to", "it would be helpful to"),
+            ("i want to", "the goal is to"),
+            ("i hope", "the expectation is"),
+            ("i wish", "it would be beneficial if"),
+            ("in my experience", "based on the data"),
+            ("from my perspective", "from this analysis"),
+            ("i've noticed", "the pattern shows"),
+            ("i have noticed", "the pattern shows"),
+            ("i've observed", "the data indicates"),
+            ("i have observed", "the data indicates"),
+            ("i've seen", "the evidence shows"),
+            ("i have seen", "the evidence shows"),
+            ("i understand how", "the analysis shows"),
+            ("i understand why", "the analysis shows"),
+            ("i understand that", "the analysis shows"),
+            ("i can see how", "it's evident that"),
+            ("i can see why", "it's evident that"),
+            ("i can see that", "it's evident that"),
+            ("i appreciate", "this acknowledges"),
+            ("i'm sorry to hear", "this situation indicates"),
+            ("i am sorry to hear", "this situation indicates"),
+            ("i'm sorry that", "this situation indicates"),
+            ("i am sorry that", "this situation indicates"),
+            ("i'm confident", "the evidence suggests"),
+            ("i am confident", "the evidence suggests"),
+            ("i'm certain", "the analysis confirms"),
+            ("i am certain", "the analysis confirms"),
+            ("i'm sure", "the data supports"),
+            ("i am sure", "the data supports"),
+            ("i doubt", "it's unlikely"),
+            ("to be honest", ""),
+            ("frankly", ""),
+            ("personally", ""),
+            ("if i'm being honest", ""),
+            ("if i am being honest", ""),
         ]
 
-        # Compile patterns for efficiency
-        self.compiled_patterns = [
-            (re.compile(pattern, re.IGNORECASE), replacement)
-            for pattern, replacement in self.anthropomorphic_patterns
-        ]
+        # Token replacements for single-word descriptors; applied on token boundaries
+        self.token_replacements: Dict[str, str] = {
+            "poignant": "significant",
+            "touching": "notable",
+            "heartwarming": "positive",
+            "heartbreaking": "concerning",
+            "fascinating": "interesting",
+            "extraordinary": "notable",
+            "remarkable": "significant",
+            "amazing": "notable",
+            "incredible": "substantial",
+        }
 
-        # Phrases that should trigger a complete rewrite
-        self.rewrite_triggers = [
-            r"\bi feel\b.*\bpoignant\b",
-            r"\bthat\'s.*extraordinary.*scott\b",
-            r"\bi\'m.*moved by\b",
-            r"\bmy heart\b",
-            r"\bmy soul\b",
-            r"\bdeep in my\b",
-        ]
-
-        self.rewrite_compiled = [
-            re.compile(pattern, re.IGNORECASE) for pattern in self.rewrite_triggers
+        # Triggers for a complete rewrite (heavy anthropomorphism)
+        self.rewrite_triggers_simple: List[Tuple[List[str], Optional[str]]] = [
+            (["i feel", "poignant"], None),
+            (["that's", "extraordinary", "scott"], None),
+            (["i'm", "moved by"], None),
+            (["my heart"], None),
+            (["my soul"], None),
+            (["deep in my"], None),
         ]
 
     def needs_rewrite(self, text: str) -> bool:
         """Check if text needs complete rewriting due to heavy anthropomorphism."""
-        for pattern in self.rewrite_compiled:
-            if pattern.search(text):
+        if not text:
+            return False
+        low = text.lower()
+        for cues, _ in self.rewrite_triggers_simple:
+            if all(cue in low for cue in cues):
                 return True
         return False
 
@@ -158,34 +177,65 @@ class StanceFilter:
             applied_filters.append("complete_rewrite_needed")
             # For now, just apply standard filters - could implement LLM-based rewrite
 
-        # Apply pattern-based filters (safer, more targeted set)
-        # Adjust replacement set by strictness
-        base_replacements = {
-            r"\bI feel\b": "I observe",
-            r"\bI\'m grateful\b": "I acknowledge",
-            r"\bpoignant\b": "notable",
-            r"\bI\'m excited\b": "I intend",
-            r"\bI appreciate\b": "This acknowledges",
-            r"\bfascinating\b": "interesting",
-            r"\bextraordinary\b": "notable",
-            r"\bremarkable\b": "significant",
-        }
-        if mode == "relaxed":
-            # Minimal replacements only; keep style latitude in later stages
-            safe_replacements = {
-                r"\bI feel\b": "I observe",
-                r"\bI\'m grateful\b": "I acknowledge",
-            }
-        else:
-            safe_replacements = base_replacements
+        # Apply phrase-level replacements according to strictness
+        def apply_phrase_replacements(s: str, phrases: List[Tuple[str, str]]) -> Tuple[str, int]:
+            count = 0
+            low = s.lower()
+            # To preserve alignment after replacements, iterate in order and rebuild string
+            out = []
+            i = 0
+            n = len(s)
+            while i < n:
+                matched = False
+                for cue, repl in phrases:
+                    if low.startswith(cue, i):
+                        out.append(repl)
+                        i += len(cue)
+                        count += 1
+                        matched = True
+                        break
+                if not matched:
+                    out.append(s[i])
+                    i += 1
+            return "".join(out), count
 
-        for pattern, replacement in safe_replacements.items():
-            compiled_pattern = re.compile(pattern, re.IGNORECASE)
-            if compiled_pattern.search(filtered_text):
-                old_text = filtered_text
-                filtered_text = compiled_pattern.sub(replacement, filtered_text)
-                if old_text != filtered_text:
-                    applied_filters.append(f"replaced: {pattern}")
+        phrase_set = self.phrase_replacements
+        if mode == "relaxed":
+            phrase_set = [
+                ("i feel", "i observe"),
+                ("i'm grateful", "i acknowledge"),
+                ("i am grateful", "i acknowledge"),
+            ]
+
+        new_text, c1 = apply_phrase_replacements(filtered_text, phrase_set)
+        if c1 > 0:
+            applied_filters.append(f"phrase_replacements:{c1}")
+        filtered_text = new_text
+
+        # Apply token-level replacements for emotional descriptors
+        def replace_tokens(s: str, mapping: Dict[str, str]) -> Tuple[str, int]:
+            tokens: List[str] = s.split(" ")
+            changed = 0
+            for idx, tok in enumerate(tokens):
+                core = tok.strip('"\'\t\r\n.,;:!?()[]{}')
+                lower = core.lower()
+                if lower in mapping and core:
+                    before = tok
+                    replaced_core = mapping[lower]
+                    # Rebuild token preserving punctuation around core
+                    start = tok.find(core)
+                    if start != -1:
+                        end = start + len(core)
+                        tok = tok[:start] + replaced_core + tok[end:]
+                        tokens[idx] = tok
+                        if before != tok:
+                            changed += 1
+            return " ".join(tokens), changed
+
+        new_text, c2 = replace_tokens(filtered_text, self.token_replacements)
+        if c2 > 0:
+            applied_filters.append(f"token_replacements:{c2}")
+        filtered_text = new_text
 
         # In relaxed mode, if we didn't actually apply any replacements and no rewrite was needed,
         # keep original text to minimize unnecessary style impact.
@@ -196,19 +246,30 @@ class StanceFilter:
         ):
             return text, ["relaxed_stage_noop"]
 
-        # Clean up extra spaces and punctuation
-        filtered_text = re.sub(r"\s+", " ", filtered_text)  # Multiple spaces
-        filtered_text = re.sub(
-            r"\s+([,.!?])", r"\1", filtered_text
-        )  # Space before punctuation
+        # Clean up extra spaces and punctuation (no regex)
+        filtered_text = " ".join(filtered_text.split())
+        for p in [",", ".", "!", "?", ";", ":"]:
+            filtered_text = filtered_text.replace(" " + p, p)
         filtered_text = filtered_text.strip()
 
-        # Capitalize first letter of sentences
-        filtered_text = re.sub(
-            r"(^|[.!?]\s+)([a-z])",
-            lambda m: m.group(1) + m.group(2).upper(),
-            filtered_text,
-        )
+        # Capitalize first letter of sentences without regex
+        def capitalize_sentences(s: str) -> str:
+            if not s:
+                return s
+            chars = list(s)
+            capitalize_next = True
+            for i, ch in enumerate(chars):
+                if capitalize_next and ch.isalpha():
+                    chars[i] = ch.upper()
+                    capitalize_next = False
+                if ch in ".!?":
+                    capitalize_next = True
+                elif ch.strip():
+                    # Any non-space resets capitalize until next delimiter
+                    pass
+            return "".join(chars)
+
+        filtered_text = capitalize_sentences(filtered_text)
 
         return filtered_text, applied_filters
 
@@ -222,16 +283,22 @@ class StanceFilter:
             return 0.0
 
         anthropomorphic_matches = 0
+        low = text.lower()
 
-        # Count pattern matches
-        for pattern, _ in self.compiled_patterns:
-            matches = len(pattern.findall(text))
-            anthropomorphic_matches += matches
+        # Count phrase occurrences
+        for cue, _ in self.phrase_replacements:
+            if cue in low:
+                anthropomorphic_matches += low.count(cue)
+
+        # Count token descriptor occurrences (approximate by substring count on word)
+        for tok in self.token_replacements.keys():
+            if tok in low:
+                anthropomorphic_matches += low.count(tok)
 
         # Check for rewrite triggers (heavily weighted)
-        for pattern in self.rewrite_compiled:
-            if pattern.search(text):
-                anthropomorphic_matches += 5  # Heavy penalty
+        for cues, _ in self.rewrite_triggers_simple:
+            if all(c in low for c in cues):
+                anthropomorphic_matches += 5
 
         # Normalize by word count
         score = min(1.0, anthropomorphic_matches / (word_count / 10))

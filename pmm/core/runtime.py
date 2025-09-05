@@ -227,7 +227,7 @@ RECENT INSIGHTS:
         """Update PMM mind state after generating response."""
         # Check for identity updates (name changes) using strict detector + cooldown
         try:
-            cand = extract_agent_name_command(user_text, role="user")
+            cand = extract_agent_name_command(user_text, speaker="user")
             if cand:
                 last_change = getattr(
                     self.pmm_manager.model.metrics, "last_name_change_at", None
@@ -437,21 +437,8 @@ RECENT INSIGHTS:
             if not text:
                 return
 
-            # Strict regex: look for standalone self-declarations like "My name is Echo" or "Call me Echo".
-            import re
-
-            patterns = [
-                r"\bmy name is\s+([A-Z][a-zA-Z]{1,31})\b",
-                r"\bcall me\s+([A-Z][a-zA-Z]{1,31})\b",
-                r"\bi am\s+([A-Z][a-zA-Z]{1,31})\b",
-            ]
-            candidate = None
-            for p in patterns:
-                m = re.search(p, text, flags=re.IGNORECASE)
-                if m:
-                    candidate = m.group(1)
-                    break
-
+            # Use centralized structural detector (no regex)
+            candidate = extract_agent_name_command(text, speaker="assistant")
             if not candidate:
                 return
 
@@ -612,14 +599,16 @@ RECENT INSIGHTS:
                 "reflection", reply, {"role": "assistant", "tag": "macro_reflection"}
             )
 
-            # Extract autonomy directive line if present: starts with "Directive:" or imperative line
-            import re
-
-            m = re.search(
-                r"^\s*Directive\s*:\s*(.+)$", reply, flags=re.IGNORECASE | re.MULTILINE
-            )
-            if m:
-                self._persist_autonomy_directive(m.group(1).strip(), source_event)
+            # Extract autonomy directive line if present: starts with "Directive:" (case-insensitive)
+            for line in (reply or "").splitlines():
+                l = line.strip()
+                if not l:
+                    continue
+                if l.lower().startswith("directive:"):
+                    content = l[len("directive:") :].strip()
+                    if content:
+                        self._persist_autonomy_directive(content, source_event)
+                        break
             return reply
         except Exception:
             return None

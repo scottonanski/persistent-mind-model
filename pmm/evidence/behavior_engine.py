@@ -1,72 +1,29 @@
 from __future__ import annotations
-import re
 import json
+import os
 from datetime import datetime, timezone
 from typing import Optional, List, Tuple
+from urllib.parse import urlparse
+from pathlib import PurePosixPath
 from pmm.semantic_analysis import get_semantic_analyzer
 
-
-DONE_RX = re.compile(r"\bDone:\s*(.+)", re.IGNORECASE)
-# Broadened completion cues so user never needs to type "Done"
-SYN_RX = re.compile(
-    r"\b(completed|implemented|fixed|merged|published|shipped|closed|deployed|uploaded|documented|refactored|adopted|renamed|set up|configured)\b",
-    re.IGNORECASE,
-)
-URL_RX = re.compile(r"https?://\S+")
-EV_RX = re.compile(r"\bev\d+\b", re.IGNORECASE)
-PR_RX = re.compile(r"(#\d+|[A-Z]{2,}-\d+)")
-FILE_RX = re.compile(r"\b[\w/\.-]+\.(py|md|txt|json|yaml|yml|ipynb)\b")
-
-# Static seed phrases for closure exemplars (kept small; dynamic table will grow)
-CLOSURE_SEEDS: List[str] = [
-    "done",
-    "it's done",
-    "all set",
-    "completed",
-    "finished",
-    "merged",
-    "shipped",
-    "deployed",
-    "published",
-    "uploaded",
-    "implemented",
-    "refactored",
-    "configured",
-]
-
-# Identity adoption patterns (e.g., "I am now officially Quest", "my name is now Quest")
-IDENTITY_NAME_RXES: List[re.Pattern] = [
-    re.compile(
-        r"\bmy\s+name\s+is\s+(?:now\s+)?['\"]?(?P<name>[A-Z][\w\- ]{1,40})['\"]?",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\bi\s*(?:am|'m)\s+now\s+(?:officially\s+)?(?P<name>[A-Z][\w\- ]{1,40})\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\bofficially\s+(?:named|name)\s+['\"]?(?P<name>[A-Z][\w\- ]{1,40})['\"]?",
-        re.IGNORECASE,
-    ),
-]
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except Exception:
+        return default
 
 
-def _best_open_commitment(smm, reply_text: str) -> Tuple[Optional[str], Optional[dict]]:
-    """Return (commit_ref, commit_dict) with highest token overlap vs reply_text."""
+def _best_open_commitment_token(smm, reply_text: str) -> Tuple[Optional[str], Optional[dict]]:
+    """Return (commit_ref, commit_dict) via simple token overlap without regex."""
     try:
         opens = smm.get_open_commitments() or []
         if not opens:
             return None, None
-        # simple token overlap score
-        import re as _re
-
-        def toks(s: str) -> set:
-            return set(t for t in _re.split(r"\W+", (s or "").lower()) if t)
-
-        rt = toks(reply_text)
+        rt = set((reply_text or "").lower().split())
         best = (0.0, None, None)
         for c in opens:
-            ct = toks(c.get("text", ""))
+            ct = set((c.get("text", "") or "").lower().split())
             if not ct:
                 continue
             inter = len(rt & ct)
@@ -100,193 +57,77 @@ def _best_open_commitment_semantic(
         return None, None, 0.0
 
 
-def _get_dynamic_exemplars(smm, limit: int = 200) -> List[str]:
-    """Fetch recent learned closure exemplar phrases from SQLite.
+def _parse_artifact(text: str) -> Optional[str]:
+    """Parse a likely artifact using standard parsers only (no regex).
 
-    Returns lowercase phrases, newest first.
+    - Prefer valid HTTP/HTTPS URIs via urllib.parse
+    - Else detect file-like tokens via pathlib suffix
+    - Else detect bare commit/event/issue tokens if they look like ids (simple tokens with digits)
     """
+    if not isinstance(text, str) or not text:
+        return None
+    # Check URI
     try:
-        rows = smm.sqlite_store.conn.execute(
-            "SELECT phrase FROM closure_exemplars ORDER BY id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return [str(r[0]).strip().lower() for r in rows if r and r[0]]
+        parsed = urlparse(text.strip())
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            return text.strip()
     except Exception:
-        return []
-
-
-def _log_closure_exemplar(smm, phrase: str, confidence: float) -> None:
-    """Insert a new closure exemplar phrase into SQLite (best-effort)."""
-    try:
-        if not phrase:
-            return
-        p = phrase.strip().lower()
-        if len(p) < 3:
-            return
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        smm.sqlite_store.conn.execute(
-            "INSERT INTO closure_exemplars (phrase, confidence, created_at) VALUES (?,?,?)",
-            (p, float(confidence or 0.6), ts),
-        )
-        # Cap to last 200 entries
-        smm.sqlite_store.conn.execute(
-            """
-            DELETE FROM closure_exemplars
-            WHERE id NOT IN (
-                SELECT id FROM closure_exemplars ORDER BY id DESC LIMIT 200
-            )
-            """
-        )
-    except Exception:
-        # best-effort only
         pass
+    # Look through whitespace tokens for a plausible path
+    for tok in text.split():
+        try:
+            p = PurePosixPath(tok)
+            if p.suffix:
+                return tok
+        except Exception:
+            continue
+        # Detect simple ids like '#123' or 'EV123' without regex: check digits presence
+        if any(ch.isdigit() for ch in tok):
+            return tok
+    return None
+
+
+def _noop_learn(*args, **kwargs) -> None:
+    # Removed exemplar phrase learning to comply with no literal phrases policy
+    return None
 
 
 def process_reply_for_evidence(smm, reply_text: str) -> Optional[str]:
-    """Best-effort evidence detector.
+    """Semantic-only evidence mapping.
 
-    Emits a minimal 'evidence' event when it spots a 'Done:' marker, with an
-    artifact if a URL or evID is present. If an open commitment exists with a
-    canonical hash, attach it via meta.commit_ref. Returns the event hash if
-    written.
+    - Map reply to nearest open commitment via cosine similarity; require threshold.
+    - Parse artifact via urllib.parse/pathlib only.
+    - Emit a single 'evidence' event with meta.commit_ref if mapped.
+    - Do NOT auto-close commitments here; closure is inferred elsewhere from evidence linkages.
     """
     try:
         text = (reply_text or "").strip()
         if not text:
             return None
-        # Specialized: identity adoption as evidence
-        identity_name = None
-        for rx in IDENTITY_NAME_RXES:
-            m = rx.search(text)
-            if m and m.group("name"):
-                identity_name = m.group("name").strip()
-                break
-
-        # If identity adoption is detected, try to map to an open commitment explicitly about name adoption
-        mapped_commit = None
+        # Map to nearest open commitment by semantic similarity, else token overlap
+        s_cref, s_cdict, s_sim = _best_open_commitment_semantic(smm, text)
+        t_cref, t_cdict = _best_open_commitment_token(smm, text)
+        sim_thresh = _env_float("PMM_EVIDENCE_SEM_THRESHOLD", 0.58)
         commit_ref = None
-        if identity_name:
-            try:
-                opens = smm.get_open_commitments() or []
-            except Exception:
-                opens = []
-            for c in opens:
-                t = (c.get("text", "") or "").lower()
-                if ("adopt" in t or "name" in t) and identity_name.lower() in t:
-                    commit_ref = c.get("hash") or None
-                    mapped_commit = c
-                    break
-            # As an extra safety, verify the self-model name matches to boost confidence
-            try:
-                current_name = str(getattr(smm.model.core_identity, "name", ""))
-            except Exception:
-                current_name = ""
-
-            if (
-                mapped_commit
-                and identity_name
-                and identity_name.lower() in current_name.lower()
-            ):
-                # Strong evidence — construct evidence content now
-                meta = {"type": "done", "commit_ref": commit_ref}
-                content = {
-                    "type": "done",
-                    "summary": f"Identity adopted: {identity_name}",
-                    "artifact": None,
-                    "confidence": 0.9,
-                }
-                res = smm.sqlite_store.append_event(
-                    kind="evidence",
-                    content=json.dumps(content, ensure_ascii=False),
-                    meta=meta,
-                )
-                try:
-                    smm.commitment_tracker.close_commitment_with_evidence(
-                        commit_hash=commit_ref,
-                        evidence_type="done",
-                        description=f"Adopted name {identity_name}",
-                        artifact=None,
-                        confidence=0.9,
-                    )
-                except Exception:
-                    pass
-                return res.get("hash")
-
-        # General: explicit Done: summary
-        m = DONE_RX.search(text)
-        summary = m.group(1).strip()[:240] if m else None
-
-        # Secondary: completion synonyms — use first line containing cue as summary
-        if not summary and SYN_RX.search(text):
-            for line in text.splitlines():
-                if SYN_RX.search(line):
-                    summary = line.strip()[:240]
-                    break
-        if not summary:
-            # No explicit completion cues — attempt semantic alignment then fallback to token overlap
-            s_cref, s_cdict, s_sim = _best_open_commitment_semantic(smm, text)
-            t_cref, t_cdict = _best_open_commitment(smm, text)
-            # Prefer semantic if clearly stronger
-            commit_ref = None
-            if s_cref and (s_sim >= 0.70):
-                commit_ref = s_cref
-            elif t_cref:
-                commit_ref = t_cref
-
-            if not commit_ref:
-                return None
-
-            # Emit implicit evidence with lower confidence; summary from first line
-            summary = (text.splitlines()[0] if text else "").strip()[:240]
-            # Proceed to event emission below; confidence computed later
-        else:
-            # Have explicit summary; map to best open commitment preferring semantic
-            s_cref, _, s_sim = _best_open_commitment_semantic(smm, text)
-            t_cref, _ = _best_open_commitment(smm, text)
-            if s_cref and s_sim >= 0.62:
-                commit_ref = s_cref
-            else:
-                commit_ref = t_cref
-
-        # artifact: URL, PR/issue id, evID, or file path
-        art = None
-        for rx in (URL_RX, PR_RX, EV_RX, FILE_RX):
-            mrx = rx.search(text)
-            if mrx:
-                art = mrx.group(0)
-                break
-        # try to grab an open commitment hash for commit_ref
-        # commit_ref selected above; if missing, leave evidence unattached
-        meta = {"type": "done"}
-        if commit_ref:
-            meta["commit_ref"] = commit_ref
-        # Confidence: base weighted by semantic similarity if available
-        try:
-            s_cref2, _, s_sim2 = _best_open_commitment_semantic(smm, text)
-        except Exception:
-            s_sim2 = 0.0
-        base = 0.65
-        if s_sim2 > 0:
-            # Map sim [0.6..0.9+] to boost [0..0.15]
-            boost = max(0.0, min(0.15, (s_sim2 - 0.60) * 0.5))
-            base += boost
-        # Exemplar similarity: compare text against static+dynamic exemplar phrases
-        try:
-            analyzer = get_semantic_analyzer()
-            exemplars = CLOSURE_SEEDS + _get_dynamic_exemplars(smm)
-            ex_sim = 0.0
-            for ex in exemplars[:200]:
-                ex_sim = max(ex_sim, analyzer.cosine_similarity(text, ex))
-            if ex_sim >= 0.60:
-                base += min(0.12, (ex_sim - 0.60) * 0.6)  # up to +0.12
-        except Exception:
-            pass
-        conf = base + (0.1 if art else 0.0)
-        conf = min(0.92, conf)
+        if s_cref and (s_sim >= sim_thresh):
+            commit_ref = s_cref
+        elif t_cref:
+            commit_ref = t_cref
+        if not commit_ref:
+            return None
+        # Artifact parsing
+        art = _parse_artifact(text)
+        # Confidence: monotone mapping from semantic similarity with small artifact boost
+        base = max(0.0, min(1.0, (s_sim if s_cref == commit_ref else 0.0)))
+        # Map [sim_thresh..1] -> [0.6..0.9]
+        if base > 0.0:
+            span = max(1e-6, 1.0 - sim_thresh)
+            base = 0.6 + (max(0.0, base - sim_thresh) / span) * 0.3
+        conf = min(0.95, base + (0.05 if art else 0.0))
+        summary = (text.splitlines()[0] if text else "").strip()[:240]
+        meta = {"type": "done", "commit_ref": commit_ref}
         content = {
-            "type": (
-                "done" if DONE_RX.search(text) or SYN_RX.search(text) else "implicit"
-            ),
+            "type": "done",
             "summary": summary,
             "artifact": art,
             "confidence": round(conf, 2),
@@ -294,48 +135,8 @@ def process_reply_for_evidence(smm, reply_text: str) -> Optional[str]:
         res = smm.sqlite_store.append_event(
             kind="evidence", content=json.dumps(content, ensure_ascii=False), meta=meta
         )
-        # Mirror JSON evidence event into self-model for narrative auditability
-        try:
-            # Structure matching tests: type prefix "evidence:done" and evidence payload
-            ev = {
-                "evidence_type": "done",
-                "commit_ref": meta.get("commit_ref"),
-                "description": summary or "Done",
-                "artifact": art,
-            }
-            smm.add_event(
-                summary=f"Evidence: {summary}",
-                etype="evidence:done",
-                evidence=ev,
-            )
-        except Exception:
-            pass
-
-        # Optional: auto-close mapped commitment when above threshold
-        try:
-            from pmm.config.models import get_evidence_confidence_threshold
-
-            thresh = float(get_evidence_confidence_threshold())
-            cref = meta.get("commit_ref")
-            if cref and conf >= thresh:
-                try:
-                    smm.commitment_tracker.close_commitment_with_evidence(
-                        commit_hash=cref,
-                        evidence_type="done",
-                        description=summary or "Done",
-                        artifact=art,
-                        confidence=conf,
-                    )
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        # Learn from this evidence by logging its phrase as an exemplar (best-effort)
-        try:
-            if summary:
-                _log_closure_exemplar(smm, summary, conf)
-        except Exception:
-            pass
+        # No auto-close here; authoritative closure is evidence-linked in analyzer
+        _noop_learn()
         return res.get("hash")
     except Exception:
         return None

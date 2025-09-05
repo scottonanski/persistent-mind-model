@@ -12,6 +12,11 @@ from pmm.config.models import (
     get_threshold_cooldown_turns,
 )
 from pmm.logging_config import pmm_tlog, pmm_dlog
+from pmm.struct_semantics import (
+    normalize_whitespace,
+    has_banned_coachlike,
+    detect_ev_ids_and_hashes,
+)
 
 
 @dataclass
@@ -467,10 +472,8 @@ class AtomicReflectionManager:
         stance_filter = StanceFilter()
         filtered_content, _ = stance_filter.filter_response(content)
 
-        # Normalize whitespace
-        import re
-
-        normalized = re.sub(r"\s+", " ", filtered_content.strip())
+        # Normalize whitespace (regex-free)
+        normalized = normalize_whitespace(filtered_content.strip())
 
         # Light style normalization to reduce false dedup (remove stock openers/closers)
         lowered = normalized.lower()
@@ -514,28 +517,9 @@ class AtomicReflectionManager:
         if len(set(words)) < len(words) * 0.3:  # Too repetitive
             return False
 
-        # Hygiene: block coach-like meta-prescriptions that cause spammy commitments
-        # Examples to block: "ask a probing question every (turn|message)",
-        # "deepen conversations each turn", "i should ask a question every time"
-        try:
-            import re
-
-            banned_patterns = (
-                r"\bask (?:a|more) (?:probing|deeper) question(?:s)? (?:every|each) (?:turn|message|reply)\b",
-                r"\bdeepen (?:the )?conversation(?:s)? (?:every|each) (?:turn|message|reply)\b",
-                r"\bi should ask (?:a )?question (?:every|each) (?:turn|message|reply)\b",
-                r"\bi will ask (?:a )?question (?:every|each) (?:turn|message|reply)\b",
-                r"\balways ask (?:a )?question\b",
-                r"\bask more questions each (?:turn|message|reply)\b",
-            )
-
-            lowered = content.lower()
-            for pat in banned_patterns:
-                if re.search(pat, lowered):
-                    return False
-        except Exception:
-            # On regex failure, don't block
-            pass
+        # Hygiene: block coach-like meta-prescriptions (regex-free)
+        if has_banned_coachlike(content):
+            return False
 
         return True
 
@@ -763,19 +747,7 @@ class AtomicReflectionManager:
         if not text:
             return set()
         try:
-            import re
-
-            refs: set[str] = set()
-
-            # Event IDs: match 'ev123' (case-insensitive), normalize to lowercase
-            for m in re.findall(r"\bev\d+\b", text, flags=re.IGNORECASE):
-                refs.add(m.lower())
-
-            # 16-char hex (commitment short hashes)
-            for m in re.findall(r"\b[a-f0-9]{16}\b", text.lower()):
-                refs.add(m)
-
-            return refs
+            return detect_ev_ids_and_hashes(text)
         except Exception:
             # On any failure, do not block acceptance
             return set()

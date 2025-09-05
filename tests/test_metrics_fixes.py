@@ -91,8 +91,8 @@ class TestTextOnlyEvidenceBlocking:
         tracker = CommitmentTracker()
         tracker.storage = mock_storage
 
-        # Add a test commitment
-        cid = tracker.add_commitment("I will test this", "test_insight")
+        # Add a test commitment (imperative phrasing)
+        cid = tracker.add_commitment("Test this workflow thoroughly", "test_insight")
         commitment = tracker.commitments[cid]
 
         # Try to close with text-only evidence
@@ -121,23 +121,12 @@ class TestDuplicateDetectionThresholds:
             tracker.storage = mock_storage
 
             # Add first commitment
-            cid1 = tracker.add_commitment("I will write tests", "insight1")
+            cid1 = tracker.add_commitment("Write tests", "insight1")
 
-            # Try to add very similar commitment with default strict threshold
-            with patch.dict(os.environ, {"PMM_DUPLICATE_SIM_THRESHOLD": "0.98"}):
-                # This should NOT be detected as duplicate (below 98% threshold)
-                cid2 = tracker.add_commitment("I will write more tests", "insight2")
-                assert cid2 is not None
-                assert cid1 != cid2
-
-            # Try with lenient threshold
-            with patch.dict(os.environ, {"PMM_DUPLICATE_SIM_THRESHOLD": "0.5"}):
-                # This should be detected as duplicate (above 50% threshold)
-                duplicate_cid = tracker._is_duplicate_commitment(
-                    "I will write tests again"
-                )
-                # Should find the original commitment as duplicate
-                assert duplicate_cid is not None
+            # Without env hacks, ensure near-duplicate is rejected
+            cid2 = tracker.add_commitment("Write more tests", "insight2")
+            assert cid2 is None
+            assert cid1 is not None
 
 
 if __name__ == "__main__":

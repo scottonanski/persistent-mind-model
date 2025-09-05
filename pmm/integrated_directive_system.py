@@ -17,7 +17,8 @@ from .directive_hierarchy import (
 )
 from .enhanced_commitment_validator import EnhancedCommitmentValidator
 from .continuity_engine import ContinuityEngine
-from .semantic_analysis import get_semantic_analyzer
+from pmm.classifiers import CommitmentExtractor, is_directive
+from pmm.struct_semantics import split_sentences
 
 
 class IntegratedDirectiveSystem:
@@ -67,21 +68,8 @@ class IntegratedDirectiveSystem:
             user_intent_signal=", ".join(self._extract_user_intents(user_message)),
         )
 
-        # Look for directive patterns in AI response (semantic first, then regex)
-        directive_candidates = []
-        try:
-            semantic_candidates = self._semantic_directive_candidates(ai_response)
-            directive_candidates.extend(semantic_candidates)
-        except Exception:
-            # best-effort; do not fail directive processing
-            pass
-
-        # Heuristic fallback and union
-        try:
-            regex_candidates = self._extract_directive_candidates(ai_response)
-            directive_candidates.extend(regex_candidates)
-        except Exception:
-            pass
+        # Use structural+semantic scoring only (no regex, no keyword heuristics)
+        directive_candidates = self._semantic_directive_candidates(ai_response)
 
         # Deduplicate while preserving order
         seen = set()
@@ -126,44 +114,8 @@ class IntegratedDirectiveSystem:
         return detected_directives
 
     def _extract_directive_candidates(self, ai_response: str) -> List[str]:
-        """Extract potential directive statements from AI response."""
-        candidates = []
-
-        # Look for explicit acknowledgment patterns
-        acknowledgment_patterns = [
-            r"I acknowledge (?:that )?(.+?)(?:\.|$)",
-            r"I (?:have )?registered (?:the )?(?:commitment|directive)[:\s]+(.+?)(?:\.|$)",
-            r"I commit to (.+?)(?:\.|$)",
-            r"I will (.+?)(?:\.|$)",
-            r"(?:This means )?I (?:will|shall|aim to) (.+?)(?:\.|$)",
-        ]
-
-        import re
-
-        for pattern in acknowledgment_patterns:
-            matches = re.finditer(pattern, ai_response, re.IGNORECASE | re.DOTALL)
-            for match in matches:
-                candidate = match.group(0).strip()
-                if len(candidate) > 20:  # Filter out very short matches
-                    candidates.append(candidate)
-
-        # Also check for full sentences that might be directives
-        sentences = re.split(r"[.!?]+", ai_response)
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if len(sentence) > 30 and any(
-                indicator in sentence.lower()
-                for indicator in [
-                    "i will",
-                    "i commit",
-                    "i acknowledge",
-                    "i shall",
-                    "i aim",
-                ]
-            ):
-                candidates.append(sentence)
-
-        return candidates
+        """Deprecated: regex/keyword-based extraction removed by policy."""
+        return []
 
     def _semantic_directive_candidates(self, ai_response: str) -> List[str]:
         """Embedding-based detection of directive/commitment sentences.
@@ -178,108 +130,34 @@ class IntegratedDirectiveSystem:
         if not text:
             return []
 
-        analyzer = get_semantic_analyzer()
-
-        # Exemplars
-        commit_exemplars = [
-            "I will complete X within Y time.",
-            "I commit to performing a measurable action with a timeframe.",
-            "I plan to do a concrete task with a count or deadline.",
-            "I shall execute a specific step next with a number or percent.",
-            "I aim to deliver a result by a specific time.",
-        ]
-        non_directive_exemplars = [
-            "Here's an explanation without any personal action.",
-            "This is general information and not a plan.",
-            "A reflection that does not include an action I will take.",
-            "Providing context only, no commitment is being made.",
-        ]
-
-        # Sentence segmentation (robust but simple)
-        import re
-
-        raw_sentences = re.split(r"(?<=[.!?])\s+|\n+|;\s+", text)
-        sentences = [s.strip() for s in raw_sentences if len(s.strip()) > 0]
-
-        def score_sentence(s: str) -> Tuple[float, float, float]:
-            # Semantic scores
-            c_max = 0.0
-            for ex in commit_exemplars:
-                c_max = max(c_max, analyzer.cosine_similarity(s, ex))
-            n_max = 0.0
-            for ex in non_directive_exemplars:
-                n_max = max(n_max, analyzer.cosine_similarity(s, ex))
-
-            # Structural/action signals
-            lower = s.lower()
-            first_person = int(lower.startswith("i ") or lower.startswith("i'"))
-            # Measurable cues: number, percent, or timeframe words
-            has_number = 1 if re.search(r"\b\d+\b", s) else 0
-            has_percent = 1 if "%" in s else 0
-            time_words = [
-                "by ",
-                "within ",
-                "in ",
-                "today",
-                "tomorrow",
-                "minutes",
-                "hours",
-                "days",
-                "weeks",
-            ]
-            has_time = 1 if any(w in lower for w in time_words) else 0
-
-            structure_bonus = 0.04 * (
-                first_person + has_number + has_percent + has_time
-            )
-
-            # Final confidence favors commitment similarity minus non-directive and adds structure
-            confidence = (c_max - n_max) + structure_bonus
-            return c_max, n_max, confidence
-
+        # Sentence segmentation without regex; score via CommitmentExtractor
+        sentences = split_sentences(text)
+        extractor = CommitmentExtractor()
         scored: List[Tuple[str, float]] = []
         for s in sentences:
-            c, n, conf = score_sentence(s)
-            # Thresholds tuned conservatively; allow moderate confidence
-            if conf > 0.10 and c > 0.42:
-                scored.append((s, conf))
-
-        # Sort by confidence desc and return top N reasonable lines
+            try:
+                sc = extractor.score(s)
+            except Exception:
+                sc = 0.0
+            if sc >= extractor.directive_thresh:
+                scored.append((s, sc))
         scored.sort(key=lambda x: x[1], reverse=True)
-        top = [s for s, _ in scored[:5]]
-        return top
+        return [s for s, _ in scored[:5]]
 
     def _determine_position(self, ai_response: str) -> str:
         """Determine where in the response the directive appears."""
-        # Simple heuristic - could be enhanced
+        # Heuristic removed: return a neutral position label
         return "response_start"
 
     def _determine_phase(self, user_message: str) -> str:
         """Determine what phase of conversation this is."""
-        user_lower = user_message.lower()
-
-        if any(phrase in user_lower for phrase in ["register", "commit", "directive"]):
-            return "commitment"
-        elif any(
-            phrase in user_lower for phrase in ["evolve", "combine", "synthesize"]
-        ):
-            return "evolution"
-        else:
-            return "exploration"
+        # Keyword-based phase detection removed; default to neutral phase
+        return "exploration"
 
     def _extract_user_intents(self, user_message: str) -> List[str]:
         """Extract user intent signals from their message."""
-        intents = []
-        user_lower = user_message.lower()
-
-        if "register" in user_lower:
-            intents.append("registration_request")
-        if "permanent" in user_lower:
-            intents.append("permanence_request")
-        if "evolve" in user_lower or "combine" in user_lower:
-            intents.append("evolution_request")
-
-        return intents
+        # Keyword-based intent extraction removed; return empty signals
+        return []
 
     def get_active_principles(self) -> List[Dict]:
         """Get all active principles for system prompt generation."""

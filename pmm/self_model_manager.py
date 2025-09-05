@@ -4,9 +4,9 @@ import threading
 import os
 import hashlib
 from dataclasses import asdict
-import re
 from datetime import datetime, timezone
 from typing import Optional, List
+from .name_detect import _STOPWORDS
 
 from .model import (
     PersistentMindModel,
@@ -685,8 +685,26 @@ class SelfModelManager:
                 hash_hit = bool(short and short in text)
                 keyword_hit = False
                 if not hash_hit and ctext:
-                    # Tokenize on whitespace, keep words >=4 chars to reduce noise
-                    words = [w for w in re.split(r"\W+", ctext) if len(w) >= 4]
+                    # Tokenize structurally (no regex): split on non-alnum boundaries
+                    def _tokenize_words(s: str) -> List[str]:
+                        acc = []
+                        cur = []
+                        for ch in s:
+                            if ch.isalnum():
+                                cur.append(ch.lower())
+                            else:
+                                if cur:
+                                    tok = "".join(cur)
+                                    if len(tok) >= 4:
+                                        acc.append(tok)
+                                    cur = []
+                        if cur:
+                            tok = "".join(cur)
+                            if len(tok) >= 4:
+                                acc.append(tok)
+                        return acc
+
+                    words = _tokenize_words(ctext)
                     if words:
                         shared = sum(1 for w in words if w in text)
                         keyword_hit = shared >= 2
@@ -791,15 +809,22 @@ class SelfModelManager:
 
         FIXED: Relaxed validation and consistent identity logging.
         """
-        import re
-        from .name_detect import _STOPWORDS
-
         # Enhanced validation with stopwords check
         if not new_name:
             return
         name = new_name.strip().strip('.,!?;"')
-        _NAME_RX = re.compile(r"[A-Za-z][A-Za-z .'-]{1,63}$")
-        if not _NAME_RX.fullmatch(name) or name.lower() in _STOPWORDS:
+        # Structural validation: starts with alpha, length 2..64, allowed charset
+        if not (2 <= len(name) <= 64):
+            print(f"🔍 DEBUG: Rejected suspicious name (length): {name!r}")
+            return
+        if not name[0].isalpha():
+            print(f"🔍 DEBUG: Rejected suspicious name (first char): {name!r}")
+            return
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ .'-")
+        if any(ch not in allowed for ch in name):
+            print(f"🔍 DEBUG: Rejected suspicious name (charset): {name!r}")
+            return
+        if name.lower() in _STOPWORDS:
             print(f"🔍 DEBUG: Rejected suspicious name: {name!r}")
             return
 

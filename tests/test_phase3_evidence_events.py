@@ -27,45 +27,27 @@ from pmm.model import EvidenceEvent
 
 @pytest.mark.unit
 def test_evidence_event_detection():
-    """Test that evidence events are detected from text patterns."""
+    """Keyword-based evidence detection is deprecated; function should return empty."""
 
     tracker = CommitmentTracker()
 
-    # Add a test commitment first
-    cid = tracker.add_commitment(
-        "Next, I will create the validation tests tonight.", "test_source"
-    )
+    # Add a test commitment first (ensures tracker is active)
+    cid = tracker.add_commitment("Create the validation tests tonight.", "test_source")
     assert cid, "Test commitment should be added"
 
-    # Test evidence detection patterns
-    test_cases = [
-        # Done patterns
-        ("Done: created validation tests in `test_phase3.py`", "done"),
-        ("Completed: PMM validation suite with 15 test cases", "done"),
-        ("Finished: documentation update for evidence events", "done"),
-        # Blocked patterns
-        ("Blocked: waiting for API key -> need to set OPENAI_API_KEY", "blocked"),
-        (
-            "Cannot proceed: missing dependencies -> install requirements first",
-            "blocked",
-        ),
-        # Delegated patterns
-        ("Delegated to Scott: review and approve the test suite", "delegated"),
-        ("Assigned to team: implement the probe API enhancements", "delegated"),
+    # Evidence detection via keywords is removed; ensure no events are returned
+    test_texts = [
+        "Done: created validation tests in `test_phase3.py`",
+        "Completed: PMM validation suite with 15 test cases",
+        "Finished: documentation update for evidence events",
+        "Blocked: waiting for API key -> need to set OPENAI_API_KEY",
+        "Delegated to Scott: review and approve the test suite",
+        "Assigned to team: implement the probe API enhancements",
     ]
 
-    detected_count = 0
-    for text, expected_type in test_cases:
+    for text in test_texts:
         evidence_events = tracker.detect_evidence_events(text)
-        if evidence_events:
-            evidence_type, commit_ref, description, artifact = evidence_events[0]
-            if evidence_type == expected_type:
-                detected_count += 1
-
-    success_rate = detected_count / len(test_cases)
-    assert (
-        success_rate >= 0.8
-    ), f"Evidence detection rate {success_rate:.1%} below 80% threshold"
+        assert evidence_events == []
 
 
 @pytest.mark.unit
@@ -75,10 +57,8 @@ def test_commitment_hash_generation():
     tracker = CommitmentTracker()
 
     # Add test commitments (make them sufficiently different to avoid duplicate detection)
-    cid1 = tracker.add_commitment(
-        "Next, I will implement hash generation tonight.", "test1"
-    )
-    cid2 = tracker.add_commitment("Next, I will write documentation tomorrow.", "test2")
+    cid1 = tracker.add_commitment("Implement hash generation tonight.", "test1")
+    cid2 = tracker.add_commitment("Write documentation tomorrow.", "test2")
 
     assert cid1 and cid2, "Test commitments should be added"
 
@@ -112,9 +92,7 @@ def test_evidence_based_closure():
     tracker = CommitmentTracker()
 
     # Add test commitment
-    cid = tracker.add_commitment(
-        "Next, I will implement evidence closure tonight.", "test_source"
-    )
+    cid = tracker.add_commitment("Implement evidence closure tonight.", "test_source")
     assert cid, "Test commitment should be added"
 
     commitment = tracker.commitments[cid]
@@ -308,9 +286,7 @@ def test_commitment_closure_enforcement():
     tracker = CommitmentTracker()
 
     # Add test commitment
-    cid = tracker.add_commitment(
-        "Next, I will test closure enforcement tonight.", "test_source"
-    )
+    cid = tracker.add_commitment("Test closure enforcement tonight.", "test_source")
     assert cid, "Test commitment should be added"
 
     commitment = tracker.commitments[cid]
@@ -344,15 +320,9 @@ def test_phase3_acceptance_criteria():
     tracker = CommitmentTracker()
 
     # Create multiple commitments (use PMM-context terms)
-    cid1 = tracker.add_commitment(
-        "Next, I will implement PMM validation tonight.", "test1"
-    )
-    cid2 = tracker.add_commitment(
-        "Next, I will document evidence system tomorrow.", "test2"
-    )
-    cid3 = tracker.add_commitment(
-        "Next, I will test commitment closure this week.", "test3"
-    )
+    cid1 = tracker.add_commitment("Implement PMM validation tonight.", "test1")
+    cid2 = tracker.add_commitment("Document evidence system tomorrow.", "test2")
+    cid3 = tracker.add_commitment("Test commitment closure this week.", "test3")
 
     assert all([cid1, cid2, cid3]), "All test commitments should be added"
 

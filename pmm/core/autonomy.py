@@ -18,6 +18,7 @@ from pmm.emergence import EmergenceAnalyzer, EmergenceEvent
 from pmm.storage.sqlite_store import SQLiteStore
 from pmm.llm_factory import get_llm_factory
 from pmm.ngram_ban import NGramBanSystem
+from pmm.struct_semantics import user_opted_out_of_reflection
 
 from pmm.adaptive_triggers import AdaptiveTrigger, TriggerConfig, TriggerState
 from pmm.reflection import reflect_once
@@ -103,9 +104,15 @@ class AutonomyLoop:
             storage_manager=self.db
         )
         self.atomic_reflection = AtomicReflectionManager(self.pmm)
+        # Reflection cooldown for autonomy loop (env-tunable)
+        try:
+            _auto_cooldown_sec = int(os.getenv("PMM_AUTONOMY_REFLECTION_COOLDOWN_SECONDS", "120"))
+        except Exception:
+            _auto_cooldown_sec = 10
+        self._base_cooldown_seconds = _auto_cooldown_sec
         self.cooldown = ReflectionCooldownManager(
             min_turns=2,
-            min_wall_time_seconds=120,
+            min_wall_time_seconds=self._base_cooldown_seconds,
             novelty_threshold=0.85,
         )
         self.baselines = ModelBaselineManager()
@@ -130,14 +137,23 @@ class AutonomyLoop:
         )
 
         cadence_days = getattr(self.pmm.model.metrics, "reflection_cadence_days", 7.0)
+        # Autonomy trigger config (env-tunable)
+        try:
+            _events_min_gap = int(os.getenv("PMM_AUTONOMY_EVENTS_MIN_GAP", "4"))
+        except Exception:
+            _events_min_gap = 4
+        try:
+            _min_cool_min = int(os.getenv("PMM_AUTONOMY_MIN_COOLDOWN_MIN", "10"))
+        except Exception:
+            _min_cool_min = 10
         self.trigger_cfg = TriggerConfig(
             cadence_days=cadence_days,
-            events_min_gap=4,
+            events_min_gap=_events_min_gap,
             ias_low=0.35,
             gas_low=0.35,
             ias_high=0.65,
             gas_high=0.65,
-            min_cooldown_minutes=10,
+            min_cooldown_minutes=_min_cool_min,
             max_skip_days=7.0,
         )
         self.trigger = AdaptiveTrigger(self.trigger_cfg, self.trigger_state)
@@ -238,6 +254,34 @@ class AutonomyLoop:
             current_ctx = " ".join(window_texts[-6:])
         except Exception:
             current_ctx = ""
+
+        # Adaptive reflection cooldown: shorten when identity/growth are weak
+        try:
+            analyzer = EmergenceAnalyzer(storage_manager=self.db)
+            recent = _load_recent_events_for_emergence(self.db, limit=15)
+            if recent:
+                analyzer.get_recent_events = lambda kind="response", limit=15: recent[-limit:]
+                scores = analyzer.compute_scores(window=min(15, len(recent)))
+            else:
+                scores = analyzer.compute_scores(window=15)
+            ias_now = float(scores.get("IAS", 0.0) or 0.0)
+            gas_now = float(scores.get("GAS", 0.0) or 0.0)
+            # Default and minimum cooldown
+            try:
+                min_cool_min = int(os.getenv("PMM_AUTONOMY_MIN_COOLDOWN_MIN", "10"))
+            except Exception:
+                min_cool_min = 10
+            min_cool_seconds = max(0, min_cool_min) * 60
+            desired = self._base_cooldown_seconds
+            if ias_now < 0.15 or gas_now < 0.20:
+                desired = max(self._base_cooldown_seconds // 2, min_cool_seconds)
+            if desired != self.cooldown.min_wall_time_seconds:
+                self.cooldown.min_wall_time_seconds = int(desired)
+                print(
+                    f"[PMM] reflection cooldown adjusted → {int(desired)}s (IAS={ias_now:.3f}, GAS={gas_now:.3f})"
+                )
+        except Exception:
+            pass
 
         ok, _reason = self.cooldown.should_reflect(current_ctx)
         if not ok:
@@ -749,17 +793,6 @@ class AutonomyLoop:
     def _user_blocked_reflection(self, text: str) -> bool:
         """Heuristic for explicit user opt-out of background reflection."""
         try:
-            s = (text or "").lower()
-            import re
-
-            patterns = [
-                r"\bdo not reflect\b",
-                r"\bdon't reflect\b",
-                r"\bno reflection\b",
-                r"\bstop reflecting\b",
-                r"\bstop reflection\b",
-                r"\bdisable reflection\b",
-            ]
-            return any(re.search(p, s) for p in patterns)
+            return user_opted_out_of_reflection(text)
         except Exception:
             return False

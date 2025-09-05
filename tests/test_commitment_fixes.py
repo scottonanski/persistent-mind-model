@@ -26,16 +26,18 @@ def test_commitment_detection_fixes():
             commitment is not None
         ), f"Expected commitment detection for: {text[:80]}..."
 
-    # Unsupported forms should currently be rejected; keep as documentation for future normalization work
-    unsupported = [
+    # Previously unsupported forms should also be accepted under semantic-only policy
+    now_supported = [
         "I commit to enhancing our conversations by actively incorporating emotional intelligence principles into my responses.",
         "I commit to achieving the goal of effectively utilizing storytelling to convey a concept today.",
         "I commit to evolving my conscientiousness by setting clear goals.",
         "I aim to enhance my creative thinking and provide a more engaging conversational experience.",
     ]
-    for text in unsupported:
+    for text in now_supported:
         commitment, _ = tracker.extract_commitment(text)
-        assert commitment is None, f"Unsupported form should be rejected: {text}"
+        assert (
+            commitment is not None
+        ), f"Expected commitment detection for: {text[:80]}..."
 
 
 if __name__ == "__main__":

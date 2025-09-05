@@ -7,7 +7,6 @@ Main entry point for chatting with your autonomous AI personality.
 import os
 import sys
 import argparse
-import re
 import json
 
 # Add current directory to path for PMM imports
@@ -24,8 +23,7 @@ from pmm.config import (
     AVAILABLE_MODELS,
     get_ollama_models,
 )
-from pmm.emergence import compute_emergence_scores
-from pmm.metrics import compute_close_rate
+from pmm.emergence import compute_emergence_scores, EmergenceAnalyzer
 from pmm.commitments import (
     tick_turn_scoped_identity_commitments,
     open_identity_commitment,
@@ -36,6 +34,47 @@ from pmm.reflection import reflect_once
 from pmm.logging_config import pmm_tlog
 from pmm.dev_tasks import DevTaskManager
 from pmm.policy import bandit as pmm_bandit
+
+# --- Structural helpers (regex-free) -----------------------------------------
+
+def _looks_like_codey(text: str) -> bool:
+    """Heuristic: does the text look like code or stack traces?"""
+    if not text:
+        return False
+    t = text
+    tl = t.lower()
+    # Easy markers
+    if "```" in t:
+        return True
+    if "traceback" in tl or "exception" in tl:
+        return True
+    # Common code punctuation
+    if any(ch in t for ch in "{};="):
+        return True
+    # Stack trace-ish pattern like " at Foo(" without regex
+    if " at " in t and "(" in t and ")" in t:
+        return True
+    return False
+
+
+def _is_display_cid(token: str) -> bool:
+    """Matches display ids like c12, c3 (formerly re.fullmatch(r"c\\d+", ...))."""
+    if not token or len(token) < 2:
+        return False
+    if token[0].lower() != "c":
+        return False
+    return token[1:].isdigit()
+
+
+def _is_hex_prefix(token: str) -> bool:
+    """Matches 6-64 length hex strings (formerly regex [0-9a-fA-F]{6,64})."""
+    if not token:
+        return False
+    n = len(token)
+    if n < 6 or n > 64:
+        return False
+    hexdigits = set("0123456789abcdefABCDEF")
+    return all(c in hexdigits for c in token)
 
 
 def parse_args():
@@ -419,9 +458,7 @@ def main():
         """Detect when to use focused reasoning mode automatically."""
         t = (text or "").lower()
         long = len(text) > 350
-        codey = "```" in text or re.search(
-            r"[{};]|traceback|exception|at \w+\(", text, re.I
-        )
+        codey = _looks_like_codey(text)
         keywords = any(
             k in t
             for k in [
@@ -539,6 +576,43 @@ def main():
             else "none"
         )
 
+        # Auto-nudge: if identity is LOW and no active identity identity-mode, open an adaptive identity TTL
+        try:
+            storage = (
+                pmm_memory.pmm.sqlite_store if hasattr(pmm_memory.pmm, "sqlite_store") else None
+            )
+            scores = compute_emergence_scores(window=15, storage_manager=storage)
+            ias_now = float(scores.get("ias", 0.0) or 0.0)
+            # Only when clearly LOW and not already in identity mode
+            if ias_now < 0.20:
+                items_now = get_identity_turn_commitments(pmm_memory.pmm)
+                if not items_now:
+                    try:
+                        # Adaptive TTL: deeper dips = longer TTL
+                        try:
+                            max_cap = int(os.getenv("PMM_IDENTITY_MAX_TTL", "30"))
+                        except Exception:
+                            max_cap = 30
+                        ttl_adaptive = int((0.20 - ias_now) * 100)
+                        if ttl_adaptive < 5:
+                            ttl_adaptive = 5
+                        if ttl_adaptive > max_cap:
+                            ttl_adaptive = max_cap
+                        h_auto = open_identity_commitment(
+                            pmm_memory.pmm,
+                            policy="express_core_principles",
+                            ttl_turns=ttl_adaptive,
+                            note="auto open due to low identity",
+                        )
+                        if h_auto:
+                            print(
+                                f"[PMM] auto identity: opened {ttl_adaptive}-turn identity mode (IAS={ias_now:.3f}, id={h_auto[:8]})"
+                            )
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         # Pull up to three open commitments to actually steer behavior
         try:
             opens = pmm_memory.pmm.get_open_commitments()[:3]
@@ -558,6 +632,8 @@ def main():
             "Evidence rule: In substantive answers, cite at least one recent event ID (e.g., ev123) or a commitment hash when relevant.",
             "Action rule: When you propose an action, make it measurable (e.g., include a timeframe, count, or percent). Avoid multiple competing actions in one reply.",
             "Variation rule: Vary verbs, quantities, and timeframes to avoid generating duplicate commitments; do not restate identical commitments across turns.",
+            "Directive subject rule: Treat third-person (e.g., 'PMM will…', 'The assistant will…') or imperative lines (e.g., 'Complete X now') as your own commitments; register and honor them like first-person commitments.",
+            "No background execution: Do not imply ongoing or background work between messages (e.g., 'I'll keep working after this message', 'running this in the background'). Only take actions within explicit turns and report results here.",
             f"Top Patterns (awareness only): {top_patterns_str}",
             "Open Commitments:",
             f"{open_commitments_str}",
@@ -815,10 +891,10 @@ def main():
 
         ias = scores.get("IAS")
         gas = scores.get("GAS")
-        # Use event-based close rate calculation instead of emergence scores
+        # Use authoritative close rate derived from evidence-linked commitments
         try:
-            events = pmm_memory.storage_manager.get_events()
-            close_rate = compute_close_rate(events)
+            analyzer = EmergenceAnalyzer(storage_manager=getattr(pmm_memory.pmm, "sqlite_store", None))
+            close_rate = float(analyzer.commitment_close_rate(window=50))
         except Exception:
             close_rate = 0.0
 
@@ -1108,8 +1184,13 @@ def main():
                         continue
                     if sub == "open":
                         ttl = 3
+                        # Allow raising the cap via env PMM_IDENTITY_MAX_TTL (default 10)
+                        try:
+                            max_ttl_cap = int(os.getenv("PMM_IDENTITY_MAX_TTL", "10"))
+                        except Exception:
+                            max_ttl_cap = 10
                         if len(parts) > 2 and parts[2].isdigit():
-                            ttl = max(1, min(10, int(parts[2])))
+                            ttl = max(1, min(max_ttl_cap, int(parts[2])))
                         try:
                             h = open_identity_commitment(
                                 pmm_memory.pmm,
@@ -1220,7 +1301,7 @@ def main():
                                 open_list = []
 
                             # If looks like display id 'cN'
-                            if re.fullmatch(r"c\d+", token):
+                            if _is_display_cid(token):
                                 for c in open_list:
                                     if str(c.get("cid", "")) == token:
                                         h = str(c.get("hash", ""))
@@ -1229,7 +1310,7 @@ def main():
                                 return token
 
                             # If looks like hex prefix -> try to expand uniquely among open hashes
-                            if re.fullmatch(r"[0-9a-fA-F]{6,64}", token):
+                            if _is_hex_prefix(token):
                                 candidates = [str(c.get("hash", "")) for c in open_list]
                                 matches = [h for h in candidates if h.startswith(token)]
                                 if len(matches) == 1:

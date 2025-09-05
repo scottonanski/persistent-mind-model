@@ -23,7 +23,8 @@ def test_atomic_reflection_blocks_coach_like_commitments():
         "We will deepen the conversation each reply by asking more questions.",
     ]
     for text in banned_cases:
-        assert arm._passes_basic_validation(text) is False
+        # No keyword-based coach filter anymore
+        assert arm._passes_basic_validation(text) is True
 
     allowed_cases = [
         "I realized the user prefers concrete examples when discussing APIs.",

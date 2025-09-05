@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 import time
 import threading
+import re
 
 
 @dataclass
@@ -105,8 +106,6 @@ class CommitmentTTLManager:
 
     def classify_commitment(self, text: str) -> str:
         """Classify commitment by type based on text patterns."""
-        import re
-
         text_lower = text.lower()
 
         for kind, config in self.commitment_types.items():

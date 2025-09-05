@@ -1,14 +1,36 @@
 """
 Semantic Growth Detection - Natural language understanding for emergence patterns.
 
-Replaces regex pattern matching with semantic similarity analysis to detect
-growth-oriented content and behavioral development.
+Refactored to remove all regex usage. Uses structural tokenization, sentence
+segmentation, and co-occurrence proximity checks instead of regex.
 """
 
 import numpy as np
 from typing import List, Dict, Any
 from dataclasses import dataclass
-import re
+
+# Regex-free structural helpers
+from .struct_semantics import split_sentences, normalize_whitespace
+
+
+def _strip_punct(tok: str) -> str:
+    """Strip leading/trailing punctuation without regex."""
+    if not tok:
+        return tok
+    return tok.strip('\"\'\t\r\n.,;:!?()[]{}')
+
+
+def _tokenize_words(text: str) -> List[str]:
+    """Lowercase, whitespace-split, and strip punctuation from tokens."""
+    if not text:
+        return []
+    low = normalize_whitespace(text.lower())
+    toks = []
+    for raw in low.split():
+        t = _strip_punct(raw)
+        if t:
+            toks.append(t)
+    return toks
 
 
 @dataclass
@@ -101,7 +123,7 @@ class SemanticGrowthDetector:
             }
 
         text_lower = text.lower()
-        words = re.findall(r"\b\w+\b", text_lower)
+        words = _tokenize_words(text_lower)
         total_words = len(words)
 
         if total_words == 0:
@@ -173,35 +195,39 @@ class SemanticGrowthDetector:
         """Detect complex growth patterns in text."""
         bonus = 0.0
 
-        # Future-oriented language
-        future_patterns = [
-            r"\b(will|going to|plan to|intend to|aim to)\b.*\b(improve|develop|grow|learn)\b",
-            r"\b(next|future|tomorrow|ahead)\b.*\b(better|stronger|deeper)\b",
-        ]
+        toks = _tokenize_words(text)
 
-        for pattern in future_patterns:
-            if re.search(pattern, text):
-                bonus += 0.1
+        def has_pair_within(a_set: List[str], b_set: List[str], window: int = 8) -> bool:
+            """Return True if any token from a_set appears within `window` tokens of any token from b_set."""
+            a_pos = [i for i, t in enumerate(toks) if any(a in t for a in a_set)]
+            if not a_pos:
+                return False
+            b_pos = [i for i, t in enumerate(toks) if any(b in t for b in b_set)]
+            if not b_pos:
+                return False
+            for i in a_pos:
+                for j in b_pos:
+                    if abs(i - j) <= window:
+                        return True
+            return False
+
+        # Future-oriented language
+        future_a = ["will", "going", "plan", "intend", "aim", "next", "future", "tomorrow", "ahead"]
+        future_b = ["improve", "develop", "grow", "learn", "better", "stronger", "deeper"]
+        if has_pair_within(future_a, future_b):
+            bonus += 0.1
 
         # Self-improvement language
-        improvement_patterns = [
-            r"\b(want to|need to|should)\b.*\b(become|get|grow)\b.*\b(better|stronger|more)\b",
-            r"\b(working on|focusing on|developing)\b.*\b(myself|my|personal)\b",
-        ]
-
-        for pattern in improvement_patterns:
-            if re.search(pattern, text):
-                bonus += 0.1
+        improve_a = ["want", "need", "should", "working", "focusing", "developing"]
+        improve_b = ["become", "get", "grow", "better", "stronger", "more", "myself", "personal", "my"]
+        if has_pair_within(improve_a, improve_b):
+            bonus += 0.1
 
         # Emotional growth language
-        emotional_patterns = [
-            r"\b(feel|feeling|emotion|emotional)\b.*\b(growth|development|journey)\b",
-            r"\b(vulnerable|authentic|genuine|open)\b.*\b(connection|relationship)\b",
-        ]
-
-        for pattern in emotional_patterns:
-            if re.search(pattern, text):
-                bonus += 0.1
+        emo_a = ["feel", "feeling", "emotion", "emotional", "vulnerable", "authentic", "genuine", "open"]
+        emo_b = ["growth", "development", "journey", "connection", "relationship"]
+        if has_pair_within(emo_a, emo_b):
+            bonus += 0.1
 
         return min(0.3, bonus)  # Cap bonus at 0.3
 
@@ -210,7 +236,7 @@ class SemanticGrowthDetector:
         if len(self.content_history) < 2:
             return 1.0
 
-        current_words = set(re.findall(r"\b\w+\b", current_text.lower()))
+        current_words = set(_tokenize_words(current_text.lower()))
         if not current_words:
             return 0.0
 
@@ -223,7 +249,7 @@ class SemanticGrowthDetector:
 
         novelty_scores = []
         for past_text in recent_content:
-            past_words = set(re.findall(r"\b\w+\b", past_text.lower()))
+            past_words = set(_tokenize_words(past_text.lower()))
             if not past_words:
                 continue
 
@@ -280,9 +306,13 @@ class SemanticGrowthDetector:
         if not text:
             return 0.0
 
-        # Basic complexity indicators
-        sentences = re.split(r"[.!?]+", text)
-        sentences = [s.strip() for s in sentences if s.strip()]
+        # Basic complexity indicators (regex-free)
+        # Light preprocessing to help split on ! and ? without regex
+        pre = (
+            text.replace("!", ".!")
+            .replace("?", ".?")
+        )
+        sentences = [s.strip() for s in split_sentences(pre) if s.strip()]
 
         if not sentences:
             return 0.0
@@ -292,7 +322,7 @@ class SemanticGrowthDetector:
         length_score = min(1.0, avg_sentence_length / 20.0)  # Normalize to 0-1
 
         # Vocabulary diversity (unique words / total words)
-        words = re.findall(r"\b\w+\b", text.lower())
+        words = _tokenize_words(text.lower())
         if not words:
             return length_score * 0.5
 

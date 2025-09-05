@@ -1,7 +1,6 @@
 from __future__ import annotations
 import os
 import random
-import re
 from typing import List, Tuple
 from datetime import datetime, timezone
 from pmm.model import Insight
@@ -32,21 +31,29 @@ def _validate_insight_references(
     Returns:
         (is_accepted, referenced_ids): Whether insight is accepted and list of referenced IDs
     """
-    referenced_ids = []
+    referenced_ids: List[str] = []
 
-    # Pattern 1: Event IDs (ev123, event ev123, etc.)
-    event_patterns = [r"\bev(\d+)\b", r"\bevent\s+ev(\d+)\b", r"\bevent\s+(\d+)\b"]
+    lc = (content or "").lower()
+    toks = [t.strip().strip(",.;:()[]{}") for t in lc.split() if t.strip()]
 
-    for pattern in event_patterns:
-        matches = re.findall(pattern, content.lower())
-        for match in matches:
-            event_id = f"ev{match}" if not match.startswith("ev") else match
-            referenced_ids.append(event_id)
+    # Event IDs: tokens like ev123 or phrases like "event 123"/"event ev123"
+    for i, t in enumerate(toks):
+        # Direct ev#### pattern without regex
+        if t.startswith("ev") and t[2:].isdigit():
+            referenced_ids.append(t)
+        # "event 123" or "event ev123"
+        if t == "event" and i + 1 < len(toks):
+            nxt = toks[i + 1]
+            if nxt.startswith("ev") and nxt[2:].isdigit():
+                referenced_ids.append(nxt)
+            elif nxt.isdigit():
+                referenced_ids.append(f"ev{nxt}")
 
-    # Pattern 2: Commitment hashes (16-char hex)
-    commit_hash_pattern = r"\b[a-f0-9]{16}\b"
-    commit_matches = re.findall(commit_hash_pattern, content.lower())
-    referenced_ids.extend(commit_matches)
+    # Commitment hashes (16-char hex) via token check (no regex)
+    HEX = set("0123456789abcdef")
+    for t in toks:
+        if len(t) == 16 and all(c in HEX for c in t):
+            referenced_ids.append(t)
 
     # Pattern 3: Recent event references (last 5 events)
     recent_events = (
@@ -74,15 +81,11 @@ def _validate_insight_references(
     is_accepted = len(referenced_ids) > 0
 
     # Soft-accept path: allow self-referential, PMM-anchored insights without strict IDs
-    # Criteria: first-person language AND presence of PMM anchor terms
+    # Criteria: first-person language AND presence of PMM anchor terms (token-based)
     if not is_accepted:
-        try:
-            has_self_ref = bool(
-                re.search(r"\b(I|my|me|myself|mine)\b", content, re.IGNORECASE)
-            )
-        except Exception:
-            has_self_ref = False
-        pmm_anchors = [
+        SELF_PRONOUNS = {"i", "my", "me", "myself", "mine"}
+        has_self_ref = any(t in SELF_PRONOUNS for t in toks)
+        pmm_anchors = {
             "commitment",
             "commitments",
             "memory",
@@ -91,11 +94,8 @@ def _validate_insight_references(
             "emergence",
             "self-model",
             "pattern",
-        ]
-        try:
-            has_anchor = any(a in content.lower() for a in pmm_anchors)
-        except Exception:
-            has_anchor = False
+        }
+        has_anchor = any(a in lc for a in pmm_anchors)
 
         if has_self_ref and has_anchor:
             # Mark as accepted but unverified; add a sentinel ref so downstream logic treats it as referenced
@@ -488,18 +488,35 @@ def reflect_once(
             _ecv = EnhancedCommitmentValidator()
             analysis = _ecv.validate_commitment(combined_for_validation, [])
             actionable = bool(analysis.is_valid and analysis.confidence >= conf_thr)
-            import re
 
-            # Strict measurability: require units or percent/threshold; reject bare numbers
-            MEASURABLE = re.compile(
-                r"(\b\d+(?:\.\d+)?\s*(minutes?|minute|hours?|days?|weeks?)\b|\b\d+\s*%|\bpercent\b|\bthreshold\b|\bcount\b)",
-                re.IGNORECASE,
-            )
-            BARE_BAD = re.compile(
-                r"^\s*\+?\d+(?:\.\d+)?\s*(minutes?|minute|hours?|days?|weeks?)?\s*$",
-                re.IGNORECASE,
-            )
-            measurable = bool(MEASURABLE.search(nl)) and not bool(BARE_BAD.match(nl))
+            def _is_measurable(s: str) -> bool:
+                text = (s or "").strip()
+                parts = [p.strip().strip(",.;:()[]{}") for p in text.split() if p.strip()]
+                if not parts:
+                    return False
+                # Reject bare number or number+unit with almost nothing else
+                def _is_num(tok: str) -> bool:
+                    t = tok.lstrip("+−-+")
+                    try:
+                        float(t.rstrip('%'))
+                        return True
+                    except Exception:
+                        return False
+                UNITS = {"minute", "minutes", "hour", "hours", "day", "days", "week", "weeks"}
+                SPECIAL = {"percent", "threshold", "count"}
+                # Percent forms
+                has_percent = any(tok.endswith("%") or tok in SPECIAL for tok in parts)
+                # Number + unit proximity (within 3 tokens)
+                num_pos = [i for i, tok in enumerate(parts) if _is_num(tok)]
+                unit_pos = [i for i, tok in enumerate(parts) if tok.lower() in UNITS]
+                prox = any(abs(i - j) <= 3 for i in num_pos for j in unit_pos)
+                # Bare-bad: extremely short numeric-only content
+                bare_like = False
+                if len(parts) <= 3 and all((_is_num(p) or p.lower() in UNITS) for p in parts):
+                    bare_like = True
+                return (has_percent or prox) and not bare_like
+
+            measurable = _is_measurable(nl)
             if not actionable:
                 contract_ok = False
                 contract_reason = "non_actionable"
@@ -597,9 +614,7 @@ def reflect_once(
                         actionable2 = bool(
                             analysis2.is_valid and analysis2.confidence >= conf_thr
                         )
-                        measurable2 = bool(MEASURABLE.search(nl2)) and not bool(
-                            BARE_BAD.match(nl2)
-                        )
+                        measurable2 = _is_measurable(nl2)
                         if actionable2 and measurable2:
                             txt = txt2
                             contract_ok = True

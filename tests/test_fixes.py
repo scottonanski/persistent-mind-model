@@ -11,8 +11,10 @@ import threading
 import time
 import tempfile
 import os
+import pytest
 from pmm.self_model_manager import SelfModelManager
 from pmm.storage.sqlite_store import SQLiteStore
+from pmm.commitments import CommitmentTracker
 
 
 def test_concurrent_id_generation():
@@ -184,6 +186,51 @@ def test_identity_logging():
         ), f"SQLite identity change incorrect: {latest_sqlite}"
 
     # Identity logging assertions above
+
+
+def test_ongoing_commitment_protection():
+    """Test that 'ongoing' commitments are protected from auto-closure."""
+    tracker = CommitmentTracker()
+
+    # Add an ongoing commitment
+    ongoing_text = "This is an ongoing commitment to maintain the system."
+    cid = tracker.add_commitment(ongoing_text, source_insight_id="test_insight")
+
+    # Promote to ongoing via public API to avoid phrase-based special-casing
+    assert cid, "Commitment should be created"
+    tracker.mark_commitment(cid, "ongoing")
+    commitment = tracker.commitments.get(cid)
+    assert commitment is not None, "Ongoing commitment was not created."
+    # Set tier to ongoing explicitly in test fixture
+    commitment.tier = "ongoing"
+    assert commitment.status == "ongoing", f"Expected status 'ongoing', got '{commitment.status}'."
+    assert commitment.tier == "ongoing", f"Expected tier 'ongoing', got '{commitment.tier}'."
+
+    # Add a few normal commitments to trigger auto-closure
+    for i in range(6):
+        tracker.add_commitment(f"Normal commitment {i}", source_insight_id="test_insight")
+
+    # Trigger reflection-based auto-closure that would normally close old commitments
+    os.environ["PMM_AUTOCLOSE_FROM_REFLECTION"] = "1"
+    reflection_text = "I will start a new task now."
+    closed_cids = tracker.auto_close_from_reflection(reflection_text)
+
+    # Assert that the ongoing commitment was NOT closed
+    assert cid not in closed_cids, "Ongoing commitment was closed by reflection."
+    assert tracker.commitments[cid].status == "ongoing", "Ongoing commitment status was changed by reflection."
+
+    # Trigger evidence-based closure
+    commit_hash = tracker.get_commitment_hash(commitment)
+    closed = tracker.close_commitment_with_evidence(
+        commit_hash, "done", "Completed a related task.", artifact="/path/to/artifact"
+    )
+
+    # Assert that the ongoing commitment was NOT closed by evidence
+    assert not closed, "Ongoing commitment was closed by evidence."
+    assert tracker.commitments[cid].status == "ongoing", "Ongoing commitment status was changed by evidence."
+
+    # Clean up env var
+    del os.environ["PMM_AUTOCLOSE_FROM_REFLECTION"]
 
 
 def main():

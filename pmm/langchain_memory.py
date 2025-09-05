@@ -31,7 +31,6 @@ from typing import Any, Dict, List, Optional
 import os
 import threading
 import atexit
-import re
 from collections import deque
 
 try:
@@ -561,6 +560,35 @@ class PersistentMindMemory(BaseChatMemory):
 
         self.personality_context = "\n".join(context_parts)
 
+    def _mentions_identity_signal(self, text: str) -> bool:
+        """Heuristic, regex‑free identity signal detection.
+
+        Triggers on clear self‑ascriptions like:
+        - "my name is ..."
+        - "identity confirm" / "identity:"
+        - "name is ..."
+        - "I am <CapitalizedWord>" (single token name)
+        """
+        try:
+            if not text:
+                return False
+            raw = text.strip()
+            low = raw.lower()
+            # Direct keyword cues
+            if any(k in low for k in ("my name is", "identity confirm", "identity:", "name is")):
+                return True
+
+            # Simple pattern: "I am <CapitalizedWord>"
+            tokens = [t for t in raw.split() if t]
+            for i in range(len(tokens) - 2):
+                if tokens[i].lower() == "i" and tokens[i + 1].lower() == "am":
+                    cand = tokens[i + 2].strip('.,!?;:"')
+                    if cand and cand.isalpha() and cand[0].isupper():
+                        return True
+            return False
+        except Exception:
+            return False
+
     def _auto_extract_key_info(self, user_input: str) -> None:
         """
         Automatically extract and remember key information from user input.
@@ -571,12 +599,10 @@ class PersistentMindMemory(BaseChatMemory):
         - Important facts about the user
         """
         try:
-            raw = user_input.strip()
+            raw = (user_input or "").strip()
             user_lower = raw.lower()
 
             # Extract names (more conservative to avoid false positives like "I'm just...")
-            import re
-
             stopwords = {
                 "just",
                 "good",
@@ -619,31 +645,50 @@ class PersistentMindMemory(BaseChatMemory):
                 pmm_dlog(f" Automatically remembered: User's name is {remembered}")
 
             # Pattern order: strongest first, using original casing for capitalization heuristics
-            # 1) "My name is X"
-            m = re.search(
-                r"\bMy name is ([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b", raw
-            )
-            if m:
-                _remember_user_name(m.group(1))
+            low = raw.lower()
+
+            # 1) "My name is X" (case-insensitive phrase, preserve original for name extraction)
+            phrase = "my name is "
+            idx = low.find(phrase)
+            if idx != -1:
+                tail = raw[idx + len(phrase):]
+                # Stop at delimiter
+                for delim in [".", "!", "?", ",", ";", ":", "\n"]:
+                    cut = tail.find(delim)
+                    if cut != -1:
+                        tail = tail[:cut]
+                        break
+                _remember_user_name(tail.strip())
             else:
                 # 2) "Call me X"
-                m = re.search(
-                    r"\bCall me ([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b", raw
-                )
-                if m:
-                    _remember_user_name(m.group(1))
+                phrase2 = "call me "
+                idx2 = low.find(phrase2)
+                if idx2 != -1:
+                    tail = raw[idx2 + len(phrase2):]
+                    for delim in [".", "!", "?", ",", ";", ":", "\n"]:
+                        cut = tail.find(delim)
+                        if cut != -1:
+                            tail = tail[:cut]
+                            break
+                    _remember_user_name(tail.strip())
                 else:
-                    # 3) "I am X" or "I'm X" only if the next token isn't a stopword and is Capitalized
-                    m = re.search(
-                        r"\bI\s*(?:am|'m)\s+([A-Z][a-zA-Z]+)(?:\b|\s*$|[\.,!?:;])", raw
-                    )
-                    if m:
-                        candidate = m.group(1)
-                        if (
-                            candidate.lower() not in stopwords
-                            and candidate.lower() not in {"doing", "going", "working"}
-                        ):
-                            _remember_user_name(candidate)
+                    # 3) "I am X" or "I'm X" only if next token is Capitalized and not a stopword/common verb
+                    tokens = [t for t in raw.strip().split() if t.strip()]
+                    for i, tok in enumerate(tokens[:-1]):
+                        tl = tok.lower()
+                        if tl in ("i", "i'm", "i’m") or (tl == "i" and i + 1 < len(tokens) and tokens[i + 1].lower() == "am"):
+                            # Determine candidate next token
+                            j = i + 1
+                            if tl == "i":
+                                # if pattern was "I am"
+                                if j < len(tokens) and tokens[j].lower() == "am":
+                                    j += 1
+                            if j < len(tokens):
+                                candidate = tokens[j].strip('.,!?;:"')
+                                if candidate and candidate[0].isupper() and candidate.isalpha():
+                                    if candidate.lower() not in stopwords and candidate.lower() not in {"doing", "going", "working"}:
+                                        _remember_user_name(candidate)
+                                        break
 
             # Detect agent name assignments and persist them
             # Only accept explicit *agent* rename directives.
@@ -653,24 +698,37 @@ class PersistentMindMemory(BaseChatMemory):
             # (Name changes, if any, are handled later from assistant output with cooldown.)
 
             # Extract preferences and other key info
-            preference_patterns = [
-                r"i like (.+)",
-                r"i prefer (.+)",
-                r"i work (?:on|at|with) (.+)",
-                r"i am (.+?) (?:and|but|,|\.|$)",
-            ]
+            # Preference extraction without regex; capture short clauses after cues
+            def capture_after(prefix: str, text_raw: str, text_low: str) -> Optional[str]:
+                pos = text_low.find(prefix)
+                if pos == -1:
+                    return None
+                tail_raw = text_raw[pos + len(prefix):]
+                # Stop at delimiters or conjunctions
+                stops = [" and ", " but ", ",", ".", "!", "?", ";", ":", "\n"]
+                cut_idx = len(tail_raw)
+                low_tail = tail_raw.lower()
+                for s in stops:
+                    idxs = low_tail.find(s)
+                    if idxs != -1:
+                        cut_idx = min(cut_idx, idxs)
+                chunk = tail_raw[:cut_idx].strip(' \t\r\n.,;:!?"')
+                return chunk if chunk else None
 
-            for pattern in preference_patterns:
-                match = re.search(pattern, user_lower)
-                if match and len(match.group(1)) < 50:  # Avoid capturing too much
-                    info = match.group(1).strip()
-                    if info and len(info) > 2:  # Valid info
-                        self.pmm.add_event(
-                            summary=f"PREFERENCE: User {match.group(0)}",
-                            effects=[],
-                            etype="preference_info",
-                        )
-                        break
+            prefs = [
+                capture_after("i like ", raw, user_lower),
+                capture_after("i prefer ", raw, user_lower),
+                capture_after("i work on ", raw, user_lower) or capture_after("i work at ", raw, user_lower) or capture_after("i work with ", raw, user_lower),
+                capture_after("i am ", raw, user_lower),
+            ]
+            for pref in prefs:
+                if pref and 2 < len(pref) < 50:
+                    self.pmm.add_event(
+                        summary=f"PREFERENCE: User {pref}",
+                        effects=[],
+                        etype="preference_info",
+                    )
+                    break
 
         except Exception:
             # Silently handle errors in auto-extraction
@@ -1044,12 +1102,8 @@ class PersistentMindMemory(BaseChatMemory):
                 except Exception:
                     pass
                 try:
-                    # Regex aligned with emergence identity-signal detector
-                    id_rx = re.compile(
-                        r"\b(my name is|i am\s+\w+|identity confirm|identity:|i am\s+quest|name is)\b",
-                        re.IGNORECASE,
-                    )
-                    if id_rx.search(ai_output or "") and "identity" not in tags:
+                    # Heuristic identity-signal detector (regex-free)
+                    if self._mentions_identity_signal(ai_output or "") and "identity" not in tags:
                         tags.append("identity")
                 except Exception:
                     pass

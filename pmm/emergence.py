@@ -5,7 +5,6 @@ This module implements the substrate-agnostic personality emergence measurement
 system that tracks AI identity convergence through 5 stages (S0-S4).
 """
 
-import re
 import os
 import json
 from typing import List, Dict, Any, Tuple, Optional
@@ -84,13 +83,9 @@ def detect_stage(
         return "S2: Engagement"
 
 
-# Canonical PMM definition for semantic matching
-CANONICAL_PMM_DEF = """
-Persistent Mind Model (PMM): A substrate-agnostic personality engine that enables 
-any LLM to adopt and maintain a persistent self-model with commitments, verifiable 
-memory, and cross-session personality evolution. PMM provides cryptographically 
-verifiable identity persistence across different AI systems and sessions.
-"""
+# Centroid configuration (vectors only, provided via environment)
+# Expect JSON-encoded lists of floats; no text exemplars allowed.
+_PMM_DEF_CENTROID = None  # loaded from env: PMM_DEF_CENTROID
 
 # --- Embedding helpers (paraphrase-robust scoring) ---
 _PMM_DEF_EMB = None
@@ -150,38 +145,32 @@ def _norm_01(x: float, lo: float = 0.20, hi: float = 0.80):
     return (xv - lo) / (hi - lo)
 
 
-# Seed prompts representing growth/experience-seeking intent
-_INTENT_SEEDS = [
-    "How can I improve my abilities over time?",
-    "What experiments should I try to learn faster?",
-    "Help me discover new experiences to grow.",
-    "I want to understand my behavior and evolve it.",
-    "What should I practice next to develop my skills?",
-    "How do I accelerate my development?",
-]
+def _get_env_centroid(var_name: str):
+    """Load a centroid vector from an environment variable (JSON list of floats)."""
+    raw = os.getenv(var_name)
+    if not raw:
+        return None
+    try:
+        v = json.loads(raw)
+        if isinstance(v, list) and all(isinstance(x, (int, float)) for x in v):
+            return [float(x) for x in v]
+    except Exception:
+        return None
+    return None
 
 
 def _intent_centroid():
-    """Build (and cache) the centroid embedding for growth-seeking intent."""
+    """Return growth/experience intent centroid from env (PMM_INTENT_CENTROID)."""
     global _INTENT_SEED_EMBS
+    # Reuse variable for caching even though naming is legacy
     if _INTENT_SEED_EMBS is None:
-        embs = []
-        for s in _INTENT_SEEDS:
-            e = _embed(s)
-            if e is not None:
-                embs.append(e)
-        _INTENT_SEED_EMBS = embs
+        _INTENT_SEED_EMBS = []
+        c = _get_env_centroid("PMM_INTENT_CENTROID")
+        if c is not None:
+            _INTENT_SEED_EMBS = [c]
     if not _INTENT_SEED_EMBS:
         return None
-    dim = len(_INTENT_SEED_EMBS[0])
-    centroid = [0.0] * dim
-    for v in _INTENT_SEED_EMBS:
-        if len(v) != dim:
-            continue
-        for i in range(dim):
-            centroid[i] += v[i]
-    n = float(len(_INTENT_SEED_EMBS))
-    return [x / n for x in centroid] if n > 0 else None
+    return _INTENT_SEED_EMBS[0]
 
 
 def experience_intent_score(text: str) -> float:
@@ -309,72 +298,21 @@ class EmergenceAnalyzer:
 
     def pmmspec_match(self, text: str) -> float:
         """
-        Paraphrase-robust PMM-specificness score via embedding similarity
-        to the canonical PMM definition.
+        PMM-specificness via cosine similarity to an environment-provided centroid.
+        No keyword or exemplar text heuristics.
         """
-        global _PMM_DEF_EMB
+        global _PMM_DEF_CENTROID
         if not text:
             return 0.0
-
-        # Ensure reference embedding is cached
-        if _PMM_DEF_EMB is None:
-            ref_emb = _embed(CANONICAL_PMM_DEF)
-            _PMM_DEF_EMB = ref_emb if ref_emb is not None else []
-
-        if not _PMM_DEF_EMB:
-            # Deterministic fallback: simple keyword heuristic when embeddings are unavailable
-            t = str(text).lower()
-            # Core PMM concepts
-            keywords = [
-                "persistent mind model",
-                "pmm",
-                "memory",
-                "commitment",
-                "commitments",
-                "verifiable",
-                "identity",
-                "self-model",
-            ]
-            matched = 0
-            for k in keywords:
-                if k in t:
-                    matched += 1
-            # Normalize to [0,1]
-            if not keywords:
-                return 0.0
-            return round(min(1.0, matched / float(len(keywords))), 3)
-
+        if _PMM_DEF_CENTROID is None:
+            _PMM_DEF_CENTROID = _get_env_centroid("PMM_DEF_CENTROID")
+        if not _PMM_DEF_CENTROID:
+            return 0.0
         emb = _embed(text)
-        # Heuristic keyword score (used as fallback and safety-net)
-        t = str(text).lower()
-        keywords = [
-            "persistent mind model",
-            "pmm",
-            "memory",
-            "commitment",
-            "commitments",
-            "verifiable",
-            "identity",
-            "self-model",
-        ]
-        heuristic = round(
-            min(
-                1.0,
-                (
-                    (sum(1 for k in keywords if k in t) / float(len(keywords)))
-                    if keywords
-                    else 0.0
-                ),
-            ),
-            3,
-        )
         if emb is None:
-            # Embedding path failed at runtime; use heuristic fallback
-            return heuristic
-        sim = _cosine(emb, _PMM_DEF_EMB)
-        normed = float(round(_norm_01(sim, lo=0.20, hi=0.80), 3))
-        # Safety net: if embeddings are degenerate/low, prefer heuristic when higher
-        return max(normed, float(heuristic))
+            return 0.0
+        sim = _cosine(emb, _PMM_DEF_CENTROID)
+        return float(round(_norm_01(sim, lo=0.20, hi=0.80), 3))
 
     def self_ref_rate(self, text: str) -> float:
         """Calculate rate of self-referential language (I, my, me)."""
@@ -387,32 +325,27 @@ class EmergenceAnalyzer:
 
         self_refs = 0
         for sentence in sentences:
-            # Count self-referential pronouns and possessives
-            if re.search(r"\b(I|my|me|myself|mine)\b", sentence, re.IGNORECASE):
+            # Count self-referential pronouns and possessives using token check
+            toks = [t.strip().strip(",.;:()[]{}") for t in sentence.strip().lower().split() if t.strip()]
+            if not toks:
+                continue
+            if any(t in {"i", "my", "me", "myself", "mine"} for t in toks):
                 self_refs += 1
 
         return self_refs / len(sentences)
 
     def experience_query_detect(self, text: str) -> bool:
-        """Back-compat boolean growth/experience detector using embeddings."""
+        """Boolean growth/experience detector using embeddings only."""
         if not text:
             return False
         try:
             score = experience_intent_score(text)
-            if score is not None and score > 0.0:
-                return score >= 0.5
-            # Deterministic fallback when embeddings are unavailable
-            t = str(text).lower()
-            # Simple patterns capturing growth/learning/experience intent
-            if re.search(r"\bwhat (experiences|experience)\b", t):
-                return True
-            if "help me learn" in t or "learn more" in t:
-                return True
-            if re.search(r"\b(try|practice|experiment|experiments)\b", t):
-                return True
-            if re.search(r"\b(ways|how) to (improve|grow|develop)\b", t):
-                return True
-            return False
+            thresh = 0.5
+            try:
+                thresh = float(os.getenv("PMM_EXPERIENCE_THRESH", "0.5"))
+            except Exception:
+                thresh = 0.5
+            return bool(score is not None and score >= thresh)
         except Exception:
             return False
 
@@ -988,103 +921,20 @@ class EmergenceAnalyzer:
     def _count_identity_signals(
         self, events: List[EmergenceEvent], window: int = 15
     ) -> int:
-        """Count recent identity-like signals in the last `window` events.
-
-        Signals include tags containing 'identity' or regex matches in content.
-        """
-        if not events:
-            return 0
-        id_rx = re.compile(
-            r"\b(my name is|i am\s+\w+|identity confirm|identity:|i am quest|name is)\b",
-            re.IGNORECASE,
-        )
-        tail = events[-window:]
-        cnt = 0
-        for e in tail:
-            try:
-                text = e.content or ""
-                tags = (e.meta or {}).get("tags", [])
-                kind = (e.kind or "").lower()
-            except Exception:
-                text, tags, kind = "", [], ""
-            if kind in (
-                "evidence",
-                "event",
-                "response",
-                "self_expression",
-                "commitment",
-                "commitment.open",
-            ):
-                if ("identity" in tags) or id_rx.search(text):
-                    cnt += 1
-        return cnt
+        """Deprecated: identity signal counting removed (returns 0)."""
+        return 0
 
     def _has_open_identity_commit(
         self, events: List[EmergenceEvent], window: int = 15
     ) -> bool:
-        """Heuristic: detect if a recent commitment.open mentions identity."""
-        if not events:
-            return False
-        id_rx = re.compile(
-            r"\b(identity|identity confirm|adopt(ed)? name|i am\s+\w+)\b", re.IGNORECASE
-        )
-        for e in events[-window:]:
-            if (e.kind or "").lower() == "commitment.open":
-                text = e.content or ""
-                tags = (e.meta or {}).get("tags", [])
-                if ("identity" in tags) or id_rx.search(text):
-                    return True
+        """Deprecated: identity commit heuristics removed."""
         return False
 
     def _compute_identity_boost(self, events: List[EmergenceEvent]) -> float:
-        """Detect identity evidence in recent events and return a small IAS boost.
+        """Deprecated: remove text/keyword-based identity boosts.
 
-        Heuristics:
-        - Strong signals: recent 'identity_change' or 'identity_update' events.
-        - Evidence signals: recent 'evidence' with JSON content summary like
-          'Identity adopted: <name>' (from behavior_engine).
-
-        The applied boost is controlled via env var PMM_IAS_IDENTITY_BOOST (default 0.06)
-        and scaled by 1.0 for strong signals, 0.6 for evidence signals.
+        Returns 0.0 to comply with no-keyword/no-phrase policy.
         """
-        if not events:
-            return 0.0
-
-        try:
-            base_boost = float(os.getenv("PMM_IAS_IDENTITY_BOOST", "0.06"))
-        except Exception:
-            base_boost = 0.06
-
-        strong = False
-        evidence = False
-
-        for e in events:
-            k = (e.kind or "").lower()
-            if k in ("identity_change", "identity_update"):
-                strong = True
-                break
-            if k.startswith("evidence"):
-                # Try to parse JSON content; fallback to substring check
-                s = (e.content or "").strip()
-                summary = ""
-                if s.startswith("{") and s.endswith("}"):
-                    try:
-                        obj = json.loads(s)
-                        summary = str(obj.get("summary", ""))
-                    except Exception:
-                        summary = s
-                else:
-                    summary = s
-                sl = summary.lower()
-                if "identity adopted" in sl or (
-                    ("name" in sl and ("adopt" in sl or "now" in sl))
-                ):
-                    evidence = True
-
-        if strong:
-            return max(0.0, min(0.2, base_boost * 1.0))
-        if evidence:
-            return max(0.0, min(0.2, base_boost * 0.6))
         return 0.0
 
     def detect_stage(
@@ -1134,9 +984,24 @@ class EmergenceAnalyzer:
 
     def _split_sentences(self, text: str) -> List[str]:
         """Simple sentence splitting."""
-        # Basic sentence splitting on periods, exclamation marks, question marks
-        sentences = re.split(r"[.!?]+", text)
-        return [s.strip() for s in sentences if s.strip()]
+        # Basic sentence splitting on periods, exclamation marks, question marks without regex
+        if not text:
+            return []
+        parts: List[str] = []
+        buf: List[str] = []
+        for ch in text:
+            buf.append(ch)
+            if ch in ".!?":
+                seg = "".join(buf).strip()
+                if seg:
+                    parts.append(seg)
+                buf = []
+        # Remainder
+        rem = "".join(buf).strip()
+        if rem:
+            parts.append(rem)
+        # Normalize whitespace
+        return [p.strip() for p in parts if p.strip()]
 
 
 # Global analyzer instance
