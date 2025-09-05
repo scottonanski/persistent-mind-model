@@ -22,8 +22,6 @@ from pmm.classifiers import CommitmentExtractor
 # Note: Avoid importing SelfModelManager here to prevent circular import.
 # Functions below accept an object with a `sqlite_store` attribute.
 from pmm.config.models import IDENTITY_COMMIT
-from pmm.config.semantic_thresholds import get_commitment_thresholds
-from pmm.util.flags import semantic_mode_enabled
 
 
 @dataclass
@@ -77,14 +75,16 @@ class CommitmentTracker:
             tags = pos_tag(s)
         except Exception:
             tags = []
-        first_is_verb = bool(tags and isinstance(tags[0], (list, tuple)) and str(tags[0][1]).startswith("VB"))
-        has_first_person_pos = any(
-            (str(tag).startswith("PRP") or str(tag).startswith("PRP$")) for _, tag in (tags or [])
+        first_is_verb = bool(
+            tags
+            and isinstance(tags[0], (list, tuple))
+            and str(tags[0][1]).startswith("VB")
         )
-        has_modal = any(str(tag).startswith("MD") for _, tag in (tags or []))
-        pos_unknown = (not tags) or all((isinstance(t, (list, tuple)) and str(t[1]) == "X") for t in (tags or []))
+        pos_unknown = (not tags) or all(
+            (isinstance(t, (list, tuple)) and str(t[1]) == "X") for t in (tags or [])
+        )
         toks = [t for t in s.split() if t]
-        first_token_lower = (toks[0].lower() if toks else "")
+        first_token_lower = toks[0].lower() if toks else ""
         token_count = len([t for t in s.split() if t])
         # Pattern: PRP MD VB* (e.g., I will do, We should consider)
         prp_md_vb = False
@@ -93,7 +93,9 @@ class CommitmentTracker:
                 t0 = str(tags[0][1])
                 t1 = str(tags[1][1])
                 t2 = str(tags[2][1])
-                prp_md_vb = (t0.startswith("PRP") and t1.startswith("MD") and t2.startswith("VB"))
+                prp_md_vb = (
+                    t0.startswith("PRP") and t1.startswith("MD") and t2.startswith("VB")
+                )
             except Exception:
                 prp_md_vb = False
         # Semantic-only policy: avoid rejecting imperative forms due to missing POS tagger.
@@ -107,7 +109,9 @@ class CommitmentTracker:
         # Reject short pronoun-first non-imperative statements in general
         if first_token_lower in {"i", "we"} and token_count < 6 and not first_is_verb:
             if os.getenv("PMM_DEBUG") == "1":
-                print(f"[PMM_DEBUG] Reject: short pronoun-first non-imperative | text={s}")
+                print(
+                    f"[PMM_DEBUG] Reject: short pronoun-first non-imperative | text={s}"
+                )
             return False
         # Reject short comma-prefixed sequences (e.g., "Next, ...") unless long enough
         if isinstance(tags, list) and len(tags) >= 4:
@@ -136,7 +140,9 @@ class CommitmentTracker:
             imperative_like = first_is_verb or (prp_md_vb and token_count >= 6)
             if not pos_unknown and not imperative_like:
                 if os.getenv("PMM_DEBUG") == "1":
-                    print(f"[PMM_DEBUG] Reject: vec_missing & non-imperative (POS known) | text={s}")
+                    print(
+                        f"[PMM_DEBUG] Reject: vec_missing & non-imperative (POS known) | text={s}"
+                    )
                 return False
             # If POS unknown, do not over-reject; rely on structural score + thresholds
         score = extractor.score(s)
@@ -188,7 +194,9 @@ class CommitmentTracker:
             return None
         # Create CID and store
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        cid = hashlib.sha256(f"{ts}:{commit_text}:{source_insight_id}".encode("utf-8")).hexdigest()[:12]
+        cid = hashlib.sha256(
+            f"{ts}:{commit_text}:{source_insight_id}".encode("utf-8")
+        ).hexdigest()[:12]
         self.commitments[cid] = Commitment(
             cid=cid,
             text=commit_text,
@@ -217,7 +225,9 @@ class CommitmentTracker:
         except Exception:
             thresh = 0.60
         candidates = [
-            c for c in self.commitments.values() if c.status in ("open", "tentative", "ongoing")
+            c
+            for c in self.commitments.values()
+            if c.status in ("open", "tentative", "ongoing")
         ]
         if not candidates:
             return None
@@ -279,9 +289,11 @@ class CommitmentTracker:
         if not isinstance(description, str) or not description:
             return None
         d = description.strip()
+
         # Tokens (strip basic punctuation)
         def _sp(tok: str) -> str:
-            return tok.strip('"\'`.,;:()[]{}')
+            return tok.strip("\"'`.,;:()[]{}")
+
         for tok in d.split():
             st = _sp(tok)
             if not st:
@@ -303,7 +315,9 @@ class CommitmentTracker:
                 return st
         return None
 
-    def detect_evidence_events(self, text: str) -> List[Tuple[str, str, str, Optional[str]]]:
+    def detect_evidence_events(
+        self, text: str
+    ) -> List[Tuple[str, str, str, Optional[str]]]:
         """Deprecated: keyword-based evidence detection removed.
 
         Evidence mapping is handled semantically in pmm/evidence/behavior_engine.py.
@@ -325,11 +339,15 @@ class CommitmentTracker:
 
             def bigrams(s: str) -> set:
                 toks = [t for t in (s or "").split() if t]
-                return set(" ".join(toks[i : i + 2]) for i in range(max(0, len(toks) - 1)))
+                return set(
+                    " ".join(toks[i : i + 2]) for i in range(max(0, len(toks) - 1))
+                )
 
             def trigrams(s: str) -> set:
                 toks = [t for t in (s or "").split() if t]
-                return set(" ".join(toks[i : i + 3]) for i in range(max(0, len(toks) - 2)))
+                return set(
+                    " ".join(toks[i : i + 3]) for i in range(max(0, len(toks) - 2))
+                )
 
             b_ct, b_desc = bigrams(ct), bigrams(desc)
             t_ct, t_desc = trigrams(ct), trigrams(desc)
@@ -380,12 +398,14 @@ class CommitmentTracker:
         out: List[Dict[str, Any]] = []
         for c in self.commitments.values():
             if c.status in ("open", "tentative", "ongoing"):
-                out.append({
-                    "cid": c.cid,
-                    "text": c.text,
-                    "status": c.status,
-                    "created_at": c.created_at,
-                })
+                out.append(
+                    {
+                        "cid": c.cid,
+                        "text": c.text,
+                        "status": c.status,
+                        "created_at": c.created_at,
+                    }
+                )
         return out
 
     def archive_legacy_commitments(self) -> List[str]:
@@ -395,7 +415,9 @@ class CommitmentTracker:
         """
         return []
 
-    def mark_commitment(self, cid: str, status: str, note: Optional[str] = None) -> bool:
+    def mark_commitment(
+        self, cid: str, status: str, note: Optional[str] = None
+    ) -> bool:
         """Update commitment status and optional note.
 
         Returns True if found and updated; False otherwise.
@@ -404,7 +426,14 @@ class CommitmentTracker:
         if not c:
             return False
         # Allow closing or expiring ongoing via explicit mark; protect in evidence path only
-        valid_status = {"open", "closed", "expired", "tentative", "ongoing", "archived_legacy"}
+        valid_status = {
+            "open",
+            "closed",
+            "expired",
+            "tentative",
+            "ongoing",
+            "archived_legacy",
+        }
         if status not in valid_status:
             return False
         c.status = status
@@ -458,8 +487,13 @@ class CommitmentTracker:
             return False
 
         # Protect ongoing items; record evidence upstream without closing
-        if getattr(target_commitment, "status", "open") == "ongoing" or getattr(target_commitment, "tier", "permanent") == "ongoing":
-            print(f"[PMM_EVIDENCE] ongoing commitment; recording evidence only: {target_cid}")
+        if (
+            getattr(target_commitment, "status", "open") == "ongoing"
+            or getattr(target_commitment, "tier", "permanent") == "ongoing"
+        ):
+            print(
+                f"[PMM_EVIDENCE] ongoing commitment; recording evidence only: {target_cid}"
+            )
             return False
         # Permit closing 'tentative' commitments too, since the UI lists them among open items
         if target_commitment.status not in ("open", "tentative"):
@@ -486,11 +520,9 @@ class CommitmentTracker:
         target_commitment.closed_at = datetime.now(timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
-        target_commitment.close_note = (
-            f"Evidence: {description} | artifact={artifact}"
-        )
+        target_commitment.close_note = f"Evidence: {description} | artifact={artifact}"
         return True
-    
+
     def _is_valid_evidence(
         self,
         evidence_type: str,

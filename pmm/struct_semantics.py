@@ -11,6 +11,7 @@ from typing import List, Tuple, Sequence, Optional
 
 # Avoid regex and keyword lists entirely
 
+
 def split_sentences(text: str) -> List[str]:
     if not isinstance(text, str) or not text:
         return []
@@ -45,6 +46,7 @@ def pos_tag(text: str) -> List[Tuple[str, str]]:
     # Try spaCy
     try:
         import spacy  # type: ignore
+
         try:
             nlp = spacy.load("en_core_web_sm")  # type: ignore
         except Exception:
@@ -63,8 +65,9 @@ def pos_tag(text: str) -> List[Tuple[str, str]]:
     # Try NLTK
     try:
         import nltk  # type: ignore
+
         try:
-            nltk.data.find('taggers/averaged_perceptron_tagger')
+            nltk.data.find("taggers/averaged_perceptron_tagger")
         except Exception:
             pass
         return list(nltk.pos_tag(toks))  # type: ignore
@@ -114,9 +117,13 @@ class CentroidModel:
             nb += bi * bi
         if na == 0.0 or nb == 0.0:
             return 0.0
-        return dot / ((na ** 0.5) * (nb ** 0.5))
+        return dot / ((na**0.5) * (nb**0.5))
 
-    def fit(self, pos_vectors: Sequence[Sequence[float]], neg_vectors: Sequence[Sequence[float]]) -> None:
+    def fit(
+        self,
+        pos_vectors: Sequence[Sequence[float]],
+        neg_vectors: Sequence[Sequence[float]],
+    ) -> None:
         self._pos = self._mean(pos_vectors)
         self._neg = self._mean(neg_vectors)
 
@@ -131,6 +138,7 @@ class CentroidModel:
 
 # --- Structural, regex-free helpers -------------------------------------------------
 
+
 def normalize_whitespace(text: str) -> str:
     """Collapse runs of whitespace into single spaces and trim."""
     if not isinstance(text, str):
@@ -142,7 +150,7 @@ def _strip_punct(tok: str) -> str:
     """Strip leading/trailing punctuation around a token."""
     if not tok:
         return tok
-    return tok.strip('\"\'\t\r\n.,;:!?()[]{}')
+    return tok.strip("\"'\t\r\n.,;:!?()[]{}")
 
 
 def detect_ev_ids_and_hashes(text: str) -> set[str]:
@@ -169,7 +177,7 @@ def detect_ev_ids_and_hashes(text: str) -> set[str]:
     n = len(low)
     i = 0
     while i < n - 2:
-        if low[i] == 'e' and low[i + 1] == 'v':
+        if low[i] == "e" and low[i + 1] == "v":
             j = i + 2
             while j < n and low[j].isdigit():
                 j += 1

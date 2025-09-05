@@ -106,7 +106,9 @@ class AutonomyLoop:
         self.atomic_reflection = AtomicReflectionManager(self.pmm)
         # Reflection cooldown for autonomy loop (env-tunable)
         try:
-            _auto_cooldown_sec = int(os.getenv("PMM_AUTONOMY_REFLECTION_COOLDOWN_SECONDS", "120"))
+            _auto_cooldown_sec = int(
+                os.getenv("PMM_AUTONOMY_REFLECTION_COOLDOWN_SECONDS", "120")
+            )
         except Exception:
             _auto_cooldown_sec = 10
         self._base_cooldown_seconds = _auto_cooldown_sec
@@ -260,7 +262,9 @@ class AutonomyLoop:
             analyzer = EmergenceAnalyzer(storage_manager=self.db)
             recent = _load_recent_events_for_emergence(self.db, limit=15)
             if recent:
-                analyzer.get_recent_events = lambda kind="response", limit=15: recent[-limit:]
+                analyzer.get_recent_events = lambda kind="response", limit=15: recent[
+                    -limit:
+                ]
                 scores = analyzer.compute_scores(window=min(15, len(recent)))
             else:
                 scores = analyzer.compute_scores(window=15)

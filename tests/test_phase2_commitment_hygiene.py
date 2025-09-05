@@ -41,11 +41,31 @@ def test_5_point_validation():
         ("We should improve decision-making.", False, "fails ownership"),
         ("I will enhance my capabilities.", False, "fails context, time"),
         # Should ACCEPT
-        ("Outline PMM onboarding v0.1 tonight.", True, "structural imperative + concrete"),
-        ("Label 20 PMM samples after importing the new dataset.", True, "structural imperative + count"),
-        ("Draft the commitment validation test before tomorrow.", True, "structural imperative + time"),
-        ("Document the probe API endpoints within the next week.", True, "structural imperative + time"),
-        ("Analyze reflection patterns after reviewing the latest session data.", True, "structural imperative + context"),
+        (
+            "Outline PMM onboarding v0.1 tonight.",
+            True,
+            "structural imperative + concrete",
+        ),
+        (
+            "Label 20 PMM samples after importing the new dataset.",
+            True,
+            "structural imperative + count",
+        ),
+        (
+            "Draft the commitment validation test before tomorrow.",
+            True,
+            "structural imperative + time",
+        ),
+        (
+            "Document the probe API endpoints within the next week.",
+            True,
+            "structural imperative + time",
+        ),
+        (
+            "Analyze reflection patterns after reviewing the latest session data.",
+            True,
+            "structural imperative + context",
+        ),
     ]
 
     # Assert per-case to reflect actual invariants (ownership + structural concreteness)
@@ -126,7 +146,9 @@ def test_integration_with_pmm():
         # Try to trigger commitment extraction with valid commitment
         memory.save_context(
             {"input": "Can you help me plan the next steps?"},
-            {"response": "Draft the PMM validation tests tonight after reviewing the current codebase."},
+            {
+                "response": "Draft the PMM validation tests tonight after reviewing the current codebase."
+            },
         )
 
         # Try to trigger with a less concrete commitment (semantic-only may accept)
@@ -144,10 +166,8 @@ def test_integration_with_pmm():
             c.text for c in memory.pmm.commitment_tracker.commitments.values()
         ]
         valid_found = any(
-            "draft the pmm validation tests" in text.lower() for text in commitment_texts
-        )
-        invalid_found = any(
-            "improve decision-making" in text.lower() for text in commitment_texts
+            "draft the pmm validation tests" in text.lower()
+            for text in commitment_texts
         )
 
         assert (

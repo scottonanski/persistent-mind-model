@@ -17,7 +17,7 @@ def _strip_punct(tok: str) -> str:
     """Strip leading/trailing punctuation without regex."""
     if not tok:
         return tok
-    return tok.strip('\"\'\t\r\n.,;:!?()[]{}')
+    return tok.strip("\"'\t\r\n.,;:!?()[]{}")
 
 
 def _tokenize_words(text: str) -> List[str]:
@@ -197,7 +197,9 @@ class SemanticGrowthDetector:
 
         toks = _tokenize_words(text)
 
-        def has_pair_within(a_set: List[str], b_set: List[str], window: int = 8) -> bool:
+        def has_pair_within(
+            a_set: List[str], b_set: List[str], window: int = 8
+        ) -> bool:
             """Return True if any token from a_set appears within `window` tokens of any token from b_set."""
             a_pos = [i for i, t in enumerate(toks) if any(a in t for a in a_set)]
             if not a_pos:
@@ -212,19 +214,56 @@ class SemanticGrowthDetector:
             return False
 
         # Future-oriented language
-        future_a = ["will", "going", "plan", "intend", "aim", "next", "future", "tomorrow", "ahead"]
-        future_b = ["improve", "develop", "grow", "learn", "better", "stronger", "deeper"]
+        future_a = [
+            "will",
+            "going",
+            "plan",
+            "intend",
+            "aim",
+            "next",
+            "future",
+            "tomorrow",
+            "ahead",
+        ]
+        future_b = [
+            "improve",
+            "develop",
+            "grow",
+            "learn",
+            "better",
+            "stronger",
+            "deeper",
+        ]
         if has_pair_within(future_a, future_b):
             bonus += 0.1
 
         # Self-improvement language
         improve_a = ["want", "need", "should", "working", "focusing", "developing"]
-        improve_b = ["become", "get", "grow", "better", "stronger", "more", "myself", "personal", "my"]
+        improve_b = [
+            "become",
+            "get",
+            "grow",
+            "better",
+            "stronger",
+            "more",
+            "myself",
+            "personal",
+            "my",
+        ]
         if has_pair_within(improve_a, improve_b):
             bonus += 0.1
 
         # Emotional growth language
-        emo_a = ["feel", "feeling", "emotion", "emotional", "vulnerable", "authentic", "genuine", "open"]
+        emo_a = [
+            "feel",
+            "feeling",
+            "emotion",
+            "emotional",
+            "vulnerable",
+            "authentic",
+            "genuine",
+            "open",
+        ]
         emo_b = ["growth", "development", "journey", "connection", "relationship"]
         if has_pair_within(emo_a, emo_b):
             bonus += 0.1
@@ -308,10 +347,7 @@ class SemanticGrowthDetector:
 
         # Basic complexity indicators (regex-free)
         # Light preprocessing to help split on ! and ? without regex
-        pre = (
-            text.replace("!", ".!")
-            .replace("?", ".?")
-        )
+        pre = text.replace("!", ".!").replace("?", ".?")
         sentences = [s.strip() for s in split_sentences(pre) if s.strip()]
 
         if not sentences:

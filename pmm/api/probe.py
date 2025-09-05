@@ -748,7 +748,11 @@ def reflections(
 
             # Look for commitment hash references (16-char lowercase hex) using structural helper
             token_refs = detect_ev_ids_and_hashes(content)
-            hex_refs = [t for t in token_refs if len(t) == 16 and all(c in "0123456789abcdef" for c in t)]
+            hex_refs = [
+                t
+                for t in token_refs
+                if len(t) == 16 and all(c in "0123456789abcdef" for c in t)
+            ]
             if hex_refs:
                 is_referential = True
                 references.extend([f"hash_{ref}" for ref in hex_refs])

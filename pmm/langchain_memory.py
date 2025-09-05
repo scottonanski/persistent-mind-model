@@ -575,7 +575,10 @@ class PersistentMindMemory(BaseChatMemory):
             raw = text.strip()
             low = raw.lower()
             # Direct keyword cues
-            if any(k in low for k in ("my name is", "identity confirm", "identity:", "name is")):
+            if any(
+                k in low
+                for k in ("my name is", "identity confirm", "identity:", "name is")
+            ):
                 return True
 
             # Simple pattern: "I am <CapitalizedWord>"
@@ -651,7 +654,7 @@ class PersistentMindMemory(BaseChatMemory):
             phrase = "my name is "
             idx = low.find(phrase)
             if idx != -1:
-                tail = raw[idx + len(phrase):]
+                tail = raw[idx + len(phrase) :]
                 # Stop at delimiter
                 for delim in [".", "!", "?", ",", ";", ":", "\n"]:
                     cut = tail.find(delim)
@@ -664,7 +667,7 @@ class PersistentMindMemory(BaseChatMemory):
                 phrase2 = "call me "
                 idx2 = low.find(phrase2)
                 if idx2 != -1:
-                    tail = raw[idx2 + len(phrase2):]
+                    tail = raw[idx2 + len(phrase2) :]
                     for delim in [".", "!", "?", ",", ";", ":", "\n"]:
                         cut = tail.find(delim)
                         if cut != -1:
@@ -676,7 +679,11 @@ class PersistentMindMemory(BaseChatMemory):
                     tokens = [t for t in raw.strip().split() if t.strip()]
                     for i, tok in enumerate(tokens[:-1]):
                         tl = tok.lower()
-                        if tl in ("i", "i'm", "i’m") or (tl == "i" and i + 1 < len(tokens) and tokens[i + 1].lower() == "am"):
+                        if tl in ("i", "i'm", "i’m") or (
+                            tl == "i"
+                            and i + 1 < len(tokens)
+                            and tokens[i + 1].lower() == "am"
+                        ):
                             # Determine candidate next token
                             j = i + 1
                             if tl == "i":
@@ -685,8 +692,16 @@ class PersistentMindMemory(BaseChatMemory):
                                     j += 1
                             if j < len(tokens):
                                 candidate = tokens[j].strip('.,!?;:"')
-                                if candidate and candidate[0].isupper() and candidate.isalpha():
-                                    if candidate.lower() not in stopwords and candidate.lower() not in {"doing", "going", "working"}:
+                                if (
+                                    candidate
+                                    and candidate[0].isupper()
+                                    and candidate.isalpha()
+                                ):
+                                    if (
+                                        candidate.lower() not in stopwords
+                                        and candidate.lower()
+                                        not in {"doing", "going", "working"}
+                                    ):
                                         _remember_user_name(candidate)
                                         break
 
@@ -699,11 +714,13 @@ class PersistentMindMemory(BaseChatMemory):
 
             # Extract preferences and other key info
             # Preference extraction without regex; capture short clauses after cues
-            def capture_after(prefix: str, text_raw: str, text_low: str) -> Optional[str]:
+            def capture_after(
+                prefix: str, text_raw: str, text_low: str
+            ) -> Optional[str]:
                 pos = text_low.find(prefix)
                 if pos == -1:
                     return None
-                tail_raw = text_raw[pos + len(prefix):]
+                tail_raw = text_raw[pos + len(prefix) :]
                 # Stop at delimiters or conjunctions
                 stops = [" and ", " but ", ",", ".", "!", "?", ";", ":", "\n"]
                 cut_idx = len(tail_raw)
@@ -718,7 +735,9 @@ class PersistentMindMemory(BaseChatMemory):
             prefs = [
                 capture_after("i like ", raw, user_lower),
                 capture_after("i prefer ", raw, user_lower),
-                capture_after("i work on ", raw, user_lower) or capture_after("i work at ", raw, user_lower) or capture_after("i work with ", raw, user_lower),
+                capture_after("i work on ", raw, user_lower)
+                or capture_after("i work at ", raw, user_lower)
+                or capture_after("i work with ", raw, user_lower),
                 capture_after("i am ", raw, user_lower),
             ]
             for pref in prefs:
@@ -1103,7 +1122,10 @@ class PersistentMindMemory(BaseChatMemory):
                     pass
                 try:
                     # Heuristic identity-signal detector (regex-free)
-                    if self._mentions_identity_signal(ai_output or "") and "identity" not in tags:
+                    if (
+                        self._mentions_identity_signal(ai_output or "")
+                        and "identity" not in tags
+                    ):
                         tags.append("identity")
                 except Exception:
                     pass

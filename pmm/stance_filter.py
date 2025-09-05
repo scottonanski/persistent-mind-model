@@ -178,7 +178,9 @@ class StanceFilter:
             # For now, just apply standard filters - could implement LLM-based rewrite
 
         # Apply phrase-level replacements according to strictness
-        def apply_phrase_replacements(s: str, phrases: List[Tuple[str, str]]) -> Tuple[str, int]:
+        def apply_phrase_replacements(
+            s: str, phrases: List[Tuple[str, str]]
+        ) -> Tuple[str, int]:
             count = 0
             low = s.lower()
             # To preserve alignment after replacements, iterate in order and rebuild string
@@ -217,7 +219,7 @@ class StanceFilter:
             tokens: List[str] = s.split(" ")
             changed = 0
             for idx, tok in enumerate(tokens):
-                core = tok.strip('"\'\t\r\n.,;:!?()[]{}')
+                core = tok.strip("\"'\t\r\n.,;:!?()[]{}")
                 lower = core.lower()
                 if lower in mapping and core:
                     before = tok

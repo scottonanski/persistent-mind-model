@@ -16,6 +16,7 @@ class ModelPhraseCache:
 
     def add_text(self, text: str) -> None:
         """Add text to the cache, extracting n-grams."""
+
         # Clean and tokenize (regex-free): keep alnum and spaces
         def _normalize(s: str) -> str:
             buf = []
@@ -52,6 +53,7 @@ class ModelPhraseCache:
         self, text: str, threshold: float = 0.35
     ) -> tuple[bool, List[str]]:
         """Check if text contains too many repeated n-grams."""
+
         # Normalize and tokenize without regex
         def _normalize(s: str) -> str:
             buf = []
@@ -113,13 +115,25 @@ class PhraseDeduper:
             "gpt": [
                 {"key": "i appreciate you sharing", "seq": ["i appreciate", "sharing"]},
                 {"key": "thank you for bringing", "seq": ["thank you", "bringing"]},
-                {"key": "that's an interesting point", "seq": ["that's", "interesting", "point"]},
-                {"key": "i understand you're saying", "seq": ["i understand", "you're", "saying"]},
+                {
+                    "key": "that's an interesting point",
+                    "seq": ["that's", "interesting", "point"],
+                },
+                {
+                    "key": "i understand you're saying",
+                    "seq": ["i understand", "you're", "saying"],
+                },
             ],
             "claude": [
                 {"key": "i'd be happy to", "seq": ["i'd be happy to"]},
-                {"key": "that's a thoughtful question", "seq": ["that's", "thoughtful", "question"]},
-                {"key": "i think it's important to consider", "seq": ["i think", "important", "consider"]},
+                {
+                    "key": "that's a thoughtful question",
+                    "seq": ["that's", "thoughtful", "question"],
+                },
+                {
+                    "key": "i think it's important to consider",
+                    "seq": ["i think", "important", "consider"],
+                },
                 {"key": "from my perspective", "seq": ["from my perspective"]},
             ],
         }
@@ -240,6 +254,7 @@ class PhraseDeduper:
         }
 
         modified_text = response_text
+
         # Helper: case-insensitive replace for phrases
         def _ci_replace(haystack: str, needle: str, repl: str) -> str:
             if not needle:

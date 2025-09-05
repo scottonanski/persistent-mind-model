@@ -37,6 +37,7 @@ from pmm.policy import bandit as pmm_bandit
 
 # --- Structural helpers (regex-free) -----------------------------------------
 
+
 def _looks_like_codey(text: str) -> bool:
     """Heuristic: does the text look like code or stack traces?"""
     if not text:
@@ -579,7 +580,9 @@ def main():
         # Auto-nudge: if identity is LOW and no active identity identity-mode, open an adaptive identity TTL
         try:
             storage = (
-                pmm_memory.pmm.sqlite_store if hasattr(pmm_memory.pmm, "sqlite_store") else None
+                pmm_memory.pmm.sqlite_store
+                if hasattr(pmm_memory.pmm, "sqlite_store")
+                else None
             )
             scores = compute_emergence_scores(window=15, storage_manager=storage)
             ias_now = float(scores.get("ias", 0.0) or 0.0)
@@ -893,7 +896,9 @@ def main():
         gas = scores.get("GAS")
         # Use authoritative close rate derived from evidence-linked commitments
         try:
-            analyzer = EmergenceAnalyzer(storage_manager=getattr(pmm_memory.pmm, "sqlite_store", None))
+            analyzer = EmergenceAnalyzer(
+                storage_manager=getattr(pmm_memory.pmm, "sqlite_store", None)
+            )
             close_rate = float(analyzer.commitment_close_rate(window=50))
         except Exception:
             close_rate = 0.0

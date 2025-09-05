@@ -1,5 +1,6 @@
 import os
 
+
 def semantic_mode_enabled() -> bool:
     """Return True when semantic relaxations are enabled via env flag.
 

@@ -491,18 +491,31 @@ def reflect_once(
 
             def _is_measurable(s: str) -> bool:
                 text = (s or "").strip()
-                parts = [p.strip().strip(",.;:()[]{}") for p in text.split() if p.strip()]
+                parts = [
+                    p.strip().strip(",.;:()[]{}") for p in text.split() if p.strip()
+                ]
                 if not parts:
                     return False
+
                 # Reject bare number or number+unit with almost nothing else
                 def _is_num(tok: str) -> bool:
                     t = tok.lstrip("+−-+")
                     try:
-                        float(t.rstrip('%'))
+                        float(t.rstrip("%"))
                         return True
                     except Exception:
                         return False
-                UNITS = {"minute", "minutes", "hour", "hours", "day", "days", "week", "weeks"}
+
+                UNITS = {
+                    "minute",
+                    "minutes",
+                    "hour",
+                    "hours",
+                    "day",
+                    "days",
+                    "week",
+                    "weeks",
+                }
                 SPECIAL = {"percent", "threshold", "count"}
                 # Percent forms
                 has_percent = any(tok.endswith("%") or tok in SPECIAL for tok in parts)
@@ -512,7 +525,9 @@ def reflect_once(
                 prox = any(abs(i - j) <= 3 for i in num_pos for j in unit_pos)
                 # Bare-bad: extremely short numeric-only content
                 bare_like = False
-                if len(parts) <= 3 and all((_is_num(p) or p.lower() in UNITS) for p in parts):
+                if len(parts) <= 3 and all(
+                    (_is_num(p) or p.lower() in UNITS) for p in parts
+                ):
                     bare_like = True
                 return (has_percent or prox) and not bare_like
 

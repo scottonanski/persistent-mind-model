@@ -601,11 +601,11 @@ RECENT INSIGHTS:
 
             # Extract autonomy directive line if present: starts with "Directive:" (case-insensitive)
             for line in (reply or "").splitlines():
-                l = line.strip()
-                if not l:
+                line_str = line.strip()
+                if not line_str:
                     continue
-                if l.lower().startswith("directive:"):
-                    content = l[len("directive:") :].strip()
+                if line_str.lower().startswith("directive:"):
+                    content = line_str[len("directive:") :].strip()
                     if content:
                         self._persist_autonomy_directive(content, source_event)
                         break

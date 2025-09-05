@@ -1,11 +1,11 @@
 from __future__ import annotations
 import json
 import os
-from datetime import datetime, timezone
-from typing import Optional, List, Tuple
+from typing import Optional, Tuple
 from urllib.parse import urlparse
 from pathlib import PurePosixPath
 from pmm.semantic_analysis import get_semantic_analyzer
+
 
 def _env_float(name: str, default: float) -> float:
     try:
@@ -14,7 +14,9 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _best_open_commitment_token(smm, reply_text: str) -> Tuple[Optional[str], Optional[dict]]:
+def _best_open_commitment_token(
+    smm, reply_text: str
+) -> Tuple[Optional[str], Optional[dict]]:
     """Return (commit_ref, commit_dict) via simple token overlap without regex."""
     try:
         opens = smm.get_open_commitments() or []

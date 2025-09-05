@@ -326,7 +326,11 @@ class EmergenceAnalyzer:
         self_refs = 0
         for sentence in sentences:
             # Count self-referential pronouns and possessives using token check
-            toks = [t.strip().strip(",.;:()[]{}") for t in sentence.strip().lower().split() if t.strip()]
+            toks = [
+                t.strip().strip(",.;:()[]{}")
+                for t in sentence.strip().lower().split()
+                if t.strip()
+            ]
             if not toks:
                 continue
             if any(t in {"i", "my", "me", "myself", "mine"} for t in toks):

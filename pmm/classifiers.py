@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-from typing import Optional, Tuple
+from typing import Optional
 import os
 
 from pmm.struct_semantics import pos_tag, split_sentences, CentroidModel
@@ -34,9 +34,12 @@ class CommitmentExtractor:
         has_modal = False
         if toks_tags:
             try:
-                first_is_verb = bool(toks_tags and str(toks_tags[0][1]).startswith("VB"))
+                first_is_verb = bool(
+                    toks_tags and str(toks_tags[0][1]).startswith("VB")
+                )
                 has_first_person_pos = any(
-                    (str(tag).startswith("PRP") or str(tag).startswith("PRP$")) for _, tag in toks_tags
+                    (str(tag).startswith("PRP") or str(tag).startswith("PRP$"))
+                    for _, tag in toks_tags
                 )
                 has_modal = any(str(tag).startswith("MD") for _, tag in toks_tags)
             except Exception:
@@ -46,7 +49,7 @@ class CommitmentExtractor:
 
         # Structure-only scoring
         score = 0.0
-        first_token = (toks[0].lower() if toks else "")
+        first_token = toks[0].lower() if toks else ""
         # Strongly favor imperative (verb-first) structure
         if first_is_verb:
             score += 0.8
@@ -75,7 +78,9 @@ class CommitmentExtractor:
         except Exception:
             return []
 
-    def fit_centroids(self, pos_vectors: list[list[float]], neg_vectors: list[list[float]]) -> None:
+    def fit_centroids(
+        self, pos_vectors: list[list[float]], neg_vectors: list[list[float]]
+    ) -> None:
         self.centroid.fit(pos_vectors, neg_vectors)
 
     def score(self, text: str) -> float:

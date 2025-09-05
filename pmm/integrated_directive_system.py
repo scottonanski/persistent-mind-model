@@ -17,7 +17,7 @@ from .directive_hierarchy import (
 )
 from .enhanced_commitment_validator import EnhancedCommitmentValidator
 from .continuity_engine import ContinuityEngine
-from pmm.classifiers import CommitmentExtractor, is_directive
+from pmm.classifiers import CommitmentExtractor
 from pmm.struct_semantics import split_sentences
 
 

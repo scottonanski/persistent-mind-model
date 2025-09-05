@@ -11,7 +11,6 @@ import threading
 import time
 import tempfile
 import os
-import pytest
 from pmm.self_model_manager import SelfModelManager
 from pmm.storage.sqlite_store import SQLiteStore
 from pmm.commitments import CommitmentTracker
@@ -203,12 +202,18 @@ def test_ongoing_commitment_protection():
     assert commitment is not None, "Ongoing commitment was not created."
     # Set tier to ongoing explicitly in test fixture
     commitment.tier = "ongoing"
-    assert commitment.status == "ongoing", f"Expected status 'ongoing', got '{commitment.status}'."
-    assert commitment.tier == "ongoing", f"Expected tier 'ongoing', got '{commitment.tier}'."
+    assert (
+        commitment.status == "ongoing"
+    ), f"Expected status 'ongoing', got '{commitment.status}'."
+    assert (
+        commitment.tier == "ongoing"
+    ), f"Expected tier 'ongoing', got '{commitment.tier}'."
 
     # Add a few normal commitments to trigger auto-closure
     for i in range(6):
-        tracker.add_commitment(f"Normal commitment {i}", source_insight_id="test_insight")
+        tracker.add_commitment(
+            f"Normal commitment {i}", source_insight_id="test_insight"
+        )
 
     # Trigger reflection-based auto-closure that would normally close old commitments
     os.environ["PMM_AUTOCLOSE_FROM_REFLECTION"] = "1"
@@ -217,7 +222,9 @@ def test_ongoing_commitment_protection():
 
     # Assert that the ongoing commitment was NOT closed
     assert cid not in closed_cids, "Ongoing commitment was closed by reflection."
-    assert tracker.commitments[cid].status == "ongoing", "Ongoing commitment status was changed by reflection."
+    assert (
+        tracker.commitments[cid].status == "ongoing"
+    ), "Ongoing commitment status was changed by reflection."
 
     # Trigger evidence-based closure
     commit_hash = tracker.get_commitment_hash(commitment)
@@ -227,7 +234,9 @@ def test_ongoing_commitment_protection():
 
     # Assert that the ongoing commitment was NOT closed by evidence
     assert not closed, "Ongoing commitment was closed by evidence."
-    assert tracker.commitments[cid].status == "ongoing", "Ongoing commitment status was changed by evidence."
+    assert (
+        tracker.commitments[cid].status == "ongoing"
+    ), "Ongoing commitment status was changed by evidence."
 
     # Clean up env var
     del os.environ["PMM_AUTOCLOSE_FROM_REFLECTION"]

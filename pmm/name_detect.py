@@ -27,6 +27,7 @@ AGENT_RENAME_CUES = [
     "your name shall be ",
 ]
 
+
 def _strip_code_blocks(text: str) -> str:
     """Remove fenced and inline code blocks without regex."""
     if not text:
@@ -52,6 +53,7 @@ def _strip_code_blocks(text: str) -> str:
             out_chars.append(s[i])
         i += 1
     return "".join(out_chars)
+
 
 def _extract_name_after_phrase(tail: str) -> Optional[str]:
     """Extract a candidate name from the tail following a cue phrase.
@@ -90,6 +92,7 @@ def _extract_name_after_phrase(tail: str) -> Optional[str]:
         if not p.isalpha() or not p[0].isupper():
             return None
     return " ".join(parts)
+
 
 # Stopwords to filter out common false positives (reduced set, more focused)
 _STOPWORDS = {
@@ -285,7 +288,10 @@ def extract_agent_name_command(text: str, speaker: str) -> Optional[str]:
     # Also cut at common conjunctions introducing follow-ups (e.g., "and that's final")
     cut_markers = {" and ", " but ", " so ", " then ", " because ", " that "}
     low_name_scan = " " + name.lower() + " "
-    cut_pos = min([low_name_scan.find(m) for m in cut_markers if m in low_name_scan] or [len(low_name_scan)])
+    cut_pos = min(
+        [low_name_scan.find(m) for m in cut_markers if m in low_name_scan]
+        or [len(low_name_scan)]
+    )
     if cut_pos < len(low_name_scan):
         name = name[: max(0, cut_pos - 1)].strip()
     name_parts = name.split()
