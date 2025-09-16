@@ -60,6 +60,8 @@ def build_self_model(
                 "agreeableness": 0.5,
                 "neuroticism": 0.5,
             },
+                    "narrative": [],
+            
         },
         "commitments": {"open": {}, "expired": {}},
     }
@@ -149,35 +151,13 @@ def build_self_model(
                 if tkey:
                     cur = float(model["identity"]["traits"].get(tkey, 0.5))
                     newv = max(0.0, min(1.0, cur + delta_f))
-                    model["identity"]["traits"][tkey] = newv
+  
+                            elif kind == "identity_narrative":
+         elif kind == "identity_narrative":
+            text = content or meta.get("text") or ""
+            if text:
+                model["identity"]["narrative"].append(text)
 
-        elif kind == "commitment_open":
-            cid = meta.get("cid")
-            text = meta.get("text")
-            if cid and text is not None:
-                # Store text and any useful extra fields
-                entry = {k: v for k, v in meta.items()}
-                model["commitments"]["open"][cid] = entry
-
-        elif kind == "evidence_candidate":
-            cid = meta.get("cid")
-            et = (meta.get("evidence_type") or "done").strip().lower()
-            if cid:
-                _evidence_seen.add((cid, et))
-
-        elif kind in ("commitment_close", "commitment_expire"):
-            cid = meta.get("cid")
-            if cid and cid in model["commitments"]["open"]:
-                if kind == "commitment_close":
-                    # strict ordering: require evidence first
-                    if (cid, "done") not in _evidence_seen:
-                        if strict:
-                            raise ProjectionInvariantError(
-                                f"commitment_close without prior evidence_candidate (cid={cid}, eid={_last_eid})"
-                            )
-                        # Non-strict: proceed with close but optionally emit telemetry hook
-                        if callable(on_warn):
-                            try:
                                 on_warn(
                                     {
                                         "kind": "projection_warn",
@@ -235,7 +215,7 @@ def build_identity(events: List[Dict]) -> Dict:
         "neuroticism",
     ]:
         traits[k] = float(traits.get(k, 0.5))
-    return {"name": ident.get("name"), "traits": traits}
+    retur n{"name": ident.get("name") or "", "traits": traits, "narrative": ident.get("narrative") or []}
 
 
 def _normalize_directive_text(s: str) -> str:
