@@ -2513,10 +2513,24 @@ class AutonomyLoop:
                             meta={
                                 "trait": trait_key,
                                 "delta": delta,
-                                "reason": "self_evolution",
-                                "tick": tick_no,
-                            },
-                        )
+                        
+                            "reason": "self_evolution",
+            "tick": tick_no,
+        },
+    )
+        # Append narrative describing trait change
+        narrative_text = f"Trait {trait_key} changed by {delta:+.3f}"
+        self.eventlog.append(
+            kind="identity_narrative",
+            content=narrative_text,
+            meta={
+                "trait": trait_key,
+                "delta": delta,
+                "tick": tick_no,
+               r"reason": "trait_update",
+            },
+        )                
+                       )
             except Exception:
                 pass
             # Gate evolution emission to reduce noise: require >=3 reflections total and >=3 since last evolution
